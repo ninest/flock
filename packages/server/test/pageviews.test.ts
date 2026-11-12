@@ -14,9 +14,9 @@ layer(Harness.layer())("Pageviews", (it) => {
       const [production, dev] = project.environments
 
       yield* TestClock.setTime(Date.parse("2026-03-01T10:00:00Z"))
-      const result = yield* h.client.ingest.send({ payload: { key: dev!.key, events: [pageview()] } })
+      const result = yield* h.sdk.ingest.send({ payload: { key: dev!.key, events: [pageview()] } })
       assert.deepStrictEqual(result, { accepted: 1, rejected: [] })
-      yield* h.client.ingest.send({ payload: { key: production!.key, events: [pageview(), pageview()] } })
+      yield* h.sdk.ingest.send({ payload: { key: production!.key, events: [pageview(), pageview()] } })
 
       const devCount = yield* h.pageviewCount(dev!.id, day("2026-03-01"))
       const productionCount = yield* h.pageviewCount(production!.id, day("2026-03-01"))
@@ -31,9 +31,9 @@ layer(Harness.layer())("Pageviews", (it) => {
       const key = production!.key
 
       yield* TestClock.setTime(Date.parse("2026-03-01T23:59:00Z"))
-      yield* h.client.ingest.send({ payload: { key, events: [pageview(), customEvent("login_clicked")] } })
+      yield* h.sdk.ingest.send({ payload: { key, events: [pageview(), customEvent("login_clicked")] } })
       yield* TestClock.setTime(Date.parse("2026-03-02T00:01:00Z"))
-      yield* h.client.ingest.send({ payload: { key, events: [pageview()] } })
+      yield* h.sdk.ingest.send({ payload: { key, events: [pageview()] } })
 
       assert.strictEqual(yield* h.pageviewCount(production!.id, day("2026-03-01")), 1)
       assert.strictEqual(yield* h.pageviewCount(production!.id, day("2026-03-02")), 1)
@@ -49,7 +49,7 @@ layer(Harness.layer())("Pageviews", (it) => {
       const { environments: [production] } = yield* h.createProject({ environments: ["production"] })
       for (const date of ["2027-01-15", "2027-01-16", "2028-06-30"]) {
         yield* TestClock.setTime(Date.parse(`${date}T12:00:00Z`))
-        yield* h.client.ingest.send({ payload: { key: production!.key, events: [pageview()] } })
+        yield* h.sdk.ingest.send({ payload: { key: production!.key, events: [pageview()] } })
         assert.strictEqual(yield* h.pageviewCount(production!.id, day(date)), 1)
       }
     }))
@@ -83,11 +83,11 @@ layer(Harness.layer())("Pageviews", (it) => {
         h.fetch("/api/ingest", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ key: "pk_dev_x", events: [{ uuid: "not-a-uuid", name: "$pageview" }] })
+          body: JSON.stringify({ key: "pk_dev_x", events: { uuid: "not-a-list", name: "$pageview" } })
         })
       )
       assert.strictEqual(response.status, 400)
       const body = (yield* Effect.promise(() => response.json())) as { errors: ReadonlyArray<{ path: string }> }
-      assert.isTrue(body.errors.some((e) => JSON.stringify(e).includes("uuid")))
+      assert.isTrue(body.errors.some((e) => JSON.stringify(e).includes("events")))
     }))
 })

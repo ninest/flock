@@ -58,7 +58,7 @@ layer(Harness.layer())("Project sharing", (it) => {
       const projectId = project.id
       yield* owner.browser.client.projects.addMember({ params: { projectId }, payload: { email: "vera@example.com", role: "viewer" } })
       yield* TestClock.setTime(Date.parse("2026-03-01T10:00:00Z"))
-      yield* h.client.ingest.send({ payload: { key: dev!.key, events: [pageview(), pageview()] } })
+      yield* h.sdk.ingest.send({ payload: { key: dev!.key, events: [pageview(), pageview()] } })
 
       const api = viewer.browser.client
       for (const env of [production!, dev!]) {
@@ -75,6 +75,7 @@ layer(Harness.layer())("Project sharing", (it) => {
         api.projects.delete({ params: { projectId } }),
         api.projects.addEnvironment({ params: { projectId }, payload: { name: "staging" } }),
         api.environments.rotateKey({ params: { environmentId: production!.id } }),
+        api.environments.update({ params: { environmentId: production!.id }, payload: { allowedOrigins: ["*"] } }),
         api.environments.delete({ params: { environmentId: dev!.id } }),
         api.environments.deleteEvents({ params: { environmentId: dev!.id } }),
         api.projects.addMember({ params: { projectId }, payload: { email: "otto@example.com", role: "viewer" } }),
@@ -82,7 +83,7 @@ layer(Harness.layer())("Project sharing", (it) => {
         api.projects.changeMemberRole({ params: { projectId, memberId: owner.id }, payload: { role: "viewer" } }),
         api.projects.removeMember({ params: { projectId, memberId: owner.id } })
       ])
-      assert.deepStrictEqual(refused, Array(11).fill("ProjectOwnerRequired"))
+      assert.deepStrictEqual(refused, Array(12).fill("ProjectOwnerRequired"))
 
       // Nothing changed.
       const after = yield* owner.browser.client.projects.get({ params: { projectId } })
