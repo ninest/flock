@@ -34,3 +34,51 @@ export class MemberAuth extends HttpApiMiddleware.Service<MemberAuth, {
 }>()("flock/MemberAuth", {
   error: Unauthorized
 }) {}
+
+/** Instance-wide settings the Instance admin manages. */
+export const InstanceSettings = Schema.Struct({
+  /** Anyone may sign up without an Invite. Off by default. */
+  openSignUp: Schema.Boolean
+})
+export type InstanceSettings = typeof InstanceSettings.Type
+
+export const InviteId = Schema.String.pipe(Schema.brand("InviteId"))
+export type InviteId = typeof InviteId.Type
+
+/** A single-use offer to become a Member, shared by hand as a link. */
+export class Invite extends Schema.Class<Invite>("Invite")({
+  id: InviteId,
+  /** Who the Invite is for, as the Instance admin noted it (e.g. "Alice"). */
+  note: Schema.String,
+  createdAt: Schema.DateTimeUtcFromString,
+  /** Set once someone has signed up with this Invite. */
+  usedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
+  /** The email of the Member who used it. */
+  usedBy: Schema.NullOr(Schema.String)
+}) {}
+
+/** A newly created Invite with its secret token, which is only ever shown once. */
+export class CreatedInvite extends Schema.Class<CreatedInvite>("CreatedInvite")({
+  invite: Invite,
+  /** Passed as `invite` in the sign-up request. */
+  token: Schema.String
+}) {}
+
+/** The signed-in Member is not allowed to do this (e.g. not the Instance admin). */
+export class Forbidden extends Schema.TaggedError<Forbidden>()(
+  "Forbidden",
+  { message: Schema.String },
+  { httpApiStatus: 403 }
+) {}
+
+export class MemberNotFound extends Schema.TaggedError<MemberNotFound>()(
+  "MemberNotFound",
+  { id: MemberId },
+  { httpApiStatus: 404 }
+) {}
+
+export class InviteNotFound extends Schema.TaggedError<InviteNotFound>()(
+  "InviteNotFound",
+  { id: InviteId },
+  { httpApiStatus: 404 }
+) {}
