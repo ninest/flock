@@ -15,6 +15,11 @@
       <textarea id="batch" rows="16" spellcheck="false"></textarea>
       <p><button type="submit">Send</button> <button type="button" id="reset">Reset example</button></p>
     </form>
+    <p>
+      Ingest rejects Events that break its limits, and reports why:
+      <button type="button" id="oversized">Send an oversized Event</button>
+      <button type="button" id="reserved">Send a reserved name</button>
+    </p>
     <pre id="result"></pre>
     <script type="module">
       const { api, key } = window.FLOCK
@@ -29,22 +34,38 @@
       }, null, 2)
       textarea.value = example()
       document.getElementById("reset").onclick = () => { textarea.value = example() }
-      document.getElementById("form").onsubmit = async (event) => {
-        event.preventDefault()
+      const send = async (body) => {
         const result = document.getElementById("result")
         result.textContent = "Sending…"
         try {
           const response = await fetch(`${api}/api/ingest`, {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: textarea.value
+            body
           })
-          const body = await response.text()
-          result.textContent = `HTTP ${response.status} ${response.statusText}\n\n${body || "(empty body)"}`
+          const text = await response.text()
+          result.textContent = `HTTP ${response.status} ${response.statusText}\n\n${text || "(empty body)"}`
         } catch (error) {
           result.textContent = `Network error: ${error}`
         }
       }
+      document.getElementById("form").onsubmit = (event) => {
+        event.preventDefault()
+        void send(textarea.value)
+      }
+      // Each button puts its batch in the textarea, so you can see what was sent.
+      const sendBatch = (events) => {
+        textarea.value = JSON.stringify({ key, events }, null, 2)
+        void send(textarea.value)
+      }
+      document.getElementById("oversized").onclick = () => sendBatch([
+        { uuid: crypto.randomUUID(), name: "oversized", properties: { blob: "x".repeat(9000) } },
+        { uuid: crypto.randomUUID(), name: "too_many_properties", properties: Object.fromEntries(Array.from({ length: 51 }, (_, i) => [`p${i}`, i])) }
+      ])
+      document.getElementById("reserved").onclick = () => sendBatch([
+        { uuid: crypto.randomUUID(), name: "$login", properties: {} },
+        { uuid: crypto.randomUUID(), name: "game_completed", properties: { $score: 34 } }
+      ])
     </script>
   </body>
 </html>

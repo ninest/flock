@@ -1,6 +1,7 @@
 import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware, HttpApiSchema, OpenApi } from "effect/http-api"
 import {
+  AllowedOrigins,
   AlreadyProjectMember,
   Environment,
   EnvironmentId,
@@ -20,7 +21,7 @@ import {
   ProjectRole,
   TimeZone
 } from "./domain.ts"
-import { IngestBatch, IngestResult, UnknownKey } from "./ingest.ts"
+import { IngestBatch, IngestResult, OriginNotAllowed, UnknownKey } from "./ingest.ts"
 import { Overview, OverviewQuery } from "./reports.ts"
 import { CreatedInvite, Forbidden, Invite, InviteId, InviteNotFound, InstanceSettings, Member, MemberAuth, MemberId, MemberNotFound, SignInOptions } from "./members.ts"
 
@@ -31,7 +32,7 @@ export class IngestGroup extends HttpApiGroup.make("ingest")
       // cross-origin fetch can send without a CORS preflight.
       payload: [IngestBatch, IngestBatch.pipe(HttpApiSchema.asJson({ contentType: "text/plain" }))],
       success: IngestResult,
-      error: UnknownKey
+      error: [UnknownKey, OriginNotAllowed]
     })
   )
   .annotateMerge(OpenApi.annotations({ title: "Ingest" })) {}
@@ -105,6 +106,13 @@ export class ProjectsGroup extends HttpApiGroup.make("projects")
 
 export class EnvironmentsGroup extends HttpApiGroup.make("environments")
   .add(
+    /** Changes an Environment's settings, such as its allowed origins. */
+    HttpApiEndpoint.patch("update", "/:environmentId", {
+      params: environmentParams,
+      payload: Schema.Struct({ allowedOrigins: Schema.optional(AllowedOrigins) }),
+      success: Environment,
+      error: [EnvironmentNotFound, ProjectOwnerRequired]
+    }),
     /** Deletes an Environment and its Events. `production` can't be deleted. */
     HttpApiEndpoint.delete("delete", "/:environmentId", {
       params: environmentParams,

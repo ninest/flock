@@ -8,11 +8,11 @@
 //       const h = yield* Harness
 //       const project = yield* h.createProject({ environments: ["production", "dev"] })
 //       yield* TestClock.setTime(Date.parse("2026-03-01T10:00:00Z"))
-//       yield* h.client.ingest.send({ payload: { key: project.environments[0]!.key, events: [pageview()] } })
+//       yield* h.sdk.ingest.send({ payload: { key: project.environments[0]!.key, events: [pageview()] } })
 //     }))
 //   })
 //
-// `h.client` is signed in as an Instance admin; `h.fetch` sends no cookies. `h.browser()`
+// `h.client` is signed in as an Instance admin; `h.fetch` and `h.sdk` send no cookies (and no Origin). `h.browser()`
 // gives a fresh cookie jar for sign-up/sign-in flows. FLOCK_ADMIN_EMAIL is `options.adminEmail`.
 // With `options.oidc`, a stub OIDC issuer (`h.oidc`) is configured and `browser.oidcSignIn()`
 // runs the whole code flow against it.
@@ -160,6 +160,11 @@ export class Harness extends Context.Service<Harness, {
   readonly oidc: OidcStub | undefined
   /** `fetch` against the server without cookies; relative URLs resolve against BASE_URL. */
   readonly fetch: typeof globalThis.fetch
+  /**
+   * Typed client without cookies or an `Origin` header, like a server or native app
+   * sending Events. Use it for ingest unless the test is about browser origins.
+   */
+  readonly sdk: HttpApiClient.ForApi<typeof FlockApi>
   /** The browser signed in as an Instance admin; `client` is its typed client. */
   readonly admin: Browser
   /** Typed client derived from the shared FlockApi, signed in as an Instance admin. */
@@ -258,6 +263,7 @@ export class Harness extends Context.Service<Harness, {
             input instanceof Request ? input : new Request(new URL(input.toString(), BASE_URL), init)
           )) as typeof globalThis.fetch
 
+        const sdk = yield* makeClient(fetch)
         const seed = Context.get(deps, Seed)
         const browser = () => makeBrowser(handler)
         const seedMember: Harness["Service"]["seedMember"] = (input) => seed.member(input)
@@ -332,6 +338,7 @@ export class Harness extends Context.Service<Harness, {
           handler,
           oidc,
           fetch,
+          sdk,
           admin: adminBrowser,
           client,
           adminCommand: (args) => adminCommand(args).pipe(Effect.provide(deps)),
