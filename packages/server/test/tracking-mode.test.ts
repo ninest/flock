@@ -92,6 +92,23 @@ layer(Harness.layer())("Persistent Tracking mode", (it) => {
       assert.strictEqual(overview.totals.pageviews, 4)
     }))
 
+  it.effect("Custom events and the live counter count an identified Visitor once, and leave $identify out", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const production = yield* persistentProject
+      yield* at("2026-03-01T09:00:00Z")
+      yield* h.ingest(production.key, [as("laptop", customEvent("game_completed")), identify("test-user", "laptop")])
+      yield* h.ingest(production.key, [as("phone", customEvent("game_completed")), identify("test-user", "phone")], {
+        ip: "203.0.113.9"
+      })
+      yield* h.ingest(production.key, [as("tablet", customEvent("game_completed"))], { ip: "203.0.113.9" })
+
+      const { events } = yield* h.client.customEvents.list({ params: { environmentId: production.id }, query: day("2026-03-01") })
+        .pipe(Effect.orDie)
+      assert.deepStrictEqual(events, [{ name: "game_completed", count: 3, visitors: 2 }])
+      assert.strictEqual(yield* h.live(production.id), 2)
+    }))
+
   it.effect("Events still sent with an identified device's own ID are attributed to the identified Visitor", () =>
     Effect.gen(function*() {
       const h = yield* Harness
