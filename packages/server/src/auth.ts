@@ -91,7 +91,13 @@ export class BetterAuth extends Context.Service<BetterAuth, {
         const access = yield* Access
         const context = yield* Effect.context<never>()
         const pool = yield* Effect.acquireRelease(
-          Effect.sync(() => new pg.Pool({ connectionString: Redacted.value(databaseUrl), max: 5 })),
+          Effect.sync(() => {
+            const pool = new pg.Pool({ connectionString: Redacted.value(databaseUrl), max: 5 })
+            // An idle client losing its connection (Postgres restart, a dropped test database)
+            // emits "error" on the pool; without a listener Node treats it as uncaught.
+            pool.on("error", (error) => Effect.runFork(Effect.logWarning("Better Auth pool: idle client error", error)))
+            return pool
+          }),
           (pool) => Effect.promise(() => pool.end())
         )
         const secret = yield* Option.match(settings.secret, {
