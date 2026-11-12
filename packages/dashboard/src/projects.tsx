@@ -9,6 +9,7 @@ import {
   type Project,
   type ProjectId,
   type ProjectRole,
+  type PropertyFilter,
   type ReportRangeQuery
 } from "@flock/shared"
 import { Link, useNavigate } from "@tanstack/react-router"
@@ -19,6 +20,7 @@ import { AudienceReports } from "./audience.tsx"
 import { LiveVisitors, PagesAndSources } from "./pages-sources.tsx"
 import { CustomEventsReport } from "./custom-events.tsx"
 import { currentMember } from "./auth.ts"
+import { FilterBar, type ProjectSearch, reportQuery, searchFor, withFilter } from "./filters.tsx"
 import { usePoll } from "./use-poll.ts"
 
 const muted: CSSProperties = { fontSize: 14, color: "#666" }
@@ -98,17 +100,26 @@ const CreateProject = () => {
   )
 }
 
-export const ProjectPage = ({ projectId, env }: { projectId: ProjectId; env: string | undefined }) => {
+export const ProjectPage = ({ projectId, search }: { projectId: ProjectId; search: ProjectSearch }) => {
   const navigate = useNavigate()
   const { data: project, error, reload } = usePoll(() => request((api) => api.projects.get({ params: { projectId } })), [projectId])
-  // The date range every report follows, set by the overview's picker.
-  const [range, setRange] = useState<ReportRangeQuery>({ period: "7d" })
+  const env = search.env
+  // The date range and filters every report follows, kept in the URL. The overview's picker
+  // sets the range; the filter bar and clicks on report rows set the filters.
+  const range = reportQuery(search)
+  const setRange = (query: ReportRangeQuery) =>
+    void navigate({ to: "/projects/$projectId", params: { projectId }, search: { ...(env ? { env } : {}), ...searchFor(query) } })
+  const addFilter = (filter: PropertyFilter) => setRange(withFilter(range, filter))
   if (error && !project) return <p role="alert">{(error as Error).message}</p>
   if (!project) return <p>Loading…</p>
 
   const environment = project.environments.find((e) => e.name === (env ?? PRODUCTION)) ?? project.environments[0]!
   const select = (name: string) =>
-    navigate({ to: "/projects/$projectId", params: { projectId }, search: name === PRODUCTION ? {} : { env: name } })
+    navigate({
+      to: "/projects/$projectId",
+      params: { projectId },
+      search: { ...(name === PRODUCTION ? {} : { env: name }), ...searchFor(range) }
+    })
 
   return (
     <>
@@ -124,12 +135,13 @@ export const ProjectPage = ({ projectId, env }: { projectId: ProjectId; env: str
           {project.environments.map((e) => <option key={e.id} value={e.name}>{e.name}</option>)}
         </select>
       </label>
-      <LiveVisitors key={`live-${environment.id}`} environment={environment} />
+      <LiveVisitors key={`live-${environment.id}`} environment={environment} filters={range.filters} />
       </div>
+      <FilterBar environment={environment} query={range} onChange={setRange} />
       <OverviewReport key={environment.id} environment={environment} timeZone={project.timeZone} query={range} onQueryChange={setRange} />
-      <PagesAndSources key={`pages-${environment.id}`} environment={environment} range={range} />
-      <AudienceReports key={`audience-${environment.id}`} environment={environment} range={range} />
-      <CustomEventsReport key={`custom-events-${environment.id}`} environment={environment} />
+      <PagesAndSources key={`pages-${environment.id}`} environment={environment} range={range} onAddFilter={addFilter} />
+      <AudienceReports key={`audience-${environment.id}`} environment={environment} range={range} onAddFilter={addFilter} />
+      <CustomEventsReport key={`custom-events-${environment.id}`} environment={environment} range={range} onAddFilter={addFilter} />
       {project.role === "owner"
         ? (
           <>

@@ -1,38 +1,42 @@
 // Content and acquisition reports for one Environment: top, entry and exit pages; referrers
 // and UTM tags (shared date range), plus the live count of Visitors in the last 30 minutes.
-import type { Environment, ReportRangeQuery } from "@flock/shared"
+import type { Environment, PropertyFilters, PropertyFilter, ReportRangeQuery } from "@flock/shared"
 import { request } from "./api.ts"
 import { muted, type TopTab, TopList } from "./top-list.tsx"
 import { usePoll } from "./use-poll.ts"
 
 const PAGES: ReadonlyArray<TopTab> = [
-  { report: "pages", title: "Top pages", unit: "Pageviews" },
-  { report: "entryPages", title: "Entry pages", unit: "Sessions" },
-  { report: "exitPages", title: "Exit pages", unit: "Sessions" }
+  { report: "pages", title: "Top pages", unit: "Pageviews", filterKey: "$path" },
+  { report: "entryPages", title: "Entry pages", unit: "Sessions", filterKey: "$path" },
+  { report: "exitPages", title: "Exit pages", unit: "Sessions", filterKey: "$path" }
 ]
 
 const SOURCES: ReadonlyArray<TopTab> = [
-  { report: "referrers", title: "Referrers", unit: "Sessions", nullLabel: "Direct / none" },
-  { report: "utmSources", title: "UTM sources", unit: "Sessions" },
-  { report: "utmMediums", title: "Mediums", unit: "Sessions" },
-  { report: "utmCampaigns", title: "Campaigns", unit: "Sessions" }
+  { report: "referrers", title: "Referrers", unit: "Sessions", nullLabel: "Direct / none", filterKey: "$referring_domain" },
+  { report: "utmSources", title: "UTM sources", unit: "Sessions", filterKey: "$utm_source" },
+  { report: "utmMediums", title: "Mediums", unit: "Sessions", filterKey: "$utm_medium" },
+  { report: "utmCampaigns", title: "Campaigns", unit: "Sessions", filterKey: "$utm_campaign" }
 ]
 
-export const PagesAndSources = ({ environment, range }: { environment: Environment; range: ReportRangeQuery }) => (
+export const PagesAndSources = ({ environment, range, onAddFilter }: {
+  environment: Environment
+  range: ReportRangeQuery
+  onAddFilter: (filter: PropertyFilter) => void
+}) => (
   <section style={{ margin: "12px 0" }}>
     <h3 style={{ marginBottom: 8 }}>Pages and sources</h3>
     <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))" }}>
-      <TopList environment={environment} range={range} tabs={PAGES} />
-      <TopList environment={environment} range={range} tabs={SOURCES} />
+      <TopList environment={environment} range={range} tabs={PAGES} onAddFilter={onAddFilter} />
+      <TopList environment={environment} range={range} tabs={SOURCES} onAddFilter={onAddFilter} />
     </div>
   </section>
 )
 
-/** Unique Visitors with an Event in the last 30 minutes, refreshed every 10 seconds. */
-export const LiveVisitors = ({ environment }: { environment: Environment }) => {
+/** Unique Visitors with a matching Event in the last 30 minutes, refreshed every 10 seconds. */
+export const LiveVisitors = ({ environment, filters }: { environment: Environment; filters: PropertyFilters | undefined }) => {
   const { data } = usePoll(
-    () => request((api) => api.reports.live({ params: { environmentId: environment.id } })),
-    [environment.id],
+    () => request((api) => api.reports.live({ params: { environmentId: environment.id }, query: { filters } })),
+    [environment.id, JSON.stringify(filters ?? [])],
     10_000
   )
   return (
