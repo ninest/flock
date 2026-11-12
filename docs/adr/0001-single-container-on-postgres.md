@@ -1,0 +1,3 @@
+# One container on Postgres, not Cloudflare Workers + D1
+
+Flock ships as a single Docker image (ingest API, dashboard and browser script) backed by Postgres 16+, and the owner's Instance runs on Railway. We rejected Cloudflare Workers + D1 because D1's per-database size cap and single-writer SQLite suit analytics queries (JSON property filters over long time ranges) poorly, and because tying self-hosters to a Cloudflare account and wrangler bindings makes self-hosting harder than "run this image with a `DATABASE_URL`". An edge ingest worker in front of the container stays possible later if latency matters.

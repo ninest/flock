@@ -1,0 +1,3 @@
+# Two Tracking modes per Project
+
+Each Project picks a Tracking mode: cookieless (default) or persistent. Cookieless derives the Visitor from a hash of IP, user agent, Project and a daily-rotating salt, so it needs no consent banner but cannot follow a Visitor across days or Identify them. Persistent stores a random ID on the device and supports Identify, retention and per-Visitor timelines, at the cost of needing consent in some jurisdictions. We support both because Flock tracks both public websites (where cookieless is the right default) and the owner's own apps (where knowing which signed-in user did what is the point). Visitor IDs from the two modes are not comparable, so switching a Project's mode starts its Visitor counts afresh.
