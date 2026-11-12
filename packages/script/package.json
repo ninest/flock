@@ -1,0 +1,7 @@
+{
+  "name": "@flock/script",
+  "private": true,
+  "type": "module",
+  "scripts": { "typecheck": "tsc -p ." },
+  "devDependencies": { "typescript": "6.0.3" }
+}

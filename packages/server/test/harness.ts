@@ -1,0 +1,128 @@
+// Seam 1 harness: the whole server (HTTP API + static files) running in-process
+// against a throwaway real Postgres database, with the Effect test layers for
+// the clock (TestClock, from @effect/vitest) and the GeoIP lookup (a fixed table).
+//
+// Usage:
+//   layer(Harness.layer())("Suite", (it) => {
+//     it.effect("does a thing", () => Effect.gen(function*() {
+//       const h = yield* Harness
+//       const project = yield* h.seedProject({ environments: ["production", "dev"] })
+//       yield* TestClock.setTime(Date.parse("2026-03-01T10:00:00Z"))
+//       yield* h.client.ingest.send({ payload: { key: project.environments[0]!.key, events: [pageview()] } })
+//     }))
+//   })
+//
+// One database per `layer(...)` block (usually one per test file), dropped when
+// the block finishes. Tests observe behavior only through HTTP: never query tables.
+import { NodeHttpServer } from "@effect/platform-node"
+import { type EnvironmentId, FlockApi, type IngestEvent, type Project } from "@flock/shared"
+import { Context, DateTime, Effect, Layer, Redacted, type Scope } from "effect"
+import { FetchHttpClient, HttpEffect, HttpRouter } from "effect/http"
+import type { HttpServerRequest } from "effect/http/HttpServerRequest"
+import { HttpApiClient } from "effect/http-api"
+import { TestClock } from "effect/testing"
+import { fileURLToPath } from "node:url"
+import { AppLive } from "../src/app.ts"
+import { PgLive } from "../src/db.ts"
+import { GeoIp } from "../src/geoip.ts"
+import { AppRoutes } from "../src/http.ts"
+import { MigratorLive } from "../src/migrations/index.ts"
+import { Seed } from "../src/seed.ts"
+import { TestDatabase } from "./test-database.ts"
+
+export const BASE_URL = "http://flock.test"
+const publicDir = fileURLToPath(new URL("./fixtures/public", import.meta.url))
+
+export interface HarnessOptions {
+  /** IP address -> ISO country code, served by the GeoIP test layer. */
+  readonly geoIp?: Record<string, string>
+}
+
+export class Harness extends Context.Service<Harness, {
+  /** The server as a fetch-style handler (no port). */
+  readonly handler: (request: Request) => Promise<Response>
+  /** `fetch` against the server; relative URLs resolve against BASE_URL. */
+  readonly fetch: typeof globalThis.fetch
+  /** Typed client derived from the shared FlockApi. */
+  readonly client: HttpApiClient.ForApi<typeof FlockApi>
+  /**
+   * Creates a Project with the given Environments and returns it with their keys.
+   * Uses the server's seeding (the only way to create Projects until the Projects API exists).
+   */
+  readonly seedProject: (options: {
+    readonly name?: string
+    readonly timeZone?: string
+    readonly environments: ReadonlyArray<string>
+  }) => Effect.Effect<Project>
+  /** Convenience: the Pageview count for an Environment in `[from, to)` (ISO strings). */
+  readonly pageviewCount: (
+    environmentId: EnvironmentId,
+    range: { readonly from: string; readonly to: string }
+  ) => Effect.Effect<number, unknown>
+}>()("test/Harness") {
+  static readonly layer = (options: HarnessOptions = {}) =>
+    Layer.effect(
+      Harness,
+      Effect.gen(function*() {
+        const databaseUrl = yield* TestDatabase
+        const Deps = AppLive.pipe(
+          Layer.provideMerge(GeoIp.layerFixed(options.geoIp ?? {})),
+          Layer.provideMerge(MigratorLive),
+          Layer.provideMerge(PgLive(Redacted.make(databaseUrl))),
+          Layer.provideMerge(NodeHttpServer.layerHttpServices)
+        )
+        // Infra (pool timers, background fibers) must run on the live clock, or
+        // TestClock.setTime would replay their timers. Requests below run on the TestClock.
+        const deps = yield* TestClock.withLive(Layer.build(Deps))
+        yield* TestClock.setTime(Date.now())
+
+        const app = yield* HttpRouter.toHttpEffect(AppRoutes(publicDir)).pipe(Effect.provide(deps))
+        const context = yield* Effect.context<never>() // includes the TestClock
+        const handler: (request: Request) => Promise<Response> = HttpEffect.toWebHandlerWith<
+          never,
+          HttpServerRequest | Scope.Scope
+        >(context)(Effect.provide(app, deps))
+
+        const fetch = ((input: string | URL | Request, init?: RequestInit) =>
+          handler(
+            input instanceof Request ? input : new Request(new URL(input.toString(), BASE_URL), init)
+          )) as typeof globalThis.fetch
+
+        const client = yield* HttpApiClient.make(FlockApi, { baseUrl: BASE_URL }).pipe(
+          Effect.provide(FetchHttpClient.layer),
+          Effect.provideService(FetchHttpClient.Fetch, fetch)
+        )
+
+        const seed = Context.get(deps, Seed)
+        let projects = 0
+        const seedProject: Harness["Service"]["seedProject"] = (o) =>
+          seed.project({
+            name: o.name ?? `Project ${++projects}`,
+            timeZone: o.timeZone ?? "UTC",
+            environments: o.environments.map((name) => ({ name }))
+          }).pipe(Effect.orDie)
+
+        const pageviewCount: Harness["Service"]["pageviewCount"] = (environmentId, range) =>
+          client.reports.pageviewCount({
+            params: { environmentId },
+            query: { from: DateTime.makeUnsafe(range.from), to: DateTime.makeUnsafe(range.to) }
+          }).pipe(Effect.map((r) => r.pageviews))
+
+        return Harness.of({ handler, fetch, client, seedProject, pageviewCount })
+      })
+    ).pipe(Layer.provide(TestDatabase.layer))
+}
+
+/** A Pageview Event with a fresh UUID. */
+export const pageview = (properties: IngestEvent["properties"] = {}): IngestEvent => ({
+  uuid: crypto.randomUUID(),
+  name: "$pageview",
+  properties: { $url: "https://example.com/", ...properties }
+})
+
+/** A Custom event with a fresh UUID. */
+export const customEvent = (name: string, properties: IngestEvent["properties"] = {}): IngestEvent => ({
+  uuid: crypto.randomUUID(),
+  name,
+  properties
+})
