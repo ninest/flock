@@ -65,7 +65,14 @@ export const isBot = (userAgent: string | undefined) => userAgent !== undefined 
 // --- Events ------------------------------------------------------------------
 
 /** Built-in events a client may send. Every other name starting with `$` is reserved. */
-export const BUILT_IN_EVENTS: ReadonlySet<string> = new Set(["$pageview"])
+export const BUILT_IN_EVENTS: ReadonlySet<string> = new Set(["$pageview", "$identify"])
+
+/**
+ * Identify (persistent Tracking mode): the browser script's `identify(id)` sends this Built-in
+ * event with `distinct_id` set to `id` and `$anon_distinct_id` set to the device's own Visitor ID.
+ */
+export const IDENTIFY = "$identify"
+export const ANON_DISTINCT_ID = "$anon_distinct_id"
 
 /**
  * Flock-defined Event properties a client may send on any Event: the URLs the browser
@@ -103,7 +110,11 @@ export const validateEvent = (raw: unknown): Result.Result<IngestEvent, string> 
   if (properties.some((name) => name.length > maxNameLength)) {
     return Result.fail(`Event property names are limited to ${maxNameLength} characters`)
   }
-  if (properties.some((name) => name.startsWith("$") && !CLIENT_FLOCK_PROPERTIES.has(name))) {
+  if (event.name === IDENTIFY && (event.distinct_id === undefined || typeof event.properties?.[ANON_DISTINCT_ID] !== "string")) {
+    return Result.fail(`${IDENTIFY} needs \`distinct_id\` and a string \`${ANON_DISTINCT_ID}\` property`)
+  }
+  const isClientProperty = (name: string) => CLIENT_FLOCK_PROPERTIES.has(name) || (event.name === IDENTIFY && name === ANON_DISTINCT_ID)
+  if (properties.some((name) => name.startsWith("$") && !isClientProperty(name))) {
     return Result.fail("Event property names starting with $ are reserved for Flock")
   }
   if (Buffer.byteLength(JSON.stringify(raw)) > maxEventBytes) {

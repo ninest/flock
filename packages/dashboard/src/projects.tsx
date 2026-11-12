@@ -9,7 +9,8 @@ import {
   type Project,
   type ProjectId,
   type ProjectRole,
-  type ReportRangeQuery
+  type ReportRangeQuery,
+  type TrackingMode
 } from "@flock/shared"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { type CSSProperties, type FormEvent, type ReactNode, useState } from "react"
@@ -114,7 +115,7 @@ export const ProjectPage = ({ projectId, env }: { projectId: ProjectId; env: str
     <>
       <h2 style={{ marginBottom: 4 }}>{project.name}</h2>
       <p style={{ ...muted, marginTop: 0 }}>
-        Time zone {project.timeZone}
+        Time zone {project.timeZone} · Tracking mode {project.trackingMode}
         {project.role === "viewer" ? " · You're a viewer of this Project" : ""}
       </p>
       <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
@@ -136,6 +137,7 @@ export const ProjectPage = ({ projectId, env }: { projectId: ProjectId; env: str
             <EnvironmentSettings
               key={`settings-${environment.id}`}
               environment={environment}
+              trackingMode={project.trackingMode}
               onChange={reload}
               onDeleted={async () => {
                 await select(PRODUCTION)
@@ -164,6 +166,7 @@ const Section = ({ title, children }: { title: string; children: ReactNode }) =>
 
 const EnvironmentSettings = (props: {
   environment: Environment
+  trackingMode: TrackingMode
   onChange: () => Promise<void>
   onDeleted: () => Promise<void>
 }) => {
@@ -181,7 +184,7 @@ const EnvironmentSettings = (props: {
         <code style={{ wordBreak: "break-all" }}>{environment.key}</code>
       </div>
       <pre style={{ fontSize: 12, background: "#f5f5f5", padding: 8, overflowX: "auto", margin: 0 }}>
-        {`<script defer src="${window.location.origin}/flock.js" data-key="${environment.key}"></script>`}
+        {`<script defer src="${window.location.origin}/flock.js" data-key="${environment.key}" data-mode="${props.trackingMode}"></script>`}
       </pre>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <button
@@ -301,7 +304,12 @@ const ProjectSettings = ({ project, onChange }: { project: Project; onChange: ()
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
-    const payload = { name: String(form.get("name")).trim(), timeZone: String(form.get("timeZone")).trim() }
+    const trackingMode = form.get("trackingMode") as TrackingMode
+    const payload = { name: String(form.get("name")).trim(), timeZone: String(form.get("timeZone")).trim(), trackingMode }
+    if (
+      trackingMode !== project.trackingMode &&
+      !window.confirm(`Switch to ${trackingMode} Tracking mode? Visitor counts start afresh, and the script snippet must be updated on your sites.`)
+    ) return
     void action.run(async () => {
       await request((api) => api.projects.update({ params: { projectId: project.id }, payload }))
       await onChange()
@@ -320,6 +328,13 @@ const ProjectSettings = ({ project, onChange }: { project: Project; onChange: ()
         <label style={{ display: "grid", gap: 4 }}>Name<input name="name" required maxLength={100} defaultValue={project.name} /></label>
         <label style={{ display: "grid", gap: 4 }}>
           Time zone<input name="timeZone" required defaultValue={project.timeZone} />
+        </label>
+        <label style={{ display: "grid", gap: 4 }}>
+          Tracking mode
+          <select name="trackingMode" defaultValue={project.trackingMode}>
+            <option value="cookieless">Cookieless: anonymous Visitors that reset daily, nothing stored on the device</option>
+            <option value="persistent">Persistent: a Visitor ID stored on the device, with identify()</option>
+          </select>
         </label>
         <button type="submit" disabled={action.busy}>Save</button>
       </form>

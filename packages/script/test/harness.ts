@@ -13,7 +13,7 @@
 // Tests observe behavior only through the outgoing requests and the page itself.
 import { afterAll, beforeAll } from "vitest"
 import { type Browser, chromium, type Page } from "playwright"
-import { renderPlayground } from "../../../playground/site.ts"
+import { renderPlayground, type TrackingMode } from "../../../playground/site.ts"
 import { buildScript } from "../build.ts"
 
 export const PLAYGROUND = "http://playground.test"
@@ -24,6 +24,8 @@ export const KEY = "pk_dev_seam2"
 export interface SentEvent {
   readonly uuid: string
   readonly name: string
+  /** The persistent Visitor ID; only sent in persistent Tracking mode. */
+  readonly distinct_id?: string
   readonly properties: Record<string, unknown>
 }
 
@@ -68,7 +70,11 @@ export interface Playground {
 
 export const openPlayground = async (
   browser: Browser,
-  options: { readonly sendBeacon?: boolean } = {}
+  options: {
+    readonly sendBeacon?: boolean
+    /** The Project's Tracking mode, which the page tells the script. Default: cookieless. */
+    readonly mode?: TrackingMode
+  } = {}
 ): Promise<Playground> => {
   const code = await builtScript()
   const context = await browser.newContext()
@@ -79,7 +85,11 @@ export const openPlayground = async (
   }
   const requests: Array<IngestRequest> = []
   await context.route(`${PLAYGROUND}/**`, async (route) => {
-    const page = await renderPlayground(new URL(route.request().url()).pathname, { api: FLOCK, key: KEY })
+    const page = await renderPlayground(new URL(route.request().url()).pathname, {
+      api: FLOCK,
+      key: KEY,
+      mode: options.mode ?? "cookieless"
+    })
     await route.fulfill({ status: page.status, contentType: page.contentType, body: page.body })
   })
   await context.route(`${FLOCK}/flock.js`, (route) => route.fulfill({ contentType: "text/javascript", body: code }))

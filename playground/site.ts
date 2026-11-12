@@ -9,7 +9,12 @@ export interface PlaygroundConfig {
   readonly api: string
   /** The Environment key the script is configured with. */
   readonly key: string
+  /** The Project's Tracking mode, which the page tells the script with `data-mode`. */
+  readonly mode: TrackingMode
 }
+
+/** The Project's Tracking mode, as the server's `/api/ingest/config` reports it. */
+export type TrackingMode = "cookieless" | "persistent"
 
 export interface PlaygroundResponse {
   readonly status: number
@@ -25,7 +30,7 @@ const SIMULATE_REFERRER =
   `if (r !== null) Object.defineProperty(document, "referrer", { get: () => r }) })()`
 
 /**
- * Every HTML page gets the browser script tag and `window.FLOCK = { api, key }` injected,
+ * Every HTML page gets the browser script tag and `window.FLOCK = { api, key, mode }` injected,
  * so pages need no build step. `?simulate_referrer=<url>` on any page fakes `document.referrer`.
  */
 export const renderPlayground = async (path: string, config: PlaygroundConfig): Promise<PlaygroundResponse> => {
@@ -47,7 +52,7 @@ export const renderPlayground = async (path: string, config: PlaygroundConfig): 
         // The Sources page simulates arriving from another site: `?simulate_referrer=` sets
         // document.referrer before the (deferred) browser script reads it.
         `<script>${SIMULATE_REFERRER}</script>`,
-        `<script defer src="${config.api}/flock.js" data-key="${config.key}"></script>`
+        `<script defer src="${config.api}/flock.js" data-key="${config.key}" data-mode="${config.mode}"></script>`
       ].join("\n    ")
       body = body.toString().replace("<head>", `<head>\n    ${inject}`)
     }
