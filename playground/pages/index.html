@@ -7,16 +7,28 @@
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
-    <nav><a href="/">Home</a><a href="/pricing">Pricing</a><a href="/ingest">Raw ingest</a></nav>
+    <nav><a href="/">Home</a><a href="/pricing">Pricing</a><a href="/spa">SPA</a><a href="/ingest">Raw ingest</a></nav>
     <h1>Home</h1>
-    <p>Opening this page sends a <code>$pageview</code> to the playground Project's <code>dev</code> Environment.</p>
+    <p>The Flock browser script sends a <code>$pageview</code> when this page loads. Watch the requests to <code>/api/ingest</code> in your browser's dev tools.</p>
     <p class="muted" id="config"></p>
-    <pre id="result">Sending…</pre>
-    <script type="module">
-      import { pageview, showConfig } from "/flock.js"
-      showConfig(document.getElementById("config"))
-      const { status, body } = await pageview().catch((e) => ({ status: "network error", body: String(e) }))
-      document.getElementById("result").textContent = `${status} ${body}`
+    <h2>Custom events</h2>
+    <p>
+      <button id="login">Log in</button>
+      sends <code>login_clicked</code>, then leaves for the Pricing page straight away (the Event is sent during page unload).
+    </p>
+    <p>
+      <button id="game">Complete game</button>
+      sends <code>game_completed</code> with a random <code>score</code> Event property.
+    </p>
+    <script>
+      document.getElementById("config").textContent = `Script from ${FLOCK.api}/flock.js, key ${FLOCK.key}`
+      document.getElementById("login").onclick = () => {
+        flock.track("login_clicked")
+        location.href = "/pricing"
+      }
+      document.getElementById("game").onclick = () => {
+        flock.track("game_completed", { score: Math.floor(Math.random() * 100) })
+      }
     </script>
   </body>
 </html>

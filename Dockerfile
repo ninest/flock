@@ -15,7 +15,7 @@ COPY playground/package.json playground/
 FROM base AS build
 RUN pnpm install --frozen-lockfile
 COPY packages packages
-RUN pnpm --filter @flock/dashboard build
+RUN pnpm --filter @flock/dashboard build && pnpm --filter @flock/script build
 
 FROM base AS prod-deps
 RUN pnpm install --frozen-lockfile --prod --filter "@flock/server..."
@@ -32,6 +32,7 @@ COPY packages/server/src packages/server/src
 COPY packages/shared/package.json packages/shared/
 COPY packages/shared/src packages/shared/src
 COPY --from=build /app/packages/dashboard/dist packages/dashboard/dist
+COPY --from=build /app/packages/script/dist packages/script/dist
 USER node
 EXPOSE 2100
 CMD ["node", "packages/server/src/main.ts"]

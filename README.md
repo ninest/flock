@@ -10,9 +10,9 @@ A pnpm workspace:
 |---|---|
 | `packages/server` | Effect HttpApi server on `@effect/sql-pg`. Runs migrations on boot and serves the API, the built dashboard and the script |
 | `packages/dashboard` | Vite + React + TanStack Router SPA, using the typed client derived from the shared API |
-| `packages/script` | The browser script (plain TypeScript, under 2 KB gzipped) |
+| `packages/script` | The browser script (plain TypeScript, under 2 KB gzipped), built with esbuild and served by the server at `/flock.js` |
 | `packages/shared` | Effect Schemas for Events and the `FlockApi` definition, shared by the server and the dashboard |
-| `playground` | A plain HTML/JS site that sends Events to a local server |
+| `playground` | A plain HTML/JS site that loads the real browser script from a local server; also the Seam 2 test fixtures |
 
 ## Development
 
@@ -29,7 +29,9 @@ In development the server seeds a "Playground" Project with fixed keys, `pk_prod
 
 ### Playground
 
-- Every playground page (`/`, `/pricing`) sends a `$pageview` to the Playground Project's `dev` Environment when it opens, and shows the response. The dashboard's `dev` count goes up within a few seconds.
+- Every page loads the browser script from the server (`<script defer src="http://hel:2100/flock.js" data-key="pk_dev_playground">`), so opening it sends a `$pageview` to the Playground Project's `dev` Environment. The dashboard's `dev` count goes up within a few seconds. Watch the `/api/ingest` requests in the browser's dev tools.
+- `/` has a **Log in** button (`login_clicked`, sent as the page unloads) and a **Complete game** button (`game_completed` with a `score` Event property).
+- `/spa` is a fake single-page app: its links change the route with `pushState`, and each route change (and back/forward) sends a `$pageview`.
 - `/ingest` is a raw-ingest form. Paste any JSON batch, send it to `POST /api/ingest`, and see the HTTP status and body. Malformed batches come back as a 400 that explains what's wrong.
 - `FLOCK_API` and `FLOCK_KEY` override where the playground sends Events and with which key.
 
@@ -45,7 +47,16 @@ pnpm -r typecheck
 Tests only go through two seams and never look at tables or internals:
 
 1. **The server's HTTP API** (`packages/server/test`). `Harness.layer()` in `test/harness.ts` runs the whole server in-process against a throwaway Postgres database (`flock_test_<random>`, created per `layer(...)` block and dropped afterwards). It provides a typed client (`h.client`), raw `h.fetch`, `h.seedProject(...)` for fixtures, `TestClock` (from `@effect/vitest`) for time, and `Harness.layer({ geoIp: { "203.0.113.7": "DE" } })` for a fixed GeoIP table. `TEST_DATABASE_ADMIN_URL` overrides the admin connection (default `postgres://postgres:postgres@127.0.0.1:2432/postgres`).
-2. **The browser script's outgoing requests** in headless Chromium against playground pages (set up with the script in #5).
+2. **The browser script's outgoing requests** (`packages/script/test`). `openPlayground(browser())` in `test/harness.ts` opens the playground pages in headless Chromium (Playwright), serving them and the freshly built script with request routing (no real servers), and captures every request to `/api/ingest`. Tests assert on those requests and the page only. One-time setup: `pnpm --filter @flock/script exec playwright install chromium --only-shell`. `test/size.test.ts` fails if the gzipped script exceeds 2 KB; `pnpm --filter @flock/script build` checks it too.
+
+The browser script:
+
+```html
+<script defer src="https://flock.example.com/flock.js" data-key="pk_production_…"></script>
+<script>flock.track("login_clicked", { plan: "pro" })</script>
+```
+
+It sends a `$pageview` on load and on `pushState`/`popstate`, gives each Event a UUID, and sends with `sendBeacon` (falling back to `fetch` with `keepalive`) as a `text/plain` JSON body, which needs no CORS preflight. Events go to the origin the script came from, or to `data-api` if set. It writes no cookies or storage.
 
 ## Docker
 
