@@ -37,7 +37,9 @@ layer(Harness.layer())("Custom event list", (it) => {
       const h = yield* Harness
       const { environments: [production] } = yield* h.createProject({})
       yield* at("2026-03-01T09:00:00Z")
-      yield* h.ingest(production!.key, [pageview(), customEvent("$pageleave"), customEvent("$identify")])
+      // `$pageview` is the only Built-in event clients may send; other `$` names are rejected at ingest.
+      const result = yield* h.ingest(production!.key, [pageview(), pageview({ $url: "https://example.com/pricing" })])
+      assert.strictEqual(result.accepted, 2)
       const { events } = yield* listEvents(h, production!.id, day)
       assert.deepStrictEqual(events, [])
     }))
