@@ -3,4 +3,5 @@
 export * from "./domain.ts"
 export * from "./ingest.ts"
 export * from "./members.ts"
+export * from "./reports.ts"
 export * from "./api.ts"

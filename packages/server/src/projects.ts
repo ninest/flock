@@ -160,7 +160,10 @@ export class Projects extends Context.Service<Projects, {
       }
 
       const deleteEventsOf = (environmentIds: ReadonlyArray<string>) =>
-        environmentIds.length === 0 ? Effect.void : sql`DELETE FROM event WHERE environment_id IN ${sql.in(environmentIds)}`.pipe(Effect.asVoid)
+        environmentIds.length === 0 ? Effect.void : Effect.all([
+          sql`DELETE FROM event WHERE environment_id IN ${sql.in(environmentIds)}`,
+          sql`DELETE FROM session WHERE environment_id IN ${sql.in(environmentIds)}`
+        ], { discard: true })
 
       const ensureOwner = (id: ProjectId, member: MemberId) =>
         sql`INSERT INTO project_member ${sql.insert({ projectId: id, memberId: member, role: "owner" })} ON CONFLICT DO NOTHING`.pipe(

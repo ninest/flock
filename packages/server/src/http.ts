@@ -9,6 +9,7 @@ import { AuthRoutes, currentMember, MemberAuthLive } from "./auth.ts"
 import { Ingest } from "./ingest.ts"
 import { Projects } from "./projects.ts"
 import { Reports } from "./reports.ts"
+import { ingestClient } from "./request-context.ts"
 
 const HealthHandlers = HttpApiBuilder.group(FlockApi, "health", Effect.fn(function*(handlers) {
   const sql = yield* PgClient.PgClient
@@ -17,7 +18,7 @@ const HealthHandlers = HttpApiBuilder.group(FlockApi, "health", Effect.fn(functi
 
 const IngestHandlers = HttpApiBuilder.group(FlockApi, "ingest", Effect.fn(function*(handlers) {
   const ingest = yield* Ingest
-  return handlers.handle("send", ({ payload }) => ingest.send(payload))
+  return handlers.handle("send", ({ payload, request }) => ingest.send(payload, ingestClient(request)))
 }))
 
 const ProjectsHandlers = HttpApiBuilder.group(FlockApi, "projects", Effect.fn(function*(handlers) {
@@ -48,8 +49,10 @@ const EnvironmentsHandlers = HttpApiBuilder.group(FlockApi, "environments", Effe
 
 const ReportsHandlers = HttpApiBuilder.group(FlockApi, "reports", Effect.fn(function*(handlers) {
   const reports = yield* Reports
-  return handlers.handle("pageviewCount", ({ params, query }) =>
-    CurrentMember.use(({ id }) => reports.pageviewCount(id, params.environmentId, query)).pipe(Effect.map((pageviews) => ({ pageviews }))))
+  return handlers
+    .handle("pageviewCount", ({ params, query }) =>
+      CurrentMember.use(({ id }) => reports.pageviewCount(id, params.environmentId, query)).pipe(Effect.map((pageviews) => ({ pageviews }))))
+    .handle("overview", ({ params, query }) => CurrentMember.use(({ id }) => reports.overview(id, params.environmentId, query)))
 }))
 
 const MembersHandlers = HttpApiBuilder.group(FlockApi, "members", (handlers) => handlers.handle("me", () => currentMember))

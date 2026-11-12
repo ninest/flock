@@ -18,7 +18,16 @@
 // One database per `layer(...)` block (usually one per test file), dropped when
 // the block finishes. Tests observe behavior only through HTTP: never query tables.
 import { NodeHttpServer } from "@effect/platform-node"
-import { type EnvironmentId, FlockApi, type IngestEvent, type MemberId, type Project } from "@flock/shared"
+import {
+  type EnvironmentId,
+  FlockApi,
+  type IngestEvent,
+  type IngestResult,
+  type MemberId,
+  type Overview,
+  type OverviewQuery,
+  type Project
+} from "@flock/shared"
 import { Context, DateTime, Effect, Layer, Option, Redacted, type Scope } from "effect"
 import { FetchHttpClient, HttpEffect, HttpRouter } from "effect/http"
 import type { HttpServerRequest } from "effect/http/HttpServerRequest"
@@ -130,6 +139,17 @@ export class Harness extends Context.Service<Harness, {
     environmentId: EnvironmentId,
     range: { readonly from: string; readonly to: string }
   ) => Effect.Effect<number, unknown>
+  /**
+   * Sends a batch to the ingest endpoint as a client with this IP address and user agent
+   * (the IP arrives in `X-Forwarded-For`, as from a reverse proxy). Fails on a non-2xx answer.
+   */
+  readonly ingest: (
+    key: string,
+    events: ReadonlyArray<IngestEvent>,
+    client?: { readonly ip?: string; readonly userAgent?: string }
+  ) => Effect.Effect<IngestResult>
+  /** Convenience: the overview report for an Environment, as `h.client`. */
+  readonly overview: (environmentId: EnvironmentId, range: OverviewQuery) => Effect.Effect<Overview, unknown>
 }>()("test/Harness") {
   static readonly layer = (options: HarnessOptions = {}) =>
     Layer.effect(
@@ -197,16 +217,37 @@ export class Harness extends Context.Service<Harness, {
             query: { from: DateTime.makeUnsafe(range.from), to: DateTime.makeUnsafe(range.to) }
           }).pipe(Effect.map((r) => r.pageviews))
 
+        const ingest: Harness["Service"]["ingest"] = (key, events, c = {}) =>
+          Effect.promise(async () => {
+            const response = await fetch("/api/ingest", {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                "x-forwarded-for": c.ip ?? "203.0.113.1",
+                "user-agent": c.userAgent ?? DEFAULT_USER_AGENT
+              },
+              body: JSON.stringify({ key, events })
+            })
+            if (!response.ok) throw new Error(`ingest answered ${response.status}: ${await response.text()}`)
+            return (await response.json()) as IngestResult
+          })
+
+        const overview: Harness["Service"]["overview"] = (environmentId, query) =>
+          client.reports.overview({ params: { environmentId }, query })
+
         return Harness.of({
           handler,
           fetch,
           admin: adminBrowser,
           client,
           adminCommand: (args) => adminCommand(args).pipe(Effect.provide(deps)),
-          browser, seedMember, createProject, pageviewCount })
+          browser, seedMember, createProject, pageviewCount, ingest, overview })
       })
     ).pipe(Layer.provide(TestDatabase.layer))
 }
+
+export const DEFAULT_USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15"
 
 /** A Pageview Event with a fresh UUID. */
 export const pageview = (properties: IngestEvent["properties"] = {}): IngestEvent => ({

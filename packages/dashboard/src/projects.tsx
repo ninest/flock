@@ -2,9 +2,9 @@
 // page with its Environment switcher and settings.
 import { type Environment, type EnvironmentId, PRODUCTION, type Project, type ProjectId } from "@flock/shared"
 import { Link, useNavigate } from "@tanstack/react-router"
-import { DateTime } from "effect"
 import { type CSSProperties, type FormEvent, type ReactNode, useState } from "react"
 import { request } from "./api.ts"
+import { OverviewReport } from "./overview.tsx"
 import { usePoll } from "./use-poll.ts"
 
 const muted: CSSProperties = { fontSize: 14, color: "#666" }
@@ -81,11 +81,6 @@ const CreateProject = () => {
   )
 }
 
-const last30Days = () => {
-  const to = DateTime.nowUnsafe()
-  return { from: DateTime.subtract(to, { days: 30 }), to: DateTime.add(to, { minutes: 1 }) }
-}
-
 export const ProjectPage = ({ projectId, env }: { projectId: ProjectId; env: string | undefined }) => {
   const navigate = useNavigate()
   const { data: project, error, reload } = usePoll(() => request((api) => api.projects.get({ params: { projectId } })), [projectId])
@@ -106,7 +101,7 @@ export const ProjectPage = ({ projectId, env }: { projectId: ProjectId; env: str
           {project.environments.map((e) => <option key={e.id} value={e.name}>{e.name}</option>)}
         </select>
       </label>
-      <EnvironmentPageviews key={environment.id} environment={environment} />
+      <OverviewReport key={environment.id} environment={environment} timeZone={project.timeZone} />
       {project.role === "owner"
         ? (
           <>
@@ -128,21 +123,6 @@ export const ProjectPage = ({ projectId, env }: { projectId: ProjectId; env: str
         )
         : null}
     </>
-  )
-}
-
-const EnvironmentPageviews = ({ environment }: { environment: Environment }) => {
-  const { data } = usePoll(
-    () => request((api) => api.reports.pageviewCount({ params: { environmentId: environment.id }, query: last30Days() })),
-    [environment.id]
-  )
-  return (
-    <article style={{ ...card, margin: "12px 0", maxWidth: 240 }}>
-      <div style={{ fontSize: 32, fontWeight: 600 }} data-testid={`pageviews-${environment.name}`}>
-        {data?.pageviews ?? "–"}
-      </div>
-      <div style={muted}>Pageviews, last 30 days</div>
-    </article>
   )
 }
 
