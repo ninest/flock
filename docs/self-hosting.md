@@ -57,7 +57,7 @@ Deploy from the Flock template (image source `ghcr.io/ninest/flock:1` plus a Pos
 | `FLOCK_OIDC_NAME` | no | the issuer's host | The name on the sign-in button ("Sign in with …"). |
 | `FLOCK_OIDC_TRUST_EMAILS` | no | `false` | Treat every email the issuer returns as verified for the `FLOCK_ADMIN_EMAIL` bootstrap. Only turn it on if the issuer never hands out emails its users haven't proven they own. |
 | `FLOCK_PUBLIC_DIR` | no | the built dashboard inside the image | Directory served as the dashboard. Only for development. |
-| `FLOCK_SEED_PLAYGROUND` | no | `false` | Creates a "Playground" Project with the fixed keys `pk_production_playground` and `pk_dev_playground`. Only for development and CI; never turn it on for a real Instance. |
+| `FLOCK_SEED_PLAYGROUND` | no | `false` | Creates a "Playground" Project with the fixed keys `pk_production_playground` and `pk_dev_playground`, owned by the `FLOCK_ADMIN_EMAIL` Member if they exist at boot. Only for development and CI; never turn it on for a real Instance. |
 
 Contributors: every new environment variable gets a row here.
 

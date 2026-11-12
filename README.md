@@ -2,6 +2,22 @@
 
 Self-hostable, event-based analytics for websites and apps: one Docker image backed by Postgres. See `GLOSSARY.md` for the vocabulary and `docs/adr/` for decisions.
 
+## Try it (local testing cheat-sheet)
+
+Run `make dev`, then:
+
+| What | Where |
+|---|---|
+| Dashboard | http://hel:2101 (sign in at `/sign-in`) |
+| Dev admin login | `admin@flock.test` / `flock-dev-password` |
+| Playground site | http://hel:2102 (if 2102 is taken, `make dev` prints the port it used instead, e.g. 2103) |
+| Server, API docs | http://hel:2100, http://hel:2100/api/docs |
+| Playground Project keys | `pk_dev_playground` (used by the playground), `pk_production_playground` |
+| Instance admin page (Invites, Open sign-up, Members) | http://hel:2101/instance |
+| OIDC sign-in ("Sign in with …" on `/sign-in`) | Off by default. Export `FLOCK_OIDC_ISSUER`, `FLOCK_OIDC_CLIENT_ID`, `FLOCK_OIDC_CLIENT_SECRET` (and optionally `FLOCK_OIDC_NAME`, `FLOCK_PASSWORD_SIGN_IN=false`) before `make dev`, with `FLOCK_PUBLIC_URL` set to the origin registered at the issuer (`http://localhost:2101` or a `tailscale serve` https URL). See [docs/self-hosting.md](docs/self-hosting.md#oidc-sign-in) |
+
+Playground pages: `/` (Pageview, **Log in** and **Complete game** buttons), `/spa` (SPA navigation), `/ingest` (raw ingest form). Open the Playground Project in the dashboard and switch to the `dev` Environment to see the Events arrive.
+
 ## Repository
 
 A pnpm workspace:
@@ -25,9 +41,9 @@ make dev
 
 `make dev` starts the shared Postgres (docker compose, container `flock-postgres` on host port 2432) if it isn't already running, then starts the server (2100), the dashboard (2101, proxies `/api` to the server) and the playground (2102). It prints `http://hel:<port>` links. A port that's already taken is replaced by the next free one. For a second copy from another worktree, override the ports and the dev database: `SERVER_PORT=2200 DASHBOARD_PORT=2201 PLAYGROUND_PORT=2202 DEV_DB=flock_other make dev`.
 
-The dashboard needs a signed-in Member. In development, sign up at `http://hel:2101/sign-in` as `admin@flock.test` (the dev `FLOCK_ADMIN_EMAIL`) to create the Instance admin. Other people join with an Invite link from the Instance page (`/instance`), or freely once Open sign-up is turned on there.
+The dashboard needs a signed-in Member. `make dev` creates the dev Instance admin first (with the `admin` CLI command), so sign in at `http://hel:2101/sign-in` as `admin@flock.test` with the password `flock-dev-password` (override with `FLOCK_ADMIN_EMAIL` and `FLOCK_DEV_ADMIN_PASSWORD`). Other people join with an Invite link from the Instance page (`/instance`), or freely once Open sign-up is turned on there.
 
-In development the server seeds a "Playground" Project with fixed keys, `pk_production_playground` and `pk_dev_playground`.
+The dashboard lists your Projects. Create one (its time zone defaults to your browser's) to get a `production` Environment and its `pk_production_…` key; add Environments such as `dev`, rotate keys, delete a non-production Environment's Events, and switch Environments on the Project page (default `production`). In development the server also creates a "Playground" Project, owned by the dev Instance admin, with the fixed keys `pk_production_playground` and `pk_dev_playground`.
 
 ### Playground
 
@@ -48,7 +64,7 @@ pnpm -r typecheck
 
 Tests only go through two seams and never look at tables or internals:
 
-1. **The server's HTTP API** (`packages/server/test`). `Harness.layer()` in `test/harness.ts` runs the whole server in-process against a throwaway Postgres database (`flock_test_<random>`, created per `layer(...)` block and dropped afterwards). It provides a typed client signed in as an Instance admin (`h.client`), raw `h.fetch` without cookies, `h.browser()` (a fresh cookie jar with `signUp`/`signIn` and its own typed client), `h.seedMember(...)`, `h.adminCommand([...])` (the admin CLI command, in-process), `Harness.layer({ adminEmail })` for `FLOCK_ADMIN_EMAIL`, `h.seedProject(...)` for fixtures, `TestClock` (from `@effect/vitest`) for time, and `Harness.layer({ geoIp: { "203.0.113.7": "DE" } })` for a fixed GeoIP table. `TEST_DATABASE_ADMIN_URL` overrides the admin connection (default `postgres://postgres:postgres@127.0.0.1:2432/postgres`).
+1. **The server's HTTP API** (`packages/server/test`). `Harness.layer()` in `test/harness.ts` runs the whole server in-process against a throwaway Postgres database (`flock_test_<random>`, created per `layer(...)` block and dropped afterwards). It provides a typed client signed in as an Instance admin (`h.client`), raw `h.fetch` without cookies, `h.browser()` (a fresh cookie jar with `signUp`/`signIn` and its own typed client), `h.seedMember(...)`, `h.adminCommand([...])` (the admin CLI command, in-process), `Harness.layer({ adminEmail })` for `FLOCK_ADMIN_EMAIL`, `h.createProject(...)` (the Projects API) for fixtures, `TestClock` (from `@effect/vitest`) for time, and `Harness.layer({ geoIp: { "203.0.113.7": "DE" } })` for a fixed GeoIP table. `TEST_DATABASE_ADMIN_URL` overrides the admin connection (default `postgres://postgres:postgres@127.0.0.1:2432/postgres`).
 2. **The browser script's outgoing requests** (`packages/script/test`). `openPlayground(browser())` in `test/harness.ts` opens the playground pages in headless Chromium (Playwright), serving them and the freshly built script with request routing (no real servers), and captures every request to `/api/ingest`. Tests assert on those requests and the page only. One-time setup: `pnpm --filter @flock/script exec playwright install chromium --only-shell`. `test/size.test.ts` fails if the gzipped script exceeds 2 KB; `pnpm --filter @flock/script build` checks it too.
 
 The browser script:

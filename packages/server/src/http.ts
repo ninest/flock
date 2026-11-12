@@ -22,12 +22,34 @@ const IngestHandlers = HttpApiBuilder.group(FlockApi, "ingest", Effect.fn(functi
 
 const ProjectsHandlers = HttpApiBuilder.group(FlockApi, "projects", Effect.fn(function*(handlers) {
   const projects = yield* Projects
-  return handlers.handle("list", () => projects.list.pipe(Effect.orDie))
+  return handlers
+    .handle("list", () => CurrentMember.use(({ id }) => projects.list(id)))
+    .handle("create", ({ payload }) =>
+      CurrentMember.use(({ id }) =>
+        projects.create({ ...payload, owner: Option.some(id) }).pipe(
+          Effect.flatMap((projectId) => projects.get(id, projectId)),
+          Effect.orDie
+        )
+      ))
+    .handle("get", ({ params }) => CurrentMember.use(({ id }) => projects.get(id, params.projectId)))
+    .handle("update", ({ params, payload }) => CurrentMember.use(({ id }) => projects.update(id, params.projectId, payload)))
+    .handle("delete", ({ params }) => CurrentMember.use(({ id }) => projects.delete(id, params.projectId)))
+    .handle("addEnvironment", ({ params, payload }) =>
+      CurrentMember.use(({ id }) => projects.addEnvironment(id, params.projectId, payload.name)))
+}))
+
+const EnvironmentsHandlers = HttpApiBuilder.group(FlockApi, "environments", Effect.fn(function*(handlers) {
+  const projects = yield* Projects
+  return handlers
+    .handle("delete", ({ params }) => CurrentMember.use(({ id }) => projects.deleteEnvironment(id, params.environmentId)))
+    .handle("rotateKey", ({ params }) => CurrentMember.use(({ id }) => projects.rotateKey(id, params.environmentId)))
+    .handle("deleteEvents", ({ params }) => CurrentMember.use(({ id }) => projects.deleteEvents(id, params.environmentId)))
 }))
 
 const ReportsHandlers = HttpApiBuilder.group(FlockApi, "reports", Effect.fn(function*(handlers) {
   const reports = yield* Reports
-  return handlers.handle("pageviewCount", ({ params, query }) => reports.pageviewCount(params.environmentId, query).pipe(Effect.map((pageviews) => ({ pageviews }))))
+  return handlers.handle("pageviewCount", ({ params, query }) =>
+    CurrentMember.use(({ id }) => reports.pageviewCount(id, params.environmentId, query)).pipe(Effect.map((pageviews) => ({ pageviews }))))
 }))
 
 const SignInHandlers = HttpApiBuilder.group(FlockApi, "signIn", Effect.fn(function*(handlers) {
@@ -71,7 +93,7 @@ const InstanceHandlers = HttpApiBuilder.group(FlockApi, "instance", Effect.fn(fu
 }))
 
 const ApiRoutes = HttpApiBuilder.layer(FlockApi, { openapiPath: "/api/openapi.json" }).pipe(
-  Layer.provide([HealthHandlers, IngestHandlers, ProjectsHandlers, ReportsHandlers, SignInHandlers, MembersHandlers, InstanceHandlers]),
+  Layer.provide([HealthHandlers, IngestHandlers, ProjectsHandlers, EnvironmentsHandlers, ReportsHandlers, SignInHandlers, MembersHandlers, InstanceHandlers]),
   Layer.provide(MemberAuthLive),
   Layer.provide(HttpApiMiddleware.layerProblemDetails({ includeDetails: true }))
 )

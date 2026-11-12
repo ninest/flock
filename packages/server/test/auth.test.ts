@@ -8,7 +8,7 @@ layer(Harness.layer())("Query API auth", (it) => {
   it.effect("rejects requests without a signed-in Member", () =>
     Effect.gen(function*() {
       const h = yield* Harness
-      const { environments: [production] } = yield* h.seedProject({ environments: ["production"] })
+      const { environments: [production] } = yield* h.createProject({ environments: ["production"] })
       for (
         const path of [
           "/api/projects",
@@ -72,7 +72,7 @@ layer(Harness.layer({ adminEmail: "owner@example.com" }))("Admin bootstrap and s
   it.effect("the ingest API needs only the Environment's key, no session", () =>
     Effect.gen(function*() {
       const h = yield* Harness
-      const { environments: [production] } = yield* h.seedProject({ environments: ["production"] })
+      const { environments: [production] } = yield* h.createProject({ environments: ["production"] })
       const response = yield* Effect.promise(() =>
         h.fetch("/api/ingest", {
           method: "POST",
