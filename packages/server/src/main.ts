@@ -20,7 +20,7 @@ const Main = Layer.unwrap(Effect.gen(function*() {
   const AppWithSeed = config.seedPlayground ? Layer.merge(App, Seed.playground.pipe(Layer.provide(App))) : App
   return Server.pipe(
     Layer.provide(AppWithSeed),
-    Layer.provide(GeoIp.layerUnknown),
+    Layer.provide(GeoIp.layerMmdb(config.geoIpDatabase)),
     Layer.provide(Layer.succeed(AuthConfig, authSettings(config))),
     Layer.provide(MigratorLive), // migrations finish before anything else is built
     Layer.provide(PgLive(config.databaseUrl))
