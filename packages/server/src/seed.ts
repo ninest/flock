@@ -36,9 +36,12 @@ export class Seed extends Context.Service<Seed, {
         ? Option.map(yield* access.memberByEmail(adminEmail.value).pipe(Effect.orDie), (m) => m.id)
         : Option.none<MemberId>()
 
+      // The playground is served from whatever dev host is at hand (`hel`, localhost…).
+      const devOrigins = ["*"]
       const existing = yield* projects.projectWithKey(PLAYGROUND_KEYS.dev)
       if (Option.isSome(existing)) {
         if (Option.isSome(admin)) yield* projects.ensureOwner(existing.value, admin.value)
+        yield* projects.setAllowedOriginsByKey(PLAYGROUND_KEYS.dev, devOrigins)
       } else {
         yield* projects.create({
           name: "Playground",
@@ -46,7 +49,7 @@ export class Seed extends Context.Service<Seed, {
           owner: admin,
           environments: [
             { name: "production", key: PLAYGROUND_KEYS.production },
-            { name: "dev", key: PLAYGROUND_KEYS.dev }
+            { name: "dev", key: PLAYGROUND_KEYS.dev, allowedOrigins: devOrigins }
           ]
         })
       }

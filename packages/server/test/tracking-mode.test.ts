@@ -24,6 +24,22 @@ layer(Harness.layer())("Tracking mode setting", (it) => {
       assert.strictEqual(reread.trackingMode, "persistent")
     }))
 
+  it.effect("only a Project owner can switch the Tracking mode; a viewer is refused", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      yield* h.seedMember({ email: "viewer@example.com", password: "viewer-password" })
+      const viewer = yield* h.browser()
+      yield* viewer.signIn({ email: "viewer@example.com", password: "viewer-password" })
+      const project = yield* h.createProject({})
+      yield* h.client.projects.addMember({ params: { projectId: project.id }, payload: { email: "viewer@example.com", role: "viewer" } })
+
+      const error = yield* viewer.client.projects.update({ params: { projectId: project.id }, payload: { trackingMode: "persistent" } })
+        .pipe(Effect.flip)
+      assert.strictEqual(error._tag, "ProjectOwnerRequired")
+      const reread = yield* viewer.client.projects.get({ params: { projectId: project.id } })
+      assert.strictEqual(reread.trackingMode, "cookieless")
+    }))
+
   it.effect("the browser script can read a Project's Tracking mode with the Environment's public key", () =>
     Effect.gen(function*() {
       const h = yield* Harness
@@ -87,6 +103,38 @@ layer(Harness.layer())("Persistent Tracking mode", (it) => {
 
       const overview = yield* h.overview(production.id, day("2026-03-01"))
       assert.strictEqual(overview.totals.visitors, 1)
+    }))
+
+  it.effect("rejects an Identify Event without its IDs, and $anon_distinct_id on other Events", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const production = yield* persistentProject
+      yield* at("2026-03-01T09:00:00Z")
+      const noDistinctId = customEvent("$identify", { $anon_distinct_id: "laptop" })
+      const noDevice = as("test-user", customEvent("$identify"))
+      const elsewhere = as("laptop", pageview({ $anon_distinct_id: "phone" }))
+      const result = yield* h.ingest(production.key, [noDistinctId, noDevice, elsewhere, identify("test-user", "laptop")])
+
+      assert.strictEqual(result.accepted, 1)
+      assert.deepStrictEqual(result.rejected.map((r) => [r.index, r.reason]), [
+        [0, "$identify needs `distinct_id` and a string `$anon_distinct_id` property"],
+        [1, "$identify needs `distinct_id` and a string `$anon_distinct_id` property"],
+        [2, "Event property names starting with $ are reserved for Flock"]
+      ])
+    }))
+
+  it.effect("a repeated Identify Event is accepted once and changes nothing", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const production = yield* persistentProject
+      yield* at("2026-03-01T09:00:00Z")
+      const event = identify("test-user", "laptop")
+      yield* h.ingest(production.key, [as("laptop", pageview()), event])
+      yield* h.ingest(production.key, [event, as("test-user", pageview())])
+
+      const overview = yield* h.overview(production.id, day("2026-03-01"))
+      assert.strictEqual(overview.totals.visitors, 1)
+      assert.strictEqual(overview.totals.pageviews, 2)
     }))
 
   it.effect("Events without a Visitor ID (such as from a backend) fall back to the cookieless Visitor", () =>

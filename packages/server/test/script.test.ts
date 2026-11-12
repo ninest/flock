@@ -22,7 +22,7 @@ layer(Harness.layer())("Browser script", (it) => {
       const response = yield* Effect.promise(() =>
         h.fetch("/api/ingest", {
           method: "POST",
-          headers: { "content-type": "text/plain;charset=UTF-8", origin: "http://hel:2102" },
+          headers: { "content-type": "text/plain;charset=UTF-8", origin: "https://blog.example.com" },
           body: JSON.stringify({ key: production!.key, events: [pageview()] })
         })
       )

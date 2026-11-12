@@ -67,7 +67,7 @@ layer(Harness.layer())("Environments", (it) => {
       assert.strictEqual(refused._tag, "ProductionProtected")
 
       yield* h.client.environments.delete({ params: { environmentId: dev!.id } })
-      const result = yield* h.client.ingest.send({ payload: { key: dev!.key, events: [pageview()] } }).pipe(Effect.flip)
+      const result = yield* h.sdk.ingest.send({ payload: { key: dev!.key, events: [pageview()] } }).pipe(Effect.flip)
       assert.strictEqual(result._tag, "UnknownKey")
       const project = (yield* h.client.projects.list()).find((p) => p.environments.some((e) => e.id === production!.id))!
       assert.deepStrictEqual(project.environments.map((e) => e.name), ["production"])
@@ -84,10 +84,10 @@ layer(Harness.layer())("Environments", (it) => {
       assert.match(rotated.key, /^pk_production_[A-Za-z0-9]{24}$/)
       assert.notStrictEqual(rotated.key, production!.key)
 
-      const old = yield* h.client.ingest.send({ payload: { key: production!.key, events: [pageview()] } }).pipe(Effect.flip)
+      const old = yield* h.sdk.ingest.send({ payload: { key: production!.key, events: [pageview()] } }).pipe(Effect.flip)
       assert.strictEqual(old._tag, "UnknownKey")
       assert.deepStrictEqual(
-        yield* h.client.ingest.send({ payload: { key: rotated.key, events: [pageview()] } }),
+        yield* h.sdk.ingest.send({ payload: { key: rotated.key, events: [pageview()] } }),
         { accepted: 1, rejected: [] }
       )
       assert.strictEqual(yield* h.pageviewCount(production!.id, allTime), 1)
@@ -100,7 +100,7 @@ layer(Harness.layer())("Environments", (it) => {
       const other = yield* h.createProject({ environments: ["dev"] })
       yield* TestClock.setTime(Date.parse("2026-03-01T10:00:00Z"))
       for (const env of [production!, dev!, staging!, other.environments[1]!]) {
-        yield* h.client.ingest.send({ payload: { key: env.key, events: [pageview(), pageview()] } })
+        yield* h.sdk.ingest.send({ payload: { key: env.key, events: [pageview(), pageview()] } })
       }
 
       yield* h.client.environments.deleteEvents({ params: { environmentId: dev!.id } })
@@ -110,7 +110,7 @@ layer(Harness.layer())("Environments", (it) => {
       assert.strictEqual(yield* h.pageviewCount(staging!.id, allTime), 2)
       assert.strictEqual(yield* h.pageviewCount(other.environments[1]!.id, allTime), 2)
       // The Environment and its key keep working.
-      yield* h.client.ingest.send({ payload: { key: dev!.key, events: [pageview()] } })
+      yield* h.sdk.ingest.send({ payload: { key: dev!.key, events: [pageview()] } })
       assert.strictEqual(yield* h.pageviewCount(dev!.id, allTime), 1)
     }))
 
@@ -119,7 +119,7 @@ layer(Harness.layer())("Environments", (it) => {
       const h = yield* Harness
       const { environments: [production] } = yield* h.createProject({})
       yield* TestClock.setTime(Date.parse("2026-03-01T10:00:00Z"))
-      yield* h.client.ingest.send({ payload: { key: production!.key, events: [pageview()] } })
+      yield* h.sdk.ingest.send({ payload: { key: production!.key, events: [pageview()] } })
 
       const refused = yield* h.client.environments.deleteEvents({ params: { environmentId: production!.id } }).pipe(Effect.flip)
       assert.strictEqual(refused._tag, "ProductionProtected")
@@ -168,7 +168,7 @@ layer(Harness.layer())("Project settings and deletion", (it) => {
       const kept = yield* h.createProject({})
       yield* TestClock.setTime(Date.parse("2026-03-01T10:00:00Z"))
       for (const env of [...project.environments, ...kept.environments]) {
-        yield* h.client.ingest.send({ payload: { key: env.key, events: [pageview()] } })
+        yield* h.sdk.ingest.send({ payload: { key: env.key, events: [pageview()] } })
       }
 
       yield* h.client.projects.delete({ params: { projectId: project.id } })
@@ -177,7 +177,7 @@ layer(Harness.layer())("Project settings and deletion", (it) => {
       assert.strictEqual(gone._tag, "ProjectNotFound")
       assert.isFalse((yield* h.client.projects.list()).some((p) => p.id === project.id))
       for (const env of project.environments) {
-        const ingest = yield* h.client.ingest.send({ payload: { key: env.key, events: [pageview()] } }).pipe(Effect.flip)
+        const ingest = yield* h.sdk.ingest.send({ payload: { key: env.key, events: [pageview()] } }).pipe(Effect.flip)
         assert.strictEqual(ingest._tag, "UnknownKey")
         const report = yield* h.pageviewCount(env.id, allTime).pipe(Effect.flip)
         assert.strictEqual((report as { _tag: string })._tag, "EnvironmentNotFound")
@@ -200,7 +200,7 @@ layer(Harness.layer())("Project access", (it) => {
       const project = yield* h.createProject({ name: "Alice's site", environments: ["dev"], as: alice })
       const [production, dev] = project.environments
       yield* TestClock.setTime(Date.parse("2026-03-01T10:00:00Z"))
-      yield* bob.client.ingest.send({ payload: { key: production!.key, events: [pageview()] } })
+      yield* h.sdk.ingest.send({ payload: { key: production!.key, events: [pageview()] } })
 
       assert.deepStrictEqual((yield* alice.client.projects.list()).map((p) => p.name), ["Alice's site"])
       assert.deepStrictEqual(yield* bob.client.projects.list(), [])
