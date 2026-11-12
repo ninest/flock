@@ -20,9 +20,13 @@ export interface PlaygroundResponse {
 const root = fileURLToPath(new URL("./pages", import.meta.url))
 const types: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css" }
 
+const SIMULATE_REFERRER =
+  `(() => { const r = new URLSearchParams(location.search).get("simulate_referrer"); ` +
+  `if (r !== null) Object.defineProperty(document, "referrer", { get: () => r }) })()`
+
 /**
  * Every HTML page gets the browser script tag and `window.FLOCK = { api, key }` injected,
- * so pages need no build step.
+ * so pages need no build step. `?simulate_referrer=<url>` on any page fakes `document.referrer`.
  */
 export const renderPlayground = async (path: string, config: PlaygroundConfig): Promise<PlaygroundResponse> => {
   if (path.startsWith("/spa/")) path = "/spa" // the fake SPA's client-side routes
@@ -40,6 +44,9 @@ export const renderPlayground = async (path: string, config: PlaygroundConfig): 
     if (contentType.startsWith("text/html")) {
       const inject = [
         `<script>window.FLOCK = ${JSON.stringify(config)}</script>`,
+        // The Sources page simulates arriving from another site: `?simulate_referrer=` sets
+        // document.referrer before the (deferred) browser script reads it.
+        `<script>${SIMULATE_REFERRER}</script>`,
         `<script defer src="${config.api}/flock.js" data-key="${config.key}"></script>`
       ].join("\n    ")
       body = body.toString().replace("<head>", `<head>\n    ${inject}`)

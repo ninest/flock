@@ -20,21 +20,23 @@ export const LocalDate = Schema.String.check(
 export const ReportPeriod = Schema.Literals(["today", "7d", "30d", "custom"])
 export type ReportPeriod = typeof ReportPeriod.Type
 
-export const ReportRangeQuery = Schema.Struct({
+const rangeFields = {
   period: ReportPeriod,
   from: Schema.optional(LocalDate),
   to: Schema.optional(LocalDate)
-}).check(
-  Schema.makeFilter((q) =>
-    q.period !== "custom"
-      ? true
-      : q.from === undefined || q.to === undefined
-      ? "a custom period needs both from and to"
-      : q.from > q.to
-      ? "from must not be after to"
-      : true
-  )
+}
+
+const validRange = Schema.makeFilter((q: { readonly period: ReportPeriod; readonly from?: string | undefined; readonly to?: string | undefined }) =>
+  q.period !== "custom"
+    ? true
+    : q.from === undefined || q.to === undefined
+    ? "a custom period needs both from and to"
+    : q.from > q.to
+    ? "from must not be after to"
+    : true
 )
+
+export const ReportRangeQuery = Schema.Struct(rangeFields).check(validRange)
 export type ReportRangeQuery = typeof ReportRangeQuery.Type
 
 /** Hourly buckets for a single day, daily buckets otherwise. */
@@ -76,3 +78,52 @@ export const Overview = Schema.Struct({
   series: Schema.Array(OverviewBucket)
 })
 export type Overview = typeof Overview.Type
+
+/**
+ * The ranked-list reports. Each counts something per value, most first:
+ * - `pages`: Pageviews per cleaned URL path (`/pricing`; no host, query or fragment).
+ * - `entryPages` / `exitPages`: Sessions per path of their first / last Pageview.
+ * - `referrers`: Sessions per referring domain of their first Pageview (`www.` dropped).
+ *   `null` is direct traffic: no referrer, or one from the page's own host.
+ * - `utmSources` / `utmMediums` / `utmCampaigns`: Sessions per `utm_source` / `utm_medium` /
+ *   `utm_campaign` of their first Pageview. Sessions without the tag are left out.
+ * - `countries` / `browsers` / `oses` / `devices`: Pageviews per `$country` / `$browser` /
+ *   `$os` / `$device`; `null` when unknown.
+ */
+export const TopReport = Schema.Literals([
+  "pages",
+  "entryPages",
+  "exitPages",
+  "referrers",
+  "utmSources",
+  "utmMediums",
+  "utmCampaigns",
+  "countries",
+  "browsers",
+  "oses",
+  "devices"
+])
+export type TopReport = typeof TopReport.Type
+
+export const TopQuery = Schema.Struct({ ...rangeFields, report: TopReport }).check(validRange)
+export type TopQuery = typeof TopQuery.Type
+
+export const TopRow = Schema.Struct({ value: Schema.NullOr(Schema.String), count: Schema.Number })
+export type TopRow = typeof TopRow.Type
+
+/** At most this many rows come back, most frequent first. */
+export const TOP_LIMIT = 100
+
+export const Top = Schema.Struct({
+  /** The resolved range, as local dates (inclusive). */
+  from: Schema.String,
+  to: Schema.String,
+  timeZone: Schema.String,
+  report: TopReport,
+  rows: Schema.Array(TopRow)
+})
+export type Top = typeof Top.Type
+
+/** Unique Visitors with an Event in the last 30 minutes. */
+export const LiveVisitors = Schema.Struct({ visitors: Schema.Number })
+export type LiveVisitors = typeof LiveVisitors.Type

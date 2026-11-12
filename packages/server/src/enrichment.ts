@@ -1,6 +1,6 @@
 // Enrichment: one Event's properties + the request it came in -> the properties Flock stores.
-// Adds $country, $region, $browser, $os and $device, and strips query strings from URLs
-// except utm_* parameters. The request IP is only used for the GeoIP lookup, never returned.
+// Adds $country, $region, $browser, $os and $device, strips query strings from URLs
+// except utm_* parameters, and copies those from $url into $utm_source and friends. The request IP is only used for the GeoIP lookup, never returned.
 import Bowser from "bowser"
 import { Context, Effect, Layer } from "effect"
 import { GeoIp } from "./geoip.ts"
@@ -14,6 +14,9 @@ export interface RequestContext {
 
 /** Properties Flock derives itself; values sent by the client are replaced. */
 export const AUDIENCE_PROPERTIES = ["$country", "$region", "$browser", "$os", "$device"] as const
+
+/** UTM tags copied from `$url` into `$utm_…` properties; values sent by the client are replaced. */
+export const UTM_TAGS = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content"] as const
 
 /** Event properties holding URLs that get cleaned. */
 const URL_PROPERTIES = ["$url", "$referrer"] as const
@@ -44,11 +47,12 @@ export class Enrichment extends Context.Service<Enrichment, {
       const enrich = (properties: Properties, audience: Properties): Properties => {
         const result: Record<string, unknown> = { ...properties }
         for (const key of AUDIENCE_PROPERTIES) delete result[key]
+        for (const tag of UTM_TAGS) delete result[`$${tag}`]
         for (const key of URL_PROPERTIES) {
           const value = result[key]
           if (typeof value === "string") result[key] = cleanUrl(value)
         }
-        return { ...result, ...audience }
+        return { ...result, ...utmTags(result["$url"]), ...audience }
       }
 
       return Enrichment.of({ audience, enrich })
@@ -67,6 +71,23 @@ const parseUserAgent = (userAgent: string) => {
     $os: parser.getOSName(),
     $device: parser.getPlatformType(true)
   }
+}
+
+/** `$utm_source` etc. from a URL's query (tag names are case-insensitive; the first one wins). */
+const utmTags = (url: unknown): Record<string, string> => {
+  if (typeof url !== "string") return {}
+  let params: URLSearchParams
+  try {
+    params = new URL(url).searchParams
+  } catch {
+    return {}
+  }
+  const tags: Record<string, string> = {}
+  for (const [name, value] of params) {
+    const tag = name.toLowerCase()
+    if ((UTM_TAGS as ReadonlyArray<string>).includes(tag) && value !== "" && !(`$${tag}` in tags)) tags[`$${tag}`] = value
+  }
+  return tags
 }
 
 /**

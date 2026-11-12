@@ -10,11 +10,25 @@ import type {
   MemberId,
   Overview,
   OverviewNumbers,
-  OverviewQuery
+  OverviewQuery,
+  Top,
+  TopQuery
 } from "@flock/shared"
+import { TOP_LIMIT } from "@flock/shared"
 import { Context, DateTime, Effect, Layer } from "effect"
 import { Projects } from "./projects.ts"
 import { type ReportRange, resolveRange } from "./report-range.ts"
+
+/**
+ * The UTM reports read `$utm_source` and friends, which Enrichment derives from the Pageview's
+ * URL, or else a plain `utm_source` Event property sent by an app.
+ */
+const UTM_TAGS = { utmSources: "utm_source", utmMediums: "utm_medium", utmCampaigns: "utm_campaign" } as const
+
+/** The live counter's window. */
+const LIVE_MINUTES = 30
+
+const AUDIENCE = { countries: "$country", browsers: "$browser", oses: "$os", devices: "$device" } as const
 
 export interface DateRange {
   readonly from: DateTime.Utc
@@ -62,6 +76,14 @@ export class Reports extends Context.Service<Reports, {
     environmentId: EnvironmentId,
     query: OverviewQuery
   ) => Effect.Effect<Overview, EnvironmentNotFound>
+  /** The live counter: unique Visitors with an Event in the last 30 minutes. */
+  readonly liveVisitors: (member: MemberId, environmentId: EnvironmentId) => Effect.Effect<number, EnvironmentNotFound>
+  /** A ranked-list report: top pages, entry and exit pages, referrers, UTM tags or audience. */
+  readonly top: (
+    member: MemberId,
+    environmentId: EnvironmentId,
+    query: TopQuery
+  ) => Effect.Effect<Top, EnvironmentNotFound>
 }>()("flock/Reports") {
   static readonly layer = Layer.effect(
     Reports,
@@ -138,6 +160,78 @@ export class Reports extends Context.Service<Reports, {
         }
       }, (effect) => Effect.catchTag(effect, "SqlError", Effect.die))
 
+      /** The path of a URL property (`/pricing`): no scheme, host, query or fragment; `/` when empty. */
+      const pathOf = () => {
+        const url = sql`(properties ->> '$url')`
+        return sql`CASE WHEN ${url} ~* '^[a-z][a-z0-9+.-]*://'
+          THEN coalesce(nullif(substring(${url} FROM '(?i)^[a-z][a-z0-9+.-]*://[^/?#]*([^?#]*)'), ''), '/')
+          ELSE substring(${url} FROM '^[^?#]*') END`
+      }
+
+      /** The host of a URL Event property, lowercased, without port or `www.`; null when it isn't a URL. */
+      const hostOf = (property: "$url" | "$referrer") =>
+        sql`regexp_replace(lower(substring(properties ->> ${property} FROM '(?i)^[a-z][a-z0-9+.-]*://(?:[^@/?#]*@)?([^/?#:]+)')), '^www[.]', '')`
+
+      /** The first (or last) Pageview of each Session in the range, as `properties`. */
+      const sessionPageview = (which: "first" | "last") => sql`
+        SELECT DISTINCT ON (session_id) properties FROM scoped
+        WHERE name = '$pageview' AND session_id IS NOT NULL
+        ORDER BY session_id, ${which === "first" ? sql`ts ASC, received_at ASC` : sql`ts DESC, received_at DESC`}`
+
+      /** One SELECT per report, over the `scoped` CTE, yielding `value` and `count` rows. */
+      const topRows = (report: TopQuery["report"]) => {
+        switch (report) {
+          case "pages":
+            return sql`SELECT ${pathOf()} AS value, count(*)::int AS count
+              FROM scoped WHERE name = '$pageview' GROUP BY 1`
+          case "entryPages":
+          case "exitPages":
+            return sql`SELECT ${pathOf()} AS value, count(*)::int AS count
+              FROM (${sessionPageview(report === "entryPages" ? "first" : "last")}) s GROUP BY 1`
+          case "referrers": {
+            const referrer = hostOf("$referrer")
+            const own = hostOf("$url")
+            return sql`SELECT CASE WHEN ${referrer} = ${own} THEN NULL ELSE ${referrer} END AS value, count(*)::int AS count
+              FROM (${sessionPageview("first")}) s GROUP BY 1`
+          }
+          case "utmSources":
+          case "utmMediums":
+          case "utmCampaigns": {
+            const tag = UTM_TAGS[report]
+            const value = sql`coalesce(properties ->> ${"$" + tag}, properties ->> ${tag})`
+            return sql`SELECT ${value} AS value, count(*)::int AS count
+              FROM (${sessionPageview("first")}) s WHERE ${value} IS NOT NULL AND ${value} <> '' GROUP BY 1`
+          }
+          case "countries":
+          case "browsers":
+          case "oses":
+          case "devices":
+            return sql`SELECT properties ->> ${AUDIENCE[report]} AS value, count(*)::int AS count
+              FROM scoped WHERE name = '$pageview' GROUP BY 1`
+        }
+      }
+
+      const top = Effect.fn("Reports.top")(function*(member: MemberId, environmentId: EnvironmentId, query: TopQuery) {
+        const { environmentId: id, range } = yield* scope(member, environmentId, query)
+        const rows = yield* sql<{ readonly value: string | null; readonly count: number }>`
+          WITH ${scopedEvents(id, range)}
+          SELECT value, count FROM (${topRows(query.report)}) t
+          ORDER BY count DESC, value ASC NULLS LAST
+          LIMIT ${TOP_LIMIT}`
+        return { from: range.from, to: range.to, timeZone: range.timeZone, report: query.report, rows }
+      }, (effect) => Effect.catchTag(effect, "SqlError", Effect.die))
+
+      const liveVisitors = Effect.fn("Reports.liveVisitors")(function*(member: MemberId, environmentId: EnvironmentId) {
+        const environment = yield* projects.environment(member, environmentId)
+        const now = yield* DateTime.now
+        const [row] = yield* sql<{ readonly visitors: number }>`
+          SELECT count(DISTINCT visitor_id)::int AS visitors FROM event
+          WHERE environment_id = ${environment.id}
+            AND ts > ${DateTime.toDateUtc(DateTime.subtract(now, { minutes: LIVE_MINUTES }))}
+            AND ts <= ${DateTime.toDateUtc(now)}`
+        return row?.visitors ?? 0
+      }, (effect) => Effect.catchTag(effect, "SqlError", Effect.die))
+
       const pageviewCount = Effect.fn("Reports.pageviewCount")(function*(member: MemberId, environmentId: EnvironmentId, range: DateRange) {
         yield* projects.environment(member, environmentId)
         const [row] = yield* sql<{ count: number }>`
@@ -172,7 +266,7 @@ export class Reports extends Context.Service<Reports, {
         return rows.map((row) => row.key)
       }, (effect) => Effect.catchTag(effect, "SqlError", Effect.die))
 
-      return Reports.of({ pageviewCount, overview, breakdown, propertyKeys })
+      return Reports.of({ pageviewCount, overview, breakdown, propertyKeys, top, liveVisitors })
     })
   )
 }

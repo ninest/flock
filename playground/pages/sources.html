@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Playground: Sources</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <nav><a href="/">Home</a><a href="/pricing">Pricing</a><a href="/blog">Blog</a><a href="/sources">Sources</a><a href="/spa">SPA</a><a href="/ingest">Raw ingest</a></nav>
+    <h1>Sources</h1>
+    <p>
+      Each link below lands on a page as if the Visitor came from another site, with <code>utm_*</code> tags in the URL
+      and a simulated referrer (the <code>simulate_referrer</code> parameter overrides <code>document.referrer</code>;
+      Flock drops it from the stored URL like any other non-<code>utm_*</code> parameter). The Referrers and UTM reports
+      count a Session by its first Pageview, and a Session ends after 30 minutes without Events, so open these in a
+      private window (a new Visitor) to see each one counted.
+    </p>
+    <ul>
+      <li><a href="/blog/first-post?utm_source=hackernews&amp;utm_medium=social&amp;utm_campaign=launch&amp;simulate_referrer=https%3A%2F%2Fnews.ycombinator.com%2Fitem%3Fid%3D42">Hacker News launch post</a></li>
+      <li><a href="/?simulate_referrer=https%3A%2F%2Fwww.google.com%2F">Google search result</a> (no tags)</li>
+      <li><a href="/pricing?utm_source=newsletter&amp;utm_medium=email&amp;utm_campaign=spring%20sale&amp;simulate_referrer=https%3A%2F%2Fmail.example.org%2Finbox">Newsletter: spring sale</a></li>
+      <li><a href="/blog/second-post?utm_source=twitter&amp;utm_medium=social&amp;utm_campaign=launch&amp;simulate_referrer=https%3A%2F%2Ft.co%2Fabc">Tweet</a></li>
+      <li><a href="/blog?utm_source=partner&amp;utm_medium=referral">Partner site</a> (tags only, no referrer)</li>
+    </ul>
+  </body>
+</html>

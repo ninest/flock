@@ -126,3 +126,33 @@ describe("Cookieless mode", () => {
     expect(await site.page.context().cookies()).toEqual([])
   })
 })
+
+describe("Playground: pages and sources", () => {
+  it("following a link between pages sends a Pageview with the new URL and the previous page as referrer", async () => {
+    const site = await openPlayground(browser())
+    await site.goto("/blog")
+    await site.waitForEvents(1)
+    await site.page.click("text=First post")
+    const [, post] = await site.waitForEvents(2)
+    expect(post).toMatchObject({
+      name: "$pageview",
+      properties: { $url: `${PLAYGROUND}/blog/first-post`, $referrer: `${PLAYGROUND}/blog` }
+    })
+  })
+
+  it("a campaign link arrives with its utm_* tags and a simulated external referrer", async () => {
+    const site = await openPlayground(browser())
+    await site.goto("/sources")
+    await site.waitForEvents(1)
+    await site.page.click("text=Hacker News launch post")
+    const [, landing] = await site.waitForEvents(2)
+    const url = new URL(landing!.properties.$url as string)
+    expect(url.pathname).toBe("/blog/first-post")
+    expect(Object.fromEntries([...url.searchParams].filter(([name]) => name.startsWith("utm_")))).toEqual({
+      utm_source: "hackernews",
+      utm_medium: "social",
+      utm_campaign: "launch"
+    })
+    expect(landing!.properties.$referrer).toBe("https://news.ycombinator.com/item?id=42")
+  })
+})
