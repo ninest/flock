@@ -29,7 +29,10 @@ import {
   type MemberId,
   type Overview,
   type OverviewQuery,
-  type Project
+  type Project,
+  type ReportRangeQuery,
+  type Top,
+  type TopReport
 } from "@flock/shared"
 import { Context, DateTime, Effect, Layer, Option, Redacted, type Scope } from "effect"
 import { FetchHttpClient, HttpEffect, HttpRouter } from "effect/http"
@@ -213,6 +216,10 @@ export class Harness extends Context.Service<Harness, {
   ) => Effect.Effect<ReadonlyArray<string>>
   /** Convenience: the overview report for an Environment, as `h.client`. */
   readonly overview: (environmentId: EnvironmentId, range: OverviewQuery) => Effect.Effect<Overview, unknown>
+  /** Convenience: a ranked-list report for an Environment, as `h.client`. */
+  readonly top: (environmentId: EnvironmentId, report: TopReport, range: ReportRangeQuery) => Effect.Effect<Top>
+  /** Convenience: the live counter (unique Visitors in the last 30 minutes), as `h.client`. */
+  readonly live: (environmentId: EnvironmentId) => Effect.Effect<number>
 }>()("test/Harness") {
   static readonly layer = (options: HarnessOptions = {}) =>
     Layer.effect(
@@ -333,8 +340,14 @@ export class Harness extends Context.Service<Harness, {
             Effect.orDie
           )
 
+        const top: Harness["Service"]["top"] = (environmentId, report, range) =>
+          client.reports.top({ params: { environmentId }, query: { ...range, report } }).pipe(Effect.orDie)
+
+        const live: Harness["Service"]["live"] = (environmentId) =>
+          client.reports.live({ params: { environmentId } }).pipe(Effect.map((r) => r.visitors), Effect.orDie)
+
         return Harness.of({
-          ingest, breakdown, propertyKeys,
+          ingest, breakdown, propertyKeys, top, live,
           handler,
           oidc,
           fetch,

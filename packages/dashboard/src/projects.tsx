@@ -8,13 +8,15 @@ import {
   PRODUCTION,
   type Project,
   type ProjectId,
-  type ProjectRole
+  type ProjectRole,
+  type ReportRangeQuery
 } from "@flock/shared"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { type CSSProperties, type FormEvent, type ReactNode, useState } from "react"
 import { request } from "./api.ts"
 import { OverviewReport } from "./overview.tsx"
 import { AudienceReports } from "./audience.tsx"
+import { LiveVisitors, PagesAndSources } from "./pages-sources.tsx"
 import { currentMember } from "./auth.ts"
 import { usePoll } from "./use-poll.ts"
 
@@ -98,6 +100,8 @@ const CreateProject = () => {
 export const ProjectPage = ({ projectId, env }: { projectId: ProjectId; env: string | undefined }) => {
   const navigate = useNavigate()
   const { data: project, error, reload } = usePoll(() => request((api) => api.projects.get({ params: { projectId } })), [projectId])
+  // The date range every report follows, set by the overview's picker.
+  const [range, setRange] = useState<ReportRangeQuery>({ period: "7d" })
   if (error && !project) return <p role="alert">{(error as Error).message}</p>
   if (!project) return <p>Loading…</p>
 
@@ -112,14 +116,18 @@ export const ProjectPage = ({ projectId, env }: { projectId: ProjectId; env: str
         Time zone {project.timeZone}
         {project.role === "viewer" ? " · You're a viewer of this Project" : ""}
       </p>
+      <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
       <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
         Environment
         <select value={environment.name} onChange={(e) => void select(e.target.value)} data-testid="environment-switcher">
           {project.environments.map((e) => <option key={e.id} value={e.name}>{e.name}</option>)}
         </select>
       </label>
-      <OverviewReport key={environment.id} environment={environment} timeZone={project.timeZone} />
-      <AudienceReports key={`audience-${environment.id}`} environment={environment} />
+      <LiveVisitors key={`live-${environment.id}`} environment={environment} />
+      </div>
+      <OverviewReport key={environment.id} environment={environment} timeZone={project.timeZone} query={range} onQueryChange={setRange} />
+      <PagesAndSources key={`pages-${environment.id}`} environment={environment} range={range} />
+      <AudienceReports key={`audience-${environment.id}`} environment={environment} range={range} />
       {project.role === "owner"
         ? (
           <>

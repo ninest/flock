@@ -108,8 +108,13 @@ const Chart = ({ overview, metric }: { overview: Overview; metric: (typeof metri
   )
 }
 
-export const OverviewReport = ({ environment, timeZone }: { environment: Environment; timeZone: string }) => {
-  const [query, setQuery] = useState<OverviewQuery>({ period: "7d" })
+/** The overview, whose date range picker sets the range every report on the page follows. */
+export const OverviewReport = ({ environment, timeZone, query, onQueryChange: setQuery }: {
+  environment: Environment
+  timeZone: string
+  query: OverviewQuery
+  onQueryChange: (query: OverviewQuery) => void
+}) => {
   const [metricKey, setMetricKey] = useState<Metric>("visitors")
   const valid = query.period !== "custom" || (query.from !== undefined && query.to !== undefined)
   const { data, error } = usePoll(

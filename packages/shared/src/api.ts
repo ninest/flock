@@ -22,7 +22,7 @@ import {
   TimeZone
 } from "./domain.ts"
 import { IngestBatch, IngestResult, OriginNotAllowed, UnknownKey } from "./ingest.ts"
-import { Overview, OverviewQuery } from "./reports.ts"
+import { LiveVisitors, Overview, OverviewQuery, Top, TopQuery } from "./reports.ts"
 import { CreatedInvite, Forbidden, Invite, InviteId, InviteNotFound, InstanceSettings, Member, MemberAuth, MemberId, MemberNotFound, SignInOptions } from "./members.ts"
 
 export class IngestGroup extends HttpApiGroup.make("ingest")
@@ -158,13 +158,26 @@ export class ReportsGroup extends HttpApiGroup.make("reports")
     }),
     /**
      * Counts Events (Pageviews unless `event` is given) by the value of one Event property,
-     * most frequent first. Events without the property count under `null`. The audience
-     * reports are breakdowns by `$country`, `$browser`, `$os` and `$device`.
+     * most frequent first, in an exact `[from, to)` time range. Events without the property
+     * count under `null`. The dashboard's reports use `top` and `overview`, on local days.
      */
     HttpApiEndpoint.get("breakdown", "/:environmentId/breakdown", {
       params: { environmentId: EnvironmentId },
       query: { ...DateRange, property: Schema.String, event: Schema.optional(Schema.String) },
       success: Schema.Array(BreakdownRow),
+      error: EnvironmentNotFound
+    }),
+    /** A ranked-list report (top pages, entry and exit pages, referrers, UTM, audience) for a date range. */
+    HttpApiEndpoint.get("top", "/:environmentId/top", {
+      params: { environmentId: EnvironmentId },
+      query: TopQuery,
+      success: Top,
+      error: EnvironmentNotFound
+    }),
+    /** The live counter: unique Visitors with an Event in the last 30 minutes. */
+    HttpApiEndpoint.get("live", "/:environmentId/live", {
+      params: { environmentId: EnvironmentId },
+      success: LiveVisitors,
       error: EnvironmentNotFound
     }),
     /** Every Event property key seen on the Environment's Events in the range, sorted. */
