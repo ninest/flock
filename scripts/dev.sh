@@ -29,6 +29,9 @@ fi
 docker exec flock-postgres psql -U postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '$DEV_DB'" | grep -q 1 \
   || docker exec flock-postgres createdb -U postgres "$DEV_DB"
 
+# Countries come from the bundled GeoIP database; fetch it once (ingest works without it).
+[[ -f packages/server/data/dbip-country-lite.mmdb ]] || ./scripts/download-geoip.sh || true
+
 # The server serves the built browser script at /flock.js; build it once, then keep rebuilding on change.
 pnpm --filter @flock/script build
 

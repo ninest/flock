@@ -3,6 +3,7 @@ import type { AuthSettings } from "./access.ts"
 import { fileURLToPath } from "node:url"
 
 const defaultPublicDir = fileURLToPath(new URL("../../dashboard/dist", import.meta.url))
+const defaultGeoIpDatabase = fileURLToPath(new URL("../data/dbip-country-lite.mmdb", import.meta.url))
 const defaultScriptFile = fileURLToPath(new URL("../../script/dist/flock.js", import.meta.url))
 
 export const ServerConfig = Config.all({
@@ -12,6 +13,11 @@ export const ServerConfig = Config.all({
   publicDir: Config.String("FLOCK_PUBLIC_DIR").pipe(Config.withDefault(defaultPublicDir)),
   /** The built browser script (`pnpm --filter @flock/script build`), served at /flock.js. */
   scriptFile: Config.String("FLOCK_SCRIPT_FILE").pipe(Config.withDefault(defaultScriptFile)),
+  /**
+   * A MaxMind-format GeoIP database. Defaults to the bundled DB-IP IP to Country Lite
+   * (`scripts/download-geoip.sh`); point it at a City database to get regions too.
+   */
+  geoIpDatabase: Config.String("FLOCK_GEOIP_DB").pipe(Config.withDefault(defaultGeoIpDatabase)),
   /** The origin Members open Flock on; defaults to each request's own origin. */
   publicUrl: Config.option(Config.String("FLOCK_PUBLIC_URL")),
   /** Comma-separated extra origins allowed to sign in (e.g. the dev dashboard). */
