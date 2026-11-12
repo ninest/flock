@@ -1,0 +1,5 @@
+interface:
+  display_name: "Approve and next session"
+  short_description: "Ship an approved ticket and hand off the next one"
+policy:
+  allow_implicit_invocation: false
