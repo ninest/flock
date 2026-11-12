@@ -13,10 +13,12 @@ import {
   FlockApi,
   type MemberId,
   type NumericStats,
+  type PropertyFilter,
   type ReportRangeQuery
 } from "@flock/shared"
 import { Context, DateTime, Effect, Layer } from "effect"
 import { HttpApiBuilder } from "effect/http-api"
+import { matchesFilters } from "./filters.ts"
 import { Projects } from "./projects.ts"
 import { type ReportRange, resolveRange } from "./report-range.ts"
 
@@ -43,11 +45,18 @@ export class CustomEvents extends Context.Service<CustomEvents, {
       const scope = (member: MemberId, environmentId: EnvironmentId, query: ReportRangeQuery) =>
         Effect.gen(function*() {
           const environment = yield* projects.environment(member, environmentId)
-          return { id: environment.id, range: resolveRange(query, environment.timeZone, yield* DateTime.now) }
+          return {
+            id: environment.id,
+            range: resolveRange(query, environment.timeZone, yield* DateTime.now),
+            filters: query.filters
+          }
         })
 
-      /** CTE `scoped`: the Environment's Custom events in range, with `bucket`, their local bucket start. */
-      const scoped = (environmentId: string, range: ReportRange) => sql`
+      /**
+       * CTE `scoped`: the Environment's Custom events in range that match the filters, with
+       * `bucket`, their local bucket start.
+       */
+      const scoped = (environmentId: string, range: ReportRange, filters: ReadonlyArray<PropertyFilter> | undefined) => sql`
         scoped AS (
           SELECT e.*, date_trunc(${range.interval}, e.ts AT TIME ZONE ${range.timeZone}) AS bucket
           FROM event e
@@ -55,13 +64,14 @@ export class CustomEvents extends Context.Service<CustomEvents, {
             AND e.name NOT LIKE '$%'
             AND e.ts >= (${range.from}::date::timestamp AT TIME ZONE ${range.timeZone})
             AND e.ts < ((${range.to}::date + 1)::timestamp AT TIME ZONE ${range.timeZone})
+            AND ${matchesFilters(sql, filters)}
         )`
 
       const list: CustomEvents["Service"]["list"] = (member, environmentId, query) =>
         Effect.gen(function*() {
-          const { id, range } = yield* scope(member, environmentId, query)
+          const { id, range, filters } = yield* scope(member, environmentId, query)
           const events = yield* sql<{ name: string; count: number; visitors: number }>`
-            WITH ${scoped(id, range)}
+            WITH ${scoped(id, range, filters)}
             SELECT name, count(*)::int AS count, count(DISTINCT visitor_id)::int AS visitors
             FROM scoped GROUP BY name
             ORDER BY count DESC, name ASC`
@@ -81,13 +91,13 @@ export class CustomEvents extends Context.Service<CustomEvents, {
 
       const detail: CustomEvents["Service"]["detail"] = (member, environmentId, query) =>
         Effect.gen(function*() {
-          const { id, range } = yield* scope(member, environmentId, query)
+          const { id, range, filters } = yield* scope(member, environmentId, query)
           const numbers = sql`count(*)::int AS count, count(DISTINCT visitor_id)::int AS visitors`
           const [totals] = yield* sql<{ count: number; visitors: number }>`
-            WITH ${scoped(id, range)}
+            WITH ${scoped(id, range, filters)}
             SELECT ${numbers} FROM scoped WHERE name = ${query.name}`
           const series = yield* sql<{ bucket: string; count: number; visitors: number }>`
-            WITH ${scoped(id, range)}, ${buckets(range)}
+            WITH ${scoped(id, range, filters)}, ${buckets(range)}
             SELECT to_char(b.bucket, ${label(range)}) AS bucket,
                    coalesce(e.count, 0) AS count, coalesce(e.visitors, 0) AS visitors
             FROM buckets b
@@ -95,7 +105,7 @@ export class CustomEvents extends Context.Service<CustomEvents, {
               ON e.bucket = b.bucket
             ORDER BY b.bucket`
           const properties = yield* sql<{ key: string; types: Array<"string" | "number" | "boolean"> }>`
-            WITH ${scoped(id, range)}
+            WITH ${scoped(id, range, filters)}
             SELECT p.key, array_agg(DISTINCT jsonb_typeof(p.value) ORDER BY jsonb_typeof(p.value)) AS types
             FROM scoped, jsonb_each(scoped.properties) p
             WHERE scoped.name = ${query.name} AND jsonb_typeof(p.value) IN ('string', 'number', 'boolean')
@@ -112,9 +122,9 @@ export class CustomEvents extends Context.Service<CustomEvents, {
 
       const breakdown: CustomEvents["Service"]["breakdown"] = (member, environmentId, query) =>
         Effect.gen(function*() {
-          const { id, range } = yield* scope(member, environmentId, query)
+          const { id, range, filters } = yield* scope(member, environmentId, query)
           const rows = yield* sql<{ value: string | null; count: number }>`
-            WITH ${scoped(id, range)}
+            WITH ${scoped(id, range, filters)}
             SELECT properties ->> ${query.property} AS value, count(*)::int AS count
             FROM scoped WHERE name = ${query.name}
             GROUP BY 1
@@ -125,7 +135,7 @@ export class CustomEvents extends Context.Service<CustomEvents, {
       /** Only JSON numbers count; strings, booleans, nulls, arrays and missing values are skipped. */
       const stats: CustomEvents["Service"]["stats"] = (member, environmentId, query) =>
         Effect.gen(function*() {
-          const { id, range } = yield* scope(member, environmentId, query)
+          const { id, range, filters } = yield* scope(member, environmentId, query)
           const numbers = sql`
             numbers AS (
               SELECT bucket, (properties ->> ${query.property})::float8 AS value FROM scoped
@@ -136,10 +146,10 @@ export class CustomEvents extends Context.Service<CustomEvents, {
             min(value) AS min, max(value) AS max,
             percentile_cont(0.5) WITHIN GROUP (ORDER BY value) AS median`
           const [totals] = yield* sql<NumericStats>`
-            WITH ${scoped(id, range)}, ${numbers}
+            WITH ${scoped(id, range, filters)}, ${numbers}
             SELECT ${aggregates} FROM numbers`
           const series = yield* sql<NumericStats & { readonly bucket: string }>`
-            WITH ${scoped(id, range)}, ${numbers}, ${buckets(range)}
+            WITH ${scoped(id, range, filters)}, ${numbers}, ${buckets(range)}
             SELECT to_char(b.bucket, ${label(range)}) AS bucket, coalesce(n.count, 0) AS count,
                    n.average, n.sum, n.min, n.max, n.median
             FROM buckets b

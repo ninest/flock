@@ -22,7 +22,7 @@ import {
   TimeZone
 } from "./domain.ts"
 import { IngestBatch, IngestResult, OriginNotAllowed, UnknownKey } from "./ingest.ts"
-import { LiveVisitors, Overview, OverviewQuery, Top, TopQuery } from "./reports.ts"
+import { filtersField, LiveVisitors, Overview, OverviewQuery, Top, TopQuery } from "./reports.ts"
 import { CustomEventsGroup } from "./custom-events.ts"
 import { CreatedInvite, Forbidden, Invite, InviteId, InviteNotFound, InstanceSettings, Member, MemberAuth, MemberId, MemberNotFound, SignInOptions } from "./members.ts"
 
@@ -160,11 +160,12 @@ export class ReportsGroup extends HttpApiGroup.make("reports")
     /**
      * Counts Events (Pageviews unless `event` is given) by the value of one Event property,
      * most frequent first, in an exact `[from, to)` time range. Events without the property
-     * count under `null`. The dashboard's reports use `top` and `overview`, on local days.
+     * count under `null`. `filters` narrow the Events counted. The dashboard's reports use
+     * `top` and `overview`, on local days.
      */
     HttpApiEndpoint.get("breakdown", "/:environmentId/breakdown", {
       params: { environmentId: EnvironmentId },
-      query: { ...DateRange, property: Schema.String, event: Schema.optional(Schema.String) },
+      query: { ...DateRange, property: Schema.String, event: Schema.optional(Schema.String), ...filtersField },
       success: Schema.Array(BreakdownRow),
       error: EnvironmentNotFound
     }),
@@ -175,9 +176,10 @@ export class ReportsGroup extends HttpApiGroup.make("reports")
       success: Top,
       error: EnvironmentNotFound
     }),
-    /** The live counter: unique Visitors with an Event in the last 30 minutes. */
+    /** The live counter: unique Visitors with a matching Event in the last 30 minutes. */
     HttpApiEndpoint.get("live", "/:environmentId/live", {
       params: { environmentId: EnvironmentId },
+      query: filtersField,
       success: LiveVisitors,
       error: EnvironmentNotFound
     }),

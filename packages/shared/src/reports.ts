@@ -20,10 +20,39 @@ export const LocalDate = Schema.String.check(
 export const ReportPeriod = Schema.Literals(["today", "7d", "30d", "custom"])
 export type ReportPeriod = typeof ReportPeriod.Type
 
+/**
+ * How a filter compares an Event property's value (as text: `34`, `true`):
+ * - `is`: equals the value.
+ * - `isNot`: anything else, including Events without the property.
+ * - `contains`: includes the value, ignoring case. Events without the property don't match.
+ */
+export const FilterOperator = Schema.Literals(["is", "isNot", "contains"])
+export type FilterOperator = typeof FilterOperator.Type
+
+/**
+ * A filter on one top-level Event property, such as `$country is DE`. Besides stored keys,
+ * `$path` is the path of `$url` and `$referring_domain` the referrer's domain, the values the
+ * pages and referrers reports show.
+ */
+export const PropertyFilter = Schema.Struct({
+  property: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(200)),
+  op: FilterOperator,
+  value: Schema.String.check(Schema.isMaxLength(1000))
+})
+export type PropertyFilter = typeof PropertyFilter.Type
+
+/** Filters combine with AND. */
+export const PropertyFilters = Schema.Array(PropertyFilter).check(Schema.isMaxLength(20))
+export type PropertyFilters = typeof PropertyFilters.Type
+
+/** In a query string, filters travel as one JSON-encoded `filters` parameter. */
+export const filtersField = { filters: Schema.optional(Schema.fromJsonString(PropertyFilters)) }
+
 const rangeFields = {
   period: ReportPeriod,
   from: Schema.optional(LocalDate),
-  to: Schema.optional(LocalDate)
+  to: Schema.optional(LocalDate),
+  ...filtersField
 }
 
 const validRange = Schema.makeFilter((q: { readonly period: ReportPeriod; readonly from?: string | undefined; readonly to?: string | undefined }) =>
