@@ -1,0 +1,22 @@
+# Local development / self-hosting database.
+# All worktrees share this one Postgres; tests create and drop their own throwaway databases.
+name: flock
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: flock-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: flock
+    ports:
+      - "127.0.0.1:2432:5432"
+    volumes:
+      - flock-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+volumes:
+  flock-pg:

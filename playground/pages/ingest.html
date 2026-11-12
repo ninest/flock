@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Playground: Raw ingest</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <nav><a href="/">Home</a><a href="/pricing">Pricing</a><a href="/ingest">Raw ingest</a></nav>
+    <h1>Raw ingest</h1>
+    <p>Paste any JSON batch and send it to <code>POST /api/ingest</code>. This page itself sends no Pageview.</p>
+    <p class="muted" id="config"></p>
+    <form id="form">
+      <textarea id="batch" rows="16" spellcheck="false"></textarea>
+      <p><button type="submit">Send</button> <button type="button" id="reset">Reset example</button></p>
+    </form>
+    <pre id="result"></pre>
+    <script type="module">
+      const { api, key } = window.FLOCK
+      document.getElementById("config").textContent = `Sending to ${api}`
+      const textarea = document.getElementById("batch")
+      const example = () => JSON.stringify({
+        key,
+        events: [
+          { uuid: crypto.randomUUID(), name: "$pageview", properties: { $url: location.origin + "/raw" } },
+          { uuid: crypto.randomUUID(), name: "game_completed", properties: { score: 34 } }
+        ]
+      }, null, 2)
+      textarea.value = example()
+      document.getElementById("reset").onclick = () => { textarea.value = example() }
+      document.getElementById("form").onsubmit = async (event) => {
+        event.preventDefault()
+        const result = document.getElementById("result")
+        result.textContent = "Sending…"
+        try {
+          const response = await fetch(`${api}/api/ingest`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: textarea.value
+          })
+          const body = await response.text()
+          result.textContent = `HTTP ${response.status} ${response.statusText}\n\n${body || "(empty body)"}`
+        } catch (error) {
+          result.textContent = `Network error: ${error}`
+        }
+      }
+    </script>
+  </body>
+</html>

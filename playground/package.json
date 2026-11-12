@@ -1,0 +1,10 @@
+{
+  "name": "@flock/playground",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --experimental-strip-types --no-warnings=ExperimentalWarning serve.ts",
+    "typecheck": "tsc -p ."
+  },
+  "devDependencies": { "@types/node": "26.6.6", "typescript": "6.0.3" }
+}

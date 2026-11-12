@@ -1,0 +1,6 @@
+body { font-family: system-ui, sans-serif; max-width: 720px; margin: 0 auto; padding: 16px; line-height: 1.5; }
+nav a { margin-right: 12px; }
+textarea { width: 100%; box-sizing: border-box; font-family: ui-monospace, monospace; font-size: 13px; }
+pre { background: #f4f4f4; padding: 8px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+.muted { color: #666; font-size: 13px; }
+button { font-size: 16px; padding: 6px 14px; }

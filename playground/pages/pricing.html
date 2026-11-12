@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Playground: Pricing</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <nav><a href="/">Home</a><a href="/pricing">Pricing</a><a href="/ingest">Raw ingest</a></nav>
+    <h1>Pricing</h1>
+    <p>Opening this page sends a <code>$pageview</code> to the playground Project's <code>dev</code> Environment.</p>
+    <p class="muted" id="config"></p>
+    <pre id="result">Sending…</pre>
+    <script type="module">
+      import { pageview, showConfig } from "/flock.js"
+      showConfig(document.getElementById("config"))
+      const { status, body } = await pageview().catch((e) => ({ status: "network error", body: String(e) }))
+      document.getElementById("result").textContent = `${status} ${body}`
+    </script>
+  </body>
+</html>
