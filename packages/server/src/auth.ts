@@ -53,7 +53,11 @@ const makeAuth = (options: {
           before: async (member, context) => {
             // No endpoint context: a trusted server-side call (the admin CLI, seeding).
             if (!context) return
-            const verdict = await run(access.canSignUp(member.email))
+            // Email + password sign-up passes an Invite token as `invite` in its body.
+            const invite = (context.body as { invite?: unknown } | undefined)?.invite
+            const verdict = await run(
+              access.admitSignUp({ email: member.email, invite: typeof invite === "string" ? invite : undefined })
+            )
             if (!verdict.ok) throw new APIError("FORBIDDEN", { code: verdict.code, message: verdict.message })
           }
         }
