@@ -27,6 +27,8 @@ import {
   type IngestEvent,
   type IngestResult,
   type MemberId,
+  type Overview,
+  type OverviewQuery,
   type Project
 } from "@flock/shared"
 import { Context, DateTime, Effect, Layer, Option, Redacted, type Scope } from "effect"
@@ -185,12 +187,12 @@ export class Harness extends Context.Service<Harness, {
   ) => Effect.Effect<number, unknown>
   /**
    * POSTs a batch to the ingest endpoint like a browser behind a proxy would:
-   * `ip` goes in X-Forwarded-For, `userAgent` in User-Agent.
+   * `ip` goes in X-Forwarded-For, `userAgent` in User-Agent (both omitted by default).
    */
   readonly ingest: (
     key: string,
     events: ReadonlyArray<IngestEvent>,
-    request: { readonly ip?: string; readonly userAgent?: string }
+    request?: { readonly ip?: string; readonly userAgent?: string }
   ) => Effect.Effect<IngestResult>
   /** Convenience: a breakdown report (Pageviews unless `event`) by one Event property. */
   readonly breakdown: (
@@ -204,6 +206,8 @@ export class Harness extends Context.Service<Harness, {
     environmentId: EnvironmentId,
     range: { readonly from: string; readonly to: string }
   ) => Effect.Effect<ReadonlyArray<string>>
+  /** Convenience: the overview report for an Environment, as `h.client`. */
+  readonly overview: (environmentId: EnvironmentId, range: OverviewQuery) => Effect.Effect<Overview, unknown>
 }>()("test/Harness") {
   static readonly layer = (options: HarnessOptions = {}) =>
     Layer.effect(
@@ -301,7 +305,7 @@ export class Harness extends Context.Service<Harness, {
           to: DateTime.makeUnsafe(range.to)
         })
 
-        const ingest: Harness["Service"]["ingest"] = (key, events, request) =>
+        const ingest: Harness["Service"]["ingest"] = (key, events, request = {}) =>
           Effect.promise(async () => {
             const headers = new Headers({ "content-type": "application/json" })
             if (request.ip !== undefined) headers.set("x-forwarded-for", request.ip)
@@ -310,6 +314,9 @@ export class Harness extends Context.Service<Harness, {
             if (!response.ok) throw new Error(`ingest answered ${response.status}: ${await response.text()}`)
             return (await response.json()) as IngestResult
           })
+
+        const overview: Harness["Service"]["overview"] = (environmentId, query) =>
+          client.reports.overview({ params: { environmentId }, query })
 
         const breakdown: Harness["Service"]["breakdown"] = (environmentId, property, range, event) =>
           client.reports.breakdown({ params: { environmentId }, query: { ...toRange(range), property, event } }).pipe(Effect.orDie)
@@ -328,7 +335,7 @@ export class Harness extends Context.Service<Harness, {
           admin: adminBrowser,
           client,
           adminCommand: (args) => adminCommand(args).pipe(Effect.provide(deps)),
-          browser, seedMember, createProject, pageviewCount })
+          browser, seedMember, createProject, pageviewCount, overview })
       })
     ).pipe(Layer.provide(TestDatabase.layer))
 }

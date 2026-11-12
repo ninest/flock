@@ -10,10 +10,12 @@ import { Ingest } from "./ingest.ts"
 import { Projects } from "./projects.ts"
 import { Reports } from "./reports.ts"
 import { Seed } from "./seed.ts"
+import { Sessions } from "./sessions.ts"
+import { Visitors } from "./visitors.ts"
 
 export const AppLive = (databaseUrl: Redacted.Redacted<string>) =>
   Layer.mergeAll(Ingest.layer, Reports.layer, Seed.layer, EventPartitions.maintenance).pipe(
-    Layer.provideMerge(Projects.layer),
+    Layer.provideMerge(Layer.mergeAll(Projects.layer, Visitors.layer, Sessions.layer)),
     Layer.provideMerge(Enrichment.layer),
     Layer.provideMerge(EventPartitions.layer),
     Layer.provideMerge(BetterAuth.layer(databaseUrl)),

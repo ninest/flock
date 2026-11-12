@@ -64,6 +64,7 @@ const ReportsHandlers = HttpApiBuilder.group(FlockApi, "reports", Effect.fn(func
   return handlers
     .handle("pageviewCount", ({ params, query }) =>
       CurrentMember.use(({ id }) => reports.pageviewCount(id, params.environmentId, query)).pipe(Effect.map((pageviews) => ({ pageviews }))))
+    .handle("overview", ({ params, query }) => CurrentMember.use(({ id }) => reports.overview(id, params.environmentId, query)))
     .handle("breakdown", ({ params, query }) =>
       CurrentMember.use(({ id }) =>
         reports.breakdown(id, params.environmentId, query, { property: query.property, event: query.event ?? "$pageview" })))

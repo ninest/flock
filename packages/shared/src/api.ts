@@ -15,6 +15,7 @@ import {
   TimeZone
 } from "./domain.ts"
 import { IngestBatch, IngestResult, UnknownKey } from "./ingest.ts"
+import { Overview, OverviewQuery } from "./reports.ts"
 import { CreatedInvite, Forbidden, Invite, InviteId, InviteNotFound, InstanceSettings, Member, MemberAuth, MemberId, MemberNotFound, SignInOptions } from "./members.ts"
 
 export class IngestGroup extends HttpApiGroup.make("ingest")
@@ -106,6 +107,13 @@ export class ReportsGroup extends HttpApiGroup.make("reports")
       params: { environmentId: EnvironmentId },
       query: DateRange,
       success: Schema.Struct({ pageviews: Schema.Number }),
+      error: EnvironmentNotFound
+    }),
+    /** Visitors, Pageviews, Sessions, bounce rate and visit duration: totals and a time series. */
+    HttpApiEndpoint.get("overview", "/:environmentId/overview", {
+      params: { environmentId: EnvironmentId },
+      query: OverviewQuery,
+      success: Overview,
       error: EnvironmentNotFound
     }),
     /**

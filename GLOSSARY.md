@@ -58,6 +58,9 @@ _Avoid_: User, client
 A run of Events from one Visitor that ends after 30 minutes without activity.
 _Avoid_: Visit
 
+**Bounce**:
+A Session with a single Event. The bounce rate is the share of Sessions that are bounces, and the visit duration is the average time from a Session's first Event to its last.
+
 **Tracking mode**:
 A per-Project choice of how Visitors are recognised: cookieless (an anonymous ID that resets daily) or persistent (an ID that is stored on the device and can be identified).
 

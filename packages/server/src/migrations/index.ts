@@ -11,12 +11,14 @@ import init from "./0001_init.ts"
 import members from "./0002_members.ts"
 import invites from "./0003_invites.ts"
 import projectMembers from "./0004_project_members.ts"
+import visitorsSessions from "./0005_visitors_sessions.ts"
 
 export const migrations = PgMigrator.fromRecord({
   "0001_init": init,
   "0002_members": members,
   "0003_invites": invites,
-  "0004_project_members": projectMembers
+  "0004_project_members": projectMembers,
+  "0005_visitors_sessions": visitorsSessions
 })
 
 export const MigratorLive = PgMigrator.layer({ loader: migrations, table: "flock_migrations" }).pipe(
