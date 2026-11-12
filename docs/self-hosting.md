@@ -21,8 +21,11 @@ Every release `vX.Y.Z` is published as `X.Y.Z`, `X.Y`, `X` and `latest`.
 mkdir flock && cd flock
 curl -fsSLO https://raw.githubusercontent.com/ninest/flock/main/deploy/docker-compose.yml
 echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)" > .env
+echo "FLOCK_ADMIN_EMAIL=you@example.com" >> .env
 docker compose up -d
 ```
+
+Then open the dashboard and sign up with `FLOCK_ADMIN_EMAIL` to create the Instance admin.
 
 Flock listens on port 2100 (`FLOCK_PORT=8080` in `.env` changes the host port). Put a reverse proxy with TLS (Caddy, Traefik, nginx, or `tailscale serve`) in front of it for anything public.
 
@@ -32,7 +35,7 @@ Deploy from the Flock template (image source `ghcr.io/ninest/flock:1` plus a Pos
 
 1. Create a Postgres service.
 2. Create a service from the Docker image `ghcr.io/ninest/flock:1`.
-3. Set its variable `DATABASE_URL=${{Postgres.DATABASE_URL}}`. Railway sets `PORT`, and Flock listens on it.
+3. Set its variables `DATABASE_URL=${{Postgres.DATABASE_URL}}`, `FLOCK_ADMIN_EMAIL` (your email) and `FLOCK_PUBLIC_URL` (the generated domain, `https://…`). Railway sets `PORT`, and Flock listens on it.
 4. Settings → Deploy → Healthcheck path: `/api/health`.
 5. Settings → Source → enable automatic image updates, so Railway redeploys when a new `1.x.y` is published.
 6. Settings → Networking → generate a domain.
@@ -43,10 +46,23 @@ Deploy from the Flock template (image source `ghcr.io/ninest/flock:1` plus a Pos
 |---|---|---|---|
 | `DATABASE_URL` | yes | | Postgres connection string, e.g. `postgres://flock:secret@db:5432/flock`. The database must exist; Flock creates its tables on boot. |
 | `PORT` | no | `2100` | Port the server listens on. |
+| `FLOCK_ADMIN_EMAIL` | no | | Signing up or signing in with this email makes that Member the Instance admin. This is how the first account is created: set it, open the dashboard and sign up with it. Sign-up is otherwise closed. |
+| `FLOCK_PUBLIC_URL` | no | the origin of each request | The URL Members open Flock on, e.g. `https://flock.example.com`. Set it when Flock is public. |
+| `FLOCK_TRUSTED_ORIGINS` | no | | Comma-separated extra origins allowed to sign in, e.g. a second domain. |
+| `BETTER_AUTH_SECRET` | no | generated on first boot and kept in Postgres | Signs Member sessions; at least 32 random characters. Changing it signs every Member out. |
 | `FLOCK_PUBLIC_DIR` | no | the built dashboard inside the image | Directory served as the dashboard. Only for development. |
 | `FLOCK_SEED_PLAYGROUND` | no | `false` | Creates a "Playground" Project with the fixed keys `pk_production_playground` and `pk_dev_playground`. Only for development and CI; never turn it on for a real Instance. |
 
 Contributors: every new environment variable gets a row here.
+
+## Recovering admin access
+
+If no one can sign in as an Instance admin, run the `admin` command inside the container. It promotes an existing Member, or creates one when given `--password`:
+
+```sh
+docker compose exec flock node packages/server/src/cli.ts admin --email you@example.com
+docker compose exec flock node packages/server/src/cli.ts admin --email you@example.com --password 'a new password'
+```
 
 ## Health
 

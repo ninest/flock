@@ -1,10 +1,11 @@
-// Seeding Projects directly (the Projects API arrives later). Used by `make dev`
+// Seeding Projects and Members directly (their APIs arrive later). Used by `make dev`
 // for the playground Project, and by the Seam 1 harness to set up fixtures.
 import { PgClient } from "@effect/sql-pg"
-import { type Project, ProjectId } from "@flock/shared"
+import { type MemberId, type Project, ProjectId } from "@flock/shared"
 import { Array as Arr, Context, Effect, Layer } from "effect"
 import type { SqlError } from "effect/sql/SqlError"
 import { makeEnvironmentKey, makeId } from "./keys.ts"
+import { BetterAuth } from "./auth.ts"
 import { Projects } from "./projects.ts"
 
 export interface SeedProject {
@@ -16,12 +17,15 @@ export interface SeedProject {
 
 export class Seed extends Context.Service<Seed, {
   readonly project: (seed: SeedProject) => Effect.Effect<Project, SqlError>
+  /** A Member who signs in with email + password (not an Instance admin). */
+  readonly member: (seed: { readonly email: string; readonly password: string; readonly name?: string }) => Effect.Effect<MemberId>
 }>()("flock/Seed") {
   static readonly layer = Layer.effect(
     Seed,
     Effect.gen(function*() {
       const sql = yield* PgClient.PgClient
       const projects = yield* Projects
+      const auth = yield* BetterAuth
 
       const project = (seed: SeedProject) =>
         sql.withTransaction(Effect.gen(function*() {
@@ -43,7 +47,10 @@ export class Seed extends Context.Service<Seed, {
           return (yield* projects.get(id))!
         }))
 
-      return Seed.of({ project })
+      return Seed.of({
+        project,
+        member: ({ email, name, password }) => auth.createMember({ email, password, name: name ?? email.split("@")[0]! })
+      })
     })
   )
 

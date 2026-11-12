@@ -6,17 +6,21 @@
     "typecheck": "tsc -p .",
     "test": "vitest run",
     "dev": "node --experimental-strip-types --no-warnings=ExperimentalWarning --watch src/main.ts",
-    "start": "node --experimental-strip-types --no-warnings=ExperimentalWarning src/main.ts"
+    "start": "node --experimental-strip-types --no-warnings=ExperimentalWarning src/main.ts",
+    "cli": "node --experimental-strip-types --no-warnings=ExperimentalWarning src/cli.ts"
   },
   "dependencies": {
     "@effect/platform-node": "4.1.4",
     "@effect/sql-pg": "4.1.4",
     "@flock/shared": "workspace:*",
-    "effect": "4.1.4"
+    "better-auth": "1.7.22",
+    "effect": "4.1.4",
+    "pg": "8.23.1"
   },
   "devDependencies": {
     "@effect/vitest": "4.1.4",
     "@types/node": "26.6.6",
+    "@types/pg": "8.23.1",
     "typescript": "6.0.3",
     "vitest": "5.1.0"
   }

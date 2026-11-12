@@ -8,9 +8,11 @@ import { NodeServices } from "@effect/platform-node"
 import { PgMigrator } from "@effect/sql-pg"
 import { Layer } from "effect"
 import init from "./0001_init.ts"
+import members from "./0002_members.ts"
 
 export const migrations = PgMigrator.fromRecord({
-  "0001_init": init
+  "0001_init": init,
+  "0002_members": members
 })
 
 export const MigratorLive = PgMigrator.layer({ loader: migrations, table: "flock_migrations" }).pipe(

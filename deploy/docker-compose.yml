@@ -1,6 +1,7 @@
 # Self-hosted Flock: the published image plus Postgres.
 #   curl -fsSLO https://raw.githubusercontent.com/ninest/flock/main/deploy/docker-compose.yml
 #   POSTGRES_PASSWORD=$(openssl rand -hex 24) docker compose up -d
+#   (add FLOCK_ADMIN_EMAIL=you@example.com to .env, then sign up with it)
 # Then open http://<host>:2100. Upgrade with `docker compose pull && docker compose up -d`.
 # See docs/self-hosting.md for every environment variable, upgrades and backups.
 name: flock
@@ -16,6 +17,9 @@ services:
     environment:
       DATABASE_URL: postgres://flock:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/flock
       PORT: "2100"
+      # Sign up with this email to create the Instance admin (see docs/self-hosting.md).
+      FLOCK_ADMIN_EMAIL: ${FLOCK_ADMIN_EMAIL:-}
+      FLOCK_PUBLIC_URL: ${FLOCK_PUBLIC_URL:-}
     ports:
       - "${FLOCK_PORT:-2100}:2100"
     labels:

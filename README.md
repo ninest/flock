@@ -25,6 +25,8 @@ make dev
 
 `make dev` starts the shared Postgres (docker compose, container `flock-postgres` on host port 2432) if it isn't already running, then starts the server (2100), the dashboard (2101, proxies `/api` to the server) and the playground (2102). It prints `http://hel:<port>` links. A port that's already taken is replaced by the next free one. For a second copy from another worktree, override the ports and the dev database: `SERVER_PORT=2200 DASHBOARD_PORT=2201 PLAYGROUND_PORT=2202 DEV_DB=flock_other make dev`.
 
+The dashboard needs a signed-in Member. In development, sign up at `http://hel:2101/sign-in` as `admin@flock.test` (the dev `FLOCK_ADMIN_EMAIL`) to create the Instance admin; sign-up with any other email is refused.
+
 In development the server seeds a "Playground" Project with fixed keys, `pk_production_playground` and `pk_dev_playground`.
 
 ### Playground
@@ -46,7 +48,7 @@ pnpm -r typecheck
 
 Tests only go through two seams and never look at tables or internals:
 
-1. **The server's HTTP API** (`packages/server/test`). `Harness.layer()` in `test/harness.ts` runs the whole server in-process against a throwaway Postgres database (`flock_test_<random>`, created per `layer(...)` block and dropped afterwards). It provides a typed client (`h.client`), raw `h.fetch`, `h.seedProject(...)` for fixtures, `TestClock` (from `@effect/vitest`) for time, and `Harness.layer({ geoIp: { "203.0.113.7": "DE" } })` for a fixed GeoIP table. `TEST_DATABASE_ADMIN_URL` overrides the admin connection (default `postgres://postgres:postgres@127.0.0.1:2432/postgres`).
+1. **The server's HTTP API** (`packages/server/test`). `Harness.layer()` in `test/harness.ts` runs the whole server in-process against a throwaway Postgres database (`flock_test_<random>`, created per `layer(...)` block and dropped afterwards). It provides a typed client signed in as an Instance admin (`h.client`), raw `h.fetch` without cookies, `h.browser()` (a fresh cookie jar with `signUp`/`signIn` and its own typed client), `h.seedMember(...)`, `h.adminCommand([...])` (the admin CLI command, in-process), `Harness.layer({ adminEmail })` for `FLOCK_ADMIN_EMAIL`, `h.seedProject(...)` for fixtures, `TestClock` (from `@effect/vitest`) for time, and `Harness.layer({ geoIp: { "203.0.113.7": "DE" } })` for a fixed GeoIP table. `TEST_DATABASE_ADMIN_URL` overrides the admin connection (default `postgres://postgres:postgres@127.0.0.1:2432/postgres`).
 2. **The browser script's outgoing requests** (`packages/script/test`). `openPlayground(browser())` in `test/harness.ts` opens the playground pages in headless Chromium (Playwright), serving them and the freshly built script with request routing (no real servers), and captures every request to `/api/ingest`. Tests assert on those requests and the page only. One-time setup: `pnpm --filter @flock/script exec playwright install chromium --only-shell`. `test/size.test.ts` fails if the gzipped script exceeds 2 KB; `pnpm --filter @flock/script build` checks it too.
 
 The browser script:
@@ -63,6 +65,7 @@ It sends a `$pageview` on load and on `pushState`/`popstate`, gives each Event a
 ```sh
 curl -fsSLO https://raw.githubusercontent.com/ninest/flock/main/deploy/docker-compose.yml
 echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)" > .env
+echo "FLOCK_ADMIN_EMAIL=you@example.com" >> .env   # sign up with it to create the Instance admin
 docker compose up -d
 ```
 
@@ -72,8 +75,20 @@ The image is `ghcr.io/ninest/flock` (tags `X.Y.Z`, `X.Y`, `X`, `latest`); run it
 
 ```sh
 docker build -t flock .
-docker run -p 2100:2100 -e DATABASE_URL=postgres://user:pass@host:5432/flock flock
+docker run -p 2100:2100 -e DATABASE_URL=postgres://user:pass@host:5432/flock -e FLOCK_ADMIN_EMAIL=you@example.com flock
 scripts/smoke.sh http://localhost:2100   # health, dashboard, OpenAPI
+```
+
+Sign-in settings (`FLOCK_ADMIN_EMAIL`, `FLOCK_PUBLIC_URL`, `BETTER_AUTH_SECRET`, …) are in [docs/self-hosting.md](docs/self-hosting.md#environment-variables).
+
+## Recovering admin access
+
+The `admin` CLI command creates an Instance admin, or promotes an existing Member. It uses the same environment variables as the server:
+
+```sh
+pnpm --filter @flock/server cli admin --email you@example.com --password 'new password'   # creates
+pnpm --filter @flock/server cli admin --email member@example.com                         # promotes
+docker compose exec flock node packages/server/src/cli.ts admin --email you@example.com # in Docker
 ```
 
 CI (`.github/workflows/image.yml`) builds the image on every push and pull request and boots it against Postgres, through `deploy/docker-compose.yml`, and next to the previous release.

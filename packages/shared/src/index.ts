@@ -2,4 +2,5 @@
 // The server implements FlockApi; the dashboard derives its typed client from it.
 export * from "./domain.ts"
 export * from "./ingest.ts"
+export * from "./members.ts"
 export * from "./api.ts"

@@ -34,6 +34,14 @@ pnpm --filter @flock/script build
 
 trap 'trap - EXIT; kill 0' INT TERM EXIT
 
+# Sign in at the dashboard; signing up with FLOCK_ADMIN_EMAIL creates the Instance admin.
+FLOCK_ADMIN_EMAIL=${FLOCK_ADMIN_EMAIL:-admin@flock.test}
+export FLOCK_ADMIN_EMAIL
+export BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:-flock-dev-secret-not-for-production-0000}
+# Members open the dashboard via Vite, which proxies /api (and its Origin header) to the server.
+export FLOCK_PUBLIC_URL=${FLOCK_PUBLIC_URL:-http://$HOST:$DASHBOARD_PORT}
+export FLOCK_TRUSTED_ORIGINS=${FLOCK_TRUSTED_ORIGINS:-http://localhost:$DASHBOARD_PORT,http://$HOST:$SERVER_PORT,http://localhost:$SERVER_PORT}
+
 pnpm --filter @flock/script dev 2>&1 | sed -u 's/^/[script]     /' &
 
 DATABASE_URL="postgres://postgres:postgres@127.0.0.1:2432/$DEV_DB" PORT=$SERVER_PORT FLOCK_SEED_PLAYGROUND=true \
@@ -46,7 +54,7 @@ FLOCK_SERVER_PORT=$SERVER_PORT PORT=$PLAYGROUND_PORT \
 sleep 3
 cat <<LINKS
 
-  Dashboard   http://$HOST:$DASHBOARD_PORT/
+  Dashboard   http://$HOST:$DASHBOARD_PORT/   (sign up as $FLOCK_ADMIN_EMAIL to create the Instance admin)
   Playground  http://$HOST:$PLAYGROUND_PORT/   (raw ingest: http://$HOST:$PLAYGROUND_PORT/ingest)
   Server      http://$HOST:$SERVER_PORT/api/docs
 
