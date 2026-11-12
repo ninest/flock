@@ -82,3 +82,12 @@ export class InviteNotFound extends Schema.TaggedError<InviteNotFound>()(
   { id: InviteId },
   { httpApiStatus: 404 }
 ) {}
+
+/** How Members can sign in on this Instance, for the sign-in page. */
+export const SignInOptions = Schema.Struct({
+  /** The email + password form. */
+  password: Schema.Boolean,
+  /** The OIDC issuer, by the name to show ("Sign in with …"), when one is configured. */
+  oidc: Schema.NullOr(Schema.Struct({ name: Schema.String }))
+})
+export type SignInOptions = typeof SignInOptions.Type

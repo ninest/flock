@@ -17,9 +17,34 @@ export interface AuthSettings {
   readonly trustedOrigins: ReadonlyArray<string>
   /** Signs session cookies; at least 32 random characters. Generated and kept in Postgres when unset. */
   readonly secret: Option.Option<Redacted.Redacted<string>>
-  /** Signing up or signing in with this email makes the Member an Instance admin. */
+  /**
+   * Signing up or signing in with this email makes the Member an Instance admin. Through
+   * OIDC, only when the issuer says the email is verified (or `oidc.trustEmails` is on).
+   */
   readonly adminEmail: Option.Option<string>
+  /** Whether Members may sign up and sign in with email + password. */
+  readonly passwordSignIn: boolean
+  /** The OIDC issuer Members may sign in with. */
+  readonly oidc: Option.Option<OidcSettings>
 }
+
+export interface OidcSettings {
+  /** The issuer URL; its discovery document is at `/.well-known/openid-configuration`. */
+  readonly issuer: string
+  readonly clientId: string
+  readonly clientSecret: Redacted.Redacted<string>
+  /** Shown on the sign-in page ("Sign in with …"). */
+  readonly name: string
+  /** Treat every email the issuer returns as verified, for the FLOCK_ADMIN_EMAIL bootstrap. */
+  readonly trustEmails: boolean
+}
+
+/**
+ * How a Member proves who they are. A password sign-up is trusted with its email (Flock
+ * can't verify emails, and FLOCK_ADMIN_EMAIL with a password is how a fresh Instance gets
+ * its admin); an OIDC sign-in is trusted only when its email is verified.
+ */
+export type SignInMethod = "password" | "oidc"
 
 export class AuthConfig extends Context.Service<AuthConfig, AuthSettings>()("flock/AuthConfig") {}
 
@@ -63,9 +88,18 @@ export class Access extends Context.Service<Access, {
    * for anyone while Open sign-up is on, and otherwise only with an unused Invite
    * token, which this uses up.
    */
-  readonly admitSignUp: (input: { readonly email: string; readonly invite: string | undefined }) => Effect.Effect<SignUpVerdict, SqlError>
-  /** Called whenever a Member signs in (including right after sign-up). */
-  readonly signedIn: (memberId: MemberId) => Effect.Effect<void, SqlError>
+  readonly admitSignUp: (input: {
+    readonly email: string
+    readonly method: SignInMethod
+    /** Whether the issuer says the email is verified (OIDC only). */
+    readonly emailVerified: boolean
+    readonly invite: string | undefined
+  }) => Effect.Effect<SignUpVerdict, SqlError>
+  /**
+   * Called whenever a Member signs in (including right after sign-up). Promotes the
+   * FLOCK_ADMIN_EMAIL Member when the sign-in proves the email.
+   */
+  readonly signedIn: (memberId: MemberId, method: SignInMethod) => Effect.Effect<void, SqlError>
   readonly member: (memberId: MemberId) => Effect.Effect<Option.Option<Member>, SqlError>
   readonly memberByEmail: (email: string) => Effect.Effect<Option.Option<Member>, SqlError>
   readonly grantAdmin: (memberId: MemberId) => Effect.Effect<void, SqlError>
@@ -85,8 +119,11 @@ export class Access extends Context.Service<Access, {
     Access,
     Effect.gen(function*() {
       const sql = yield* PgClient.PgClient
-      const { adminEmail } = yield* AuthConfig
+      const { adminEmail, oidc } = yield* AuthConfig
       const isAdminEmail = (email: string) => Option.exists(adminEmail, (admin) => sameEmail(admin, email))
+      /** Whether this sign-in proves the email well enough for the admin bootstrap. */
+      const emailProven = (method: SignInMethod, emailVerified: boolean) =>
+        method === "password" || emailVerified || Option.exists(oidc, (o) => o.trustEmails)
 
       const selectMembers = (where: ReturnType<typeof sql.and>) =>
         sql<{ id: string; email: string; name: string; isAdmin: boolean }>`
@@ -118,17 +155,21 @@ export class Access extends Context.Service<Access, {
         sql`INSERT INTO instance_admin (member_id) VALUES (${memberId}) ON CONFLICT DO NOTHING`.pipe(Effect.asVoid)
 
       return Access.of({
-        admitSignUp: ({ email, invite }) =>
+        admitSignUp: ({ email, emailVerified, invite, method }) =>
           Effect.gen(function*() {
-            if (isAdminEmail(email)) return { ok: true } as const
+            if (isAdminEmail(email) && emailProven(method, emailVerified)) return { ok: true } as const
             if ((yield* settings).openSignUp) return { ok: true } as const
             if (invite === undefined || invite === "") return signUpClosed
             return (yield* useInvite(invite, email)) ? { ok: true } as const : inviteInvalid
           }),
-        signedIn: (memberId) =>
+        signedIn: (memberId, method) =>
           Effect.gen(function*() {
-            const found = yield* member(memberId)
-            if (Option.isSome(found) && !found.value.isAdmin && isAdminEmail(found.value.email)) {
+            // Better Auth keeps "emailVerified" up to date from the issuer's email_verified claim.
+            const [found] = yield* sql<{ email: string; emailVerified: boolean; isAdmin: boolean }>`
+              SELECT m.email, m."emailVerified" AS email_verified, a.member_id IS NOT NULL AS is_admin
+              FROM member m LEFT JOIN instance_admin a ON a.member_id = m.id
+              WHERE m.id = ${memberId}`
+            if (found && !found.isAdmin && isAdminEmail(found.email) && emailProven(method, found.emailVerified)) {
               yield* grantAdmin(memberId)
             }
           }),

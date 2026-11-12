@@ -14,6 +14,7 @@ Run `make dev`, then:
 | Server, API docs | http://hel:2100, http://hel:2100/api/docs |
 | Playground Project keys | `pk_dev_playground` (used by the playground), `pk_production_playground` |
 | Instance admin page (Invites, Open sign-up, Members) | http://hel:2101/instance |
+| OIDC sign-in ("Sign in with …" on `/sign-in`) | Off by default. Export `FLOCK_OIDC_ISSUER`, `FLOCK_OIDC_CLIENT_ID`, `FLOCK_OIDC_CLIENT_SECRET` (and optionally `FLOCK_OIDC_NAME`, `FLOCK_PASSWORD_SIGN_IN=false`) before `make dev`, with `FLOCK_PUBLIC_URL` set to the origin registered at the issuer (`http://localhost:2101` or a `tailscale serve` https URL). See [docs/self-hosting.md](docs/self-hosting.md#oidc-sign-in) |
 
 Playground pages: `/` (Pageview, **Log in** and **Complete game** buttons), `/spa` (SPA navigation), `/ingest` (raw ingest form). Open the Playground Project in the dashboard and switch to the `dev` Environment to see the Events arrive.
 

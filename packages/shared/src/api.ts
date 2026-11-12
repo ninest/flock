@@ -16,7 +16,7 @@ import {
   TimeZone
 } from "./domain.ts"
 import { IngestBatch, IngestResult, OriginNotAllowed, UnknownKey } from "./ingest.ts"
-import { CreatedInvite, Forbidden, Invite, InviteId, InviteNotFound, InstanceSettings, Member, MemberAuth, MemberId, MemberNotFound } from "./members.ts"
+import { CreatedInvite, Forbidden, Invite, InviteId, InviteNotFound, InstanceSettings, Member, MemberAuth, MemberId, MemberNotFound, SignInOptions } from "./members.ts"
 
 export class IngestGroup extends HttpApiGroup.make("ingest")
   .add(
@@ -139,6 +139,11 @@ export class ReportsGroup extends HttpApiGroup.make("reports")
   .prefix("/api/environments")
   .annotateMerge(OpenApi.annotations({ title: "Reports" })) {}
 
+/** Public: what the sign-in page offers. */
+export class SignInGroup extends HttpApiGroup.make("signIn")
+  .add(HttpApiEndpoint.get("options", "/api/sign-in-options", { success: SignInOptions }))
+  .annotateMerge(OpenApi.annotations({ title: "Sign-in" })) {}
+
 export class MembersGroup extends HttpApiGroup.make("members")
   .add(HttpApiEndpoint.get("me", "/api/me", { success: Member }))
   .middleware(MemberAuth)
@@ -179,6 +184,7 @@ export class FlockApi extends HttpApi.make("flock")
   .add(ProjectsGroup)
   .add(EnvironmentsGroup)
   .add(ReportsGroup)
+  .add(SignInGroup)
   .add(MembersGroup)
   .add(InstanceGroup)
   .middleware(HttpApiMiddleware.ProblemDetails) // malformed requests get an RFC 9457 400 explaining why

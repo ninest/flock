@@ -20,6 +20,13 @@ services:
       # Sign up with this email to create the Instance admin (see docs/self-hosting.md).
       FLOCK_ADMIN_EMAIL: ${FLOCK_ADMIN_EMAIL:-}
       FLOCK_PUBLIC_URL: ${FLOCK_PUBLIC_URL:-}
+      # Optional OIDC sign-in (see docs/self-hosting.md#oidc-sign-in).
+      FLOCK_OIDC_ISSUER: ${FLOCK_OIDC_ISSUER:-}
+      FLOCK_OIDC_CLIENT_ID: ${FLOCK_OIDC_CLIENT_ID:-}
+      FLOCK_OIDC_CLIENT_SECRET: ${FLOCK_OIDC_CLIENT_SECRET:-}
+      FLOCK_OIDC_NAME: ${FLOCK_OIDC_NAME:-}
+      FLOCK_OIDC_TRUST_EMAILS: ${FLOCK_OIDC_TRUST_EMAILS:-false}
+      FLOCK_PASSWORD_SIGN_IN: ${FLOCK_PASSWORD_SIGN_IN:-true}
     ports:
       - "${FLOCK_PORT:-2100}:2100"
     labels:

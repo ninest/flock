@@ -16,7 +16,7 @@ const Deps = Layer.unwrap(Effect.gen(function*() {
   const config = yield* ServerConfig
   return BetterAuth.layer(config.databaseUrl).pipe(
     Layer.provideMerge(Access.layer),
-    Layer.provide(Layer.succeed(AuthConfig, authSettings(config))),
+    Layer.provide(Layer.effect(AuthConfig, authSettings(config))),
     Layer.provide(MigratorLive),
     Layer.provide(PgLive(config.databaseUrl))
   )

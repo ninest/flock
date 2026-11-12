@@ -14,6 +14,8 @@
 //
 // `h.client` is signed in as an Instance admin; `h.fetch` and `h.sdk` send no cookies (and no Origin). `h.browser()`
 // gives a fresh cookie jar for sign-up/sign-in flows. FLOCK_ADMIN_EMAIL is `options.adminEmail`.
+// With `options.oidc`, a stub OIDC issuer (`h.oidc`) is configured and `browser.oidcSignIn()`
+// runs the whole code flow against it.
 //
 // One database per `layer(...)` block (usually one per test file), dropped when
 // the block finishes. Tests observe behavior only through HTTP: never query tables.
@@ -41,6 +43,7 @@ import { GeoIp } from "../src/geoip.ts"
 import { AppRoutes } from "../src/http.ts"
 import { MigratorLive } from "../src/migrations/index.ts"
 import { Seed } from "../src/seed.ts"
+import { type OidcStub, startOidcStub } from "./oidc-stub.ts"
 import { TestDatabase } from "./test-database.ts"
 
 export const BASE_URL = "http://flock.test"
@@ -55,7 +58,14 @@ export interface HarnessOptions {
   readonly adminEmail?: string
   /** Leave FLOCK_PUBLIC_URL and BETTER_AUTH_SECRET unset, like a fresh self-hosted Instance. */
   readonly zeroConfig?: boolean
+  /** Configure the stub OIDC issuer; `trustEmails` is FLOCK_OIDC_TRUST_EMAILS. */
+  readonly oidc?: { readonly trustEmails?: boolean }
+  /** FLOCK_PASSWORD_SIGN_IN (default true). */
+  readonly passwordSignIn?: boolean
 }
+
+/** The name the sign-in page shows for the stub issuer (FLOCK_OIDC_NAME). */
+export const OIDC_NAME = "Example ID"
 
 /** A browser with its own cookie jar, talking to the server. */
 export interface Browser {
@@ -67,6 +77,12 @@ export interface Browser {
   readonly auth: (path: string, body?: object) => Effect.Effect<Response>
   readonly signUp: (input: { readonly email: string; readonly password: string; readonly name?: string }) => Effect.Effect<Response>
   readonly signIn: (input: { readonly email: string; readonly password: string }) => Effect.Effect<Response>
+  /**
+   * Signs in with the OIDC issuer (as whoever `h.oidc.setNextUser` set), following every
+   * redirect between Flock and the issuer. Returns the response that leaves the auth flow:
+   * a redirect to `/` on success, or to `/sign-in?error=…` on failure.
+   */
+  readonly oidcSignIn: (input?: { readonly invite?: string }) => Effect.Effect<Response>
 }
 
 const makeBrowser = (handler: (request: Request) => Promise<Response>) =>
@@ -93,10 +109,37 @@ const makeBrowser = (handler: (request: Request) => Promise<Response>) =>
       Effect.promise(() =>
         fetch(`/api/auth${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
       )
+    const oidcSignIn: Browser["oidcSignIn"] = ({ invite } = {}) =>
+      Effect.promise(async () => {
+        const start = await fetch("/api/auth/sign-in/social", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            provider: "misc",
+            callbackURL: "/",
+            errorCallbackURL: "/sign-in",
+            ...(invite === undefined ? {} : { additionalData: { invite } })
+          })
+        })
+        if (!start.ok) return start
+        let url = new URL(((await start.json()) as { url: string }).url)
+        for (let hop = 0; hop < 10; hop++) {
+          const response = url.origin === BASE_URL
+            ? await fetch(url.toString(), { redirect: "manual" })
+            : await globalThis.fetch(url, { redirect: "manual" })
+          const location = response.headers.get("location")
+          if (response.status < 300 || response.status >= 400 || location === null) return response
+          const next = new URL(location, url)
+          if (next.origin === BASE_URL && !next.pathname.startsWith("/api/")) return response
+          url = next
+        }
+        throw new Error("Too many redirects")
+      })
     return {
       fetch,
       client,
       auth,
+      oidcSignIn,
       signUp: ({ email, name, password }) => auth("/sign-up/email", { email, password, name: name ?? email.split("@")[0] }),
       signIn: (input) => auth("/sign-in/email", input)
     } satisfies Browser
@@ -111,6 +154,8 @@ const makeClient = (fetch: typeof globalThis.fetch) =>
 export class Harness extends Context.Service<Harness, {
   /** The server as a fetch-style handler (no port). */
   readonly handler: (request: Request) => Promise<Response>
+  /** The stub OIDC issuer, when `options.oidc` is set. */
+  readonly oidc: OidcStub | undefined
   /** `fetch` against the server without cookies; relative URLs resolve against BASE_URL. */
   readonly fetch: typeof globalThis.fetch
   /**
@@ -170,11 +215,25 @@ export class Harness extends Context.Service<Harness, {
       Harness,
       Effect.gen(function*() {
         const databaseUrl = Redacted.make(yield* TestDatabase)
+        const clientId = "flock-test"
+        const clientSecret = "flock-test-secret"
+        const oidc = options.oidc === undefined ? undefined : yield* Effect.acquireRelease(
+          Effect.promise(() => startOidcStub({ clientId, clientSecret })),
+          (stub) => Effect.promise(() => stub.close())
+        )
         const settings: AuthConfig["Service"] = {
           publicUrl: options.zeroConfig ? Option.none() : Option.some(BASE_URL),
           trustedOrigins: [],
           secret: options.zeroConfig ? Option.none() : Option.some(Redacted.make("test-secret-test-secret-test-secret-0123")),
-          adminEmail: Option.some(options.adminEmail ?? "owner@flock.test")
+          adminEmail: Option.some(options.adminEmail ?? "owner@flock.test"),
+          passwordSignIn: options.passwordSignIn ?? true,
+          oidc: oidc === undefined ? Option.none() : Option.some({
+            issuer: oidc.issuer,
+            clientId,
+            clientSecret: Redacted.make(clientSecret),
+            name: OIDC_NAME,
+            trustEmails: options.oidc?.trustEmails ?? false
+          })
         }
         const Deps = AppLive(databaseUrl).pipe(
           Layer.provideMerge(Layer.succeed(AuthConfig, settings)),
@@ -205,12 +264,23 @@ export class Harness extends Context.Service<Harness, {
         const browser = () => makeBrowser(handler)
         const seedMember: Harness["Service"]["seedMember"] = (input) => seed.member(input)
 
-        // The default client: a seeded Member, made Instance admin, signed in.
+        // The default client: a Member made Instance admin, signed in. With password sign-in
+        // off, they join through the OIDC issuer during a moment of Open sign-up.
+        const access = Context.get(deps, Access)
         const admin = { email: "harness-admin@flock.test", password: "harness-password" }
-        const adminId = yield* seedMember(admin)
-        yield* Context.get(deps, Access).grantAdmin(adminId).pipe(Effect.orDie)
         const adminBrowser = yield* browser()
-        yield* adminBrowser.signIn(admin)
+        if (settings.passwordSignIn || oidc === undefined) {
+          const adminId = yield* seedMember(admin)
+          yield* access.grantAdmin(adminId).pipe(Effect.orDie)
+          yield* adminBrowser.signIn(admin)
+        } else {
+          oidc.setNextUser({ sub: "harness-admin", email: admin.email, email_verified: true })
+          yield* access.updateSettings({ openSignUp: true }).pipe(Effect.orDie)
+          yield* adminBrowser.oidcSignIn()
+          yield* access.updateSettings({ openSignUp: false }).pipe(Effect.orDie)
+          const adminMember = yield* access.memberByEmail(admin.email).pipe(Effect.orDie)
+          yield* access.grantAdmin(Option.getOrThrow(adminMember).id).pipe(Effect.orDie)
+        }
         const client = adminBrowser.client
 
         let projects = 0
@@ -259,6 +329,7 @@ export class Harness extends Context.Service<Harness, {
         return Harness.of({
           ingest, breakdown, propertyKeys,
           handler,
+          oidc,
           fetch,
           sdk,
           admin: adminBrowser,
