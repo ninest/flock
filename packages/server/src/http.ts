@@ -1,10 +1,10 @@
 // HTTP: the FlockApi handlers, the dashboard and the script as static files.
 import { PgClient } from "@effect/sql-pg"
 import { CurrentMember, FlockApi, Forbidden, InviteNotFound, MemberNotFound } from "@flock/shared"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Option } from "effect"
 import { HttpRouter, HttpServerResponse, HttpStaticServer } from "effect/http"
 import { HttpApiBuilder, HttpApiMiddleware, HttpApiScalar } from "effect/http-api"
-import { Access } from "./access.ts"
+import { Access, AuthConfig } from "./access.ts"
 import { AuthRoutes, currentMember, MemberAuthLive } from "./auth.ts"
 import { Ingest } from "./ingest.ts"
 import { Projects } from "./projects.ts"
@@ -28,6 +28,12 @@ const ProjectsHandlers = HttpApiBuilder.group(FlockApi, "projects", Effect.fn(fu
 const ReportsHandlers = HttpApiBuilder.group(FlockApi, "reports", Effect.fn(function*(handlers) {
   const reports = yield* Reports
   return handlers.handle("pageviewCount", ({ params, query }) => reports.pageviewCount(params.environmentId, query).pipe(Effect.map((pageviews) => ({ pageviews }))))
+}))
+
+const SignInHandlers = HttpApiBuilder.group(FlockApi, "signIn", Effect.fn(function*(handlers) {
+  const { oidc, passwordSignIn } = yield* AuthConfig
+  const options = { password: passwordSignIn, oidc: Option.match(oidc, { onNone: () => null, onSome: ({ name }) => ({ name }) }) }
+  return handlers.handle("options", () => Effect.succeed(options))
 }))
 
 const MembersHandlers = HttpApiBuilder.group(FlockApi, "members", (handlers) => handlers.handle("me", () => currentMember))
@@ -65,7 +71,7 @@ const InstanceHandlers = HttpApiBuilder.group(FlockApi, "instance", Effect.fn(fu
 }))
 
 const ApiRoutes = HttpApiBuilder.layer(FlockApi, { openapiPath: "/api/openapi.json" }).pipe(
-  Layer.provide([HealthHandlers, IngestHandlers, ProjectsHandlers, ReportsHandlers, MembersHandlers, InstanceHandlers]),
+  Layer.provide([HealthHandlers, IngestHandlers, ProjectsHandlers, ReportsHandlers, SignInHandlers, MembersHandlers, InstanceHandlers]),
   Layer.provide(MemberAuthLive),
   Layer.provide(HttpApiMiddleware.layerProblemDetails({ includeDetails: true }))
 )

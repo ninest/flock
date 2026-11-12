@@ -1,4 +1,4 @@
-import { Config, Option, Redacted } from "effect"
+import { Config, Effect, Option, Redacted, Schema } from "effect"
 import type { AuthSettings } from "./access.ts"
 import { fileURLToPath } from "node:url"
 
@@ -23,16 +23,61 @@ export const ServerConfig = Config.all({
   authSecret: Config.option(Config.Redacted("BETTER_AUTH_SECRET")),
   /** Signing up or signing in with this email makes the Member an Instance admin. */
   adminEmail: Config.option(Config.String("FLOCK_ADMIN_EMAIL")),
+  /** Members may sign up and sign in with email + password. Turn off to allow OIDC only. */
+  passwordSignIn: Config.Boolean("FLOCK_PASSWORD_SIGN_IN").pipe(Config.withDefault(true)),
+  /** The OIDC issuer URL, e.g. https://auth.misc.page. Members may sign in with it when set. */
+  oidcIssuer: Config.option(Config.String("FLOCK_OIDC_ISSUER")),
+  oidcClientId: Config.option(Config.String("FLOCK_OIDC_CLIENT_ID")),
+  oidcClientSecret: Config.option(Config.Redacted("FLOCK_OIDC_CLIENT_SECRET")),
+  /** The issuer's name on the sign-in page; defaults to its host. */
+  oidcName: Config.option(Config.String("FLOCK_OIDC_NAME")),
+  /** Treat the issuer's emails as verified for the FLOCK_ADMIN_EMAIL bootstrap. */
+  oidcTrustEmails: Config.Boolean("FLOCK_OIDC_TRUST_EMAILS").pipe(Config.withDefault(false)),
   /** Seed the playground Project with fixed keys (development only). */
   seedPlayground: Config.Boolean("FLOCK_SEED_PLAYGROUND").pipe(Config.withDefault(false))
 })
 
-export const authSettings = (config: Config.Success<typeof ServerConfig>): AuthSettings => ({
-  publicUrl: nonEmpty(config.publicUrl),
-  trustedOrigins: config.trustedOrigins,
-  secret: Option.filter(config.authSecret, (secret) => Redacted.value(secret).trim() !== ""),
-  adminEmail: nonEmpty(config.adminEmail)
-})
+export class AuthConfigError extends Schema.TaggedError<AuthConfigError>()("AuthConfigError", {
+  message: Schema.String
+}) {}
+
+/** The sign-in settings, or an error explaining which variables are missing. */
+export const authSettings = (config: Config.Success<typeof ServerConfig>): Effect.Effect<AuthSettings, AuthConfigError> =>
+  Effect.gen(function*() {
+    const publicUrl = nonEmpty(config.publicUrl)
+    const issuer = nonEmpty(config.oidcIssuer)
+    const fail = (message: string) => Effect.fail(new AuthConfigError({ message }))
+    let oidc: AuthSettings["oidc"] = Option.none()
+    if (Option.isSome(issuer)) {
+      const clientId = nonEmpty(config.oidcClientId)
+      const clientSecret = Option.filter(config.oidcClientSecret, (secret) => Redacted.value(secret).trim() !== "")
+      if (Option.isNone(clientId) || Option.isNone(clientSecret)) {
+        return yield* fail("FLOCK_OIDC_ISSUER needs FLOCK_OIDC_CLIENT_ID and FLOCK_OIDC_CLIENT_SECRET.")
+      }
+      if (Option.isNone(publicUrl)) {
+        return yield* fail("FLOCK_OIDC_ISSUER needs FLOCK_PUBLIC_URL, which Flock's OIDC callback URL is built from.")
+      }
+      const url = issuer.value.replace(/\/+$/, "")
+      oidc = Option.some({
+        issuer: url,
+        clientId: clientId.value,
+        clientSecret: clientSecret.value,
+        name: Option.getOrElse(nonEmpty(config.oidcName), () => new URL(url).host),
+        trustEmails: config.oidcTrustEmails
+      })
+    }
+    if (!config.passwordSignIn && Option.isNone(oidc)) {
+      return yield* fail("FLOCK_PASSWORD_SIGN_IN=false needs an OIDC issuer (FLOCK_OIDC_ISSUER), or nobody could sign in.")
+    }
+    return {
+      publicUrl,
+      trustedOrigins: config.trustedOrigins,
+      secret: Option.filter(config.authSecret, (secret) => Redacted.value(secret).trim() !== ""),
+      adminEmail: nonEmpty(config.adminEmail),
+      passwordSignIn: config.passwordSignIn,
+      oidc
+    }
+  })
 
 /** Docker Compose passes unset variables as empty strings. */
 const nonEmpty = (value: Option.Option<string>) => Option.filter(Option.map(value, (s) => s.trim()), (s) => s !== "")

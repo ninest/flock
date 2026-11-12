@@ -1,9 +1,9 @@
-import type { Environment, Project } from "@flock/shared"
+import type { Environment, Project, SignInOptions } from "@flock/shared"
 import { createRootRoute, createRoute, createRouter, Link, Outlet, redirect, useNavigate } from "@tanstack/react-router"
 import { DateTime } from "effect"
-import { type FormEvent, useState } from "react"
+import { type FormEvent, useEffect, useState } from "react"
 import { request } from "./api.ts"
-import { currentMember, signIn, signOut, signUp } from "./auth.ts"
+import { currentMember, oidcSignIn, signIn, signInOptions, signOut, signUp } from "./auth.ts"
 import { InstancePage } from "./instance.tsx"
 import { usePoll } from "./use-poll.ts"
 
@@ -59,11 +59,31 @@ const EnvironmentPageviews = ({ environment }: { environment: Environment }) => 
 
 const SignInPage = () => {
   const navigate = useNavigate()
-  // An Invite link opens /sign-in?invite=<token>.
-  const [invite] = useState(() => new URLSearchParams(window.location.search).get("invite") ?? undefined)
+  // An Invite link opens /sign-in?invite=<token>. A refused OIDC sign-in comes back
+  // with ?error=<code>&error_description=<message>.
+  const [query] = useState(() => new URLSearchParams(window.location.search))
+  const invite = query.get("invite") ?? undefined
   const [mode, setMode] = useState<"sign-in" | "sign-up">(invite ? "sign-up" : "sign-in")
-  const [error, setError] = useState<string>()
+  const [error, setError] = useState<string | undefined>(
+    () => query.get("error_description") ?? (query.get("error") ? `Sign-in failed (${query.get("error")})` : undefined)
+  )
   const [busy, setBusy] = useState(false)
+  const [options, setOptions] = useState<SignInOptions>()
+  useEffect(() => {
+    // If the options can't be loaded, fall back to the password form.
+    signInOptions().then(setOptions, () => setOptions({ password: true, oidc: null }))
+  }, [])
+
+  const startOidc = async () => {
+    setBusy(true)
+    setError(undefined)
+    try {
+      await oidcSignIn(invite)
+    } catch (e) {
+      setError((e as Error).message)
+      setBusy(false)
+    }
+  }
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -84,9 +104,26 @@ const SignInPage = () => {
   }
 
   const field = { display: "grid", gap: 4 } as const
+  const heading = mode === "sign-in" ? "Sign in" : invite ? "Accept your Invite" : "Sign up"
+  if (!options) return <h2>{heading}</h2>
+  const oidcButton = options.oidc && (
+    <button type="button" onClick={startOidc} disabled={busy}>Sign in with {options.oidc.name}</button>
+  )
+  const errorMessage = error && <p role="alert" style={{ color: "#b00020", margin: 0 }}>{error}</p>
+  if (!options.password) {
+    return (
+      <div style={{ display: "grid", gap: 12, maxWidth: 320 }}>
+        <h2>{invite ? "Accept your Invite" : "Sign in"}</h2>
+        {errorMessage}
+        {oidcButton}
+      </div>
+    )
+  }
   return (
     <form onSubmit={submit} style={{ display: "grid", gap: 12, maxWidth: 320 }}>
-      <h2>{mode === "sign-in" ? "Sign in" : invite ? "Accept your Invite" : "Sign up"}</h2>
+      <h2>{heading}</h2>
+      {oidcButton}
+      {oidcButton && <p style={{ margin: 0, color: "#666" }}>or with email and password:</p>}
       {mode === "sign-up" && (
         <label style={field}>Name<input name="name" required autoComplete="name" /></label>
       )}
@@ -101,7 +138,7 @@ const SignInPage = () => {
           autoComplete={mode === "sign-in" ? "current-password" : "new-password"}
         />
       </label>
-      {error && <p role="alert" style={{ color: "#b00020", margin: 0 }}>{error}</p>}
+      {errorMessage}
       <button type="submit" disabled={busy}>{mode === "sign-in" ? "Sign in" : "Sign up"}</button>
       <button type="button" onClick={() => setMode(mode === "sign-in" ? "sign-up" : "sign-in")} style={{ all: "unset", color: "#06c", cursor: "pointer" }}>
         {mode === "sign-in" ? "First time? Sign up" : "Have an account? Sign in"}
