@@ -1,6 +1,6 @@
 import { assert, layer } from "@effect/vitest"
 import { Effect } from "effect"
-import { Harness, pageview } from "./harness.ts"
+import { BASE_URL, type Browser, Harness, pageview } from "./harness.ts"
 
 const get = (h: Harness["Service"], path: string) => Effect.promise(() => h.fetch(path))
 
@@ -99,5 +99,29 @@ layer(Harness.layer({ adminEmail: "member@example.com" }))("Admin bootstrap on s
       const other = yield* h.browser()
       yield* other.signIn({ email: "other@example.com", password: "correct horse battery" })
       assert.isFalse((yield* other.client.members.me()).isAdmin)
+    }))
+})
+
+layer(Harness.layer({ adminEmail: "owner@example.com", zeroConfig: true }))("Sign-in without FLOCK_PUBLIC_URL or BETTER_AUTH_SECRET", (it) => {
+  const signUp = (browser: Browser, origin: string) =>
+    Effect.promise(() =>
+      browser.fetch("/api/auth/sign-up/email", {
+        method: "POST",
+        headers: { "content-type": "application/json", origin },
+        body: JSON.stringify({ email: "owner@example.com", password: "correct horse battery", name: "Owner" })
+      })
+    )
+
+  it.effect("accepts sign-up from the Instance's own origin and refuses other origins", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const attacker = yield* h.browser()
+      const refused = yield* signUp(attacker, "https://evil.example")
+      assert.strictEqual(refused.status, 403)
+
+      const browser = yield* h.browser()
+      const response = yield* signUp(browser, BASE_URL)
+      assert.strictEqual(response.status, 200)
+      assert.isTrue((yield* browser.client.members.me()).isAdmin)
     }))
 })

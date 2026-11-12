@@ -2,6 +2,17 @@
   "name": "@flock/script",
   "private": true,
   "type": "module",
-  "scripts": { "typecheck": "tsc -p ." },
-  "devDependencies": { "typescript": "6.0.3" }
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "build": "node --experimental-strip-types --no-warnings=ExperimentalWarning build.ts",
+    "dev": "node --experimental-strip-types --no-warnings=ExperimentalWarning build.ts --watch",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "esbuild": "0.28.2",
+    "playwright": "1.65.0",
+    "typescript": "6.0.3",
+    "vitest": "5.1.0"
+  }
 }

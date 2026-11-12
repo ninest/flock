@@ -24,4 +24,11 @@ export default Effect.gen(function*() {
       member_id text PRIMARY KEY REFERENCES member (id) ON DELETE CASCADE,
       granted_at timestamptz NOT NULL DEFAULT now()
     )`
+  // Secrets Flock generates for itself, e.g. the session-signing secret when
+  // BETTER_AUTH_SECRET is unset.
+  yield* sql`
+    CREATE TABLE instance_secret (
+      name text PRIMARY KEY,
+      value text NOT NULL
+    )`
 })

@@ -1,0 +1,48 @@
+# Self-hosted Flock: the published image plus Postgres.
+#   curl -fsSLO https://raw.githubusercontent.com/ninest/flock/main/deploy/docker-compose.yml
+#   POSTGRES_PASSWORD=$(openssl rand -hex 24) docker compose up -d
+#   (add FLOCK_ADMIN_EMAIL=you@example.com to .env, then sign up with it)
+# Then open http://<host>:2100. Upgrade with `docker compose pull && docker compose up -d`.
+# See docs/self-hosting.md for every environment variable, upgrades and backups.
+name: flock
+services:
+  flock:
+    # Pinned to a major tag: new minor and patch releases are safe to pull
+    # (breaking changes only ship in a new major).
+    image: ${FLOCK_IMAGE:-ghcr.io/ninest/flock:1}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://flock:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/flock
+      PORT: "2100"
+      # Sign up with this email to create the Instance admin (see docs/self-hosting.md).
+      FLOCK_ADMIN_EMAIL: ${FLOCK_ADMIN_EMAIL:-}
+      FLOCK_PUBLIC_URL: ${FLOCK_PUBLIC_URL:-}
+    ports:
+      - "${FLOCK_PORT:-2100}:2100"
+    labels:
+      # Opt in to automatic updates when Watchtower runs with --label-enable.
+      com.centurylinklabs.watchtower.enable: "true"
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: flock
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: flock
+    volumes:
+      - flock-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flock -d flock"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    labels:
+      # Never auto-update Postgres: a major Postgres upgrade needs a dump and restore.
+      com.centurylinklabs.watchtower.enable: "false"
+
+volumes:
+  flock-postgres:

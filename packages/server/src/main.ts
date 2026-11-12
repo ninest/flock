@@ -13,7 +13,7 @@ import { Seed } from "./seed.ts"
 
 const Main = Layer.unwrap(Effect.gen(function*() {
   const config = yield* ServerConfig
-  const Server = HttpRouter.serve(AppRoutes(config.publicDir)).pipe(
+  const Server = HttpRouter.serve(AppRoutes(config)).pipe(
     Layer.provide(NodeHttpServer.layer(createServer, { port: config.port }))
   )
   const App = AppLive(config.databaseUrl)

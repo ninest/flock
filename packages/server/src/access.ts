@@ -6,12 +6,15 @@ import { Context, Effect, Layer, Option, type Redacted } from "effect"
 import type { SqlError } from "effect/sql/SqlError"
 
 export interface AuthSettings {
-  /** The origin Members open the dashboard on, e.g. https://flock.example.com. */
-  readonly publicUrl: string
+  /**
+   * The origin Members open the dashboard on, e.g. https://flock.example.com.
+   * When unset, each request's own origin is used.
+   */
+  readonly publicUrl: Option.Option<string>
   /** More origins allowed to call the auth API (e.g. the dev dashboard). */
   readonly trustedOrigins: ReadonlyArray<string>
-  /** Signs session cookies; at least 32 random characters. */
-  readonly secret: Redacted.Redacted<string>
+  /** Signs session cookies; at least 32 random characters. Generated and kept in Postgres when unset. */
+  readonly secret: Option.Option<Redacted.Redacted<string>>
   /** Signing up or signing in with this email makes the Member an Instance admin. */
   readonly adminEmail: Option.Option<string>
 }
@@ -30,6 +33,8 @@ export class Access extends Context.Service<Access, {
   readonly member: (memberId: MemberId) => Effect.Effect<Option.Option<Member>, SqlError>
   readonly memberByEmail: (email: string) => Effect.Effect<Option.Option<Member>, SqlError>
   readonly grantAdmin: (memberId: MemberId) => Effect.Effect<void, SqlError>
+  /** The session-signing secret generated on first boot, for Instances without BETTER_AUTH_SECRET. */
+  readonly generatedSecret: Effect.Effect<string, SqlError>
 }>()("flock/Access") {
   static readonly layer = Layer.effect(
     Access,
@@ -66,7 +71,13 @@ export class Access extends Context.Service<Access, {
           }),
         member,
         memberByEmail: (email) => select(sql.and([sql`lower(m.email) = ${email.trim().toLowerCase()}`])),
-        grantAdmin
+        grantAdmin,
+        generatedSecret: Effect.gen(function*() {
+          const candidate = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url")
+          yield* sql`INSERT INTO instance_secret (name, value) VALUES ('auth', ${candidate}) ON CONFLICT DO NOTHING`
+          const [row] = yield* sql<{ value: string }>`SELECT value FROM instance_secret WHERE name = 'auth'`
+          return row!.value
+        })
       })
     })
   )

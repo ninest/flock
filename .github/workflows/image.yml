@@ -1,0 +1,159 @@
+# Builds the Docker image and checks it before anything is published:
+#   1. the image boots against Postgres, migrates and serves (scripts/smoke.sh)
+#   2. deploy/docker-compose.yml gives a working Instance
+#   3. the previous release's image still works against the migrated schema
+#      (the expand/contract rule, see docs/migrations.md)
+# With `push: true` (release tags only) it then publishes ghcr.io/ninest/flock.
+name: image
+
+on:
+  workflow_call:
+    inputs:
+      push:
+        type: boolean
+        default: false
+      previous_image:
+        description: Image to treat as the previous release (overrides the latest release tag; for testing this check)
+        type: string
+        default: ""
+
+env:
+  IMAGE: ghcr.io/ninest/flock
+  PGPASSWORD: postgres
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 3s --health-retries 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # tags, to find the previous release
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: flock:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Image boots, migrates and serves
+        run: |
+          psql -h localhost -U postgres -c "CREATE DATABASE smoke"
+          docker run -d --name flock-smoke --network host \
+            -e PORT=2100 -e FLOCK_SEED_PLAYGROUND=true \
+            -e DATABASE_URL=postgres://postgres:postgres@localhost:5432/smoke flock:ci
+          scripts/smoke.sh http://localhost:2100 pk_dev_playground
+          # The image's own HEALTHCHECK must turn healthy too.
+          for _ in $(seq 30); do
+            status="$(docker inspect -f '{{.State.Health.Status}}' flock-smoke)"
+            [ "$status" = healthy ] && break
+            sleep 2
+          done
+          echo "container health: $status"; [ "$status" = healthy ]
+          # A second boot against the already-migrated database is a no-op.
+          docker restart flock-smoke
+          scripts/smoke.sh http://localhost:2100 pk_dev_playground
+
+      - name: Logs (image)
+        if: always()
+        run: docker logs flock-smoke 2>&1 | tail -n 100 || true
+
+      - name: Compose file gives a working Instance
+        run: |
+          docker rm -f flock-smoke
+          export FLOCK_IMAGE=flock:ci FLOCK_PORT=2200 POSTGRES_PASSWORD="$(openssl rand -hex 16)"
+          docker compose -f deploy/docker-compose.yml up -d --wait
+          scripts/smoke.sh http://localhost:2200
+          docker compose -f deploy/docker-compose.yml logs flock | tail -n 50
+          docker compose -f deploy/docker-compose.yml down -v
+
+      - name: Find the previous release
+        id: previous
+        env:
+          OVERRIDE: ${{ inputs.previous_image }}
+        run: |
+          current="${GITHUB_REF_NAME}"
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            # The highest release tag below the one being released.
+            previous="$( (git tag --list 'v[0-9]*.[0-9]*.[0-9]*'; echo "$current") | sort -V | grep -B1 -x "$current" | grep -vx "$current" || true)"
+          else
+            previous="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1)"
+          fi
+          image="${previous:+$IMAGE:${previous#v}}"
+          [[ -n "$OVERRIDE" ]] && image="$OVERRIDE"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          if [[ -z "$image" ]]; then
+            echo "::notice title=No previous release::No earlier release tag, so the previous-release compatibility check is skipped."
+          else
+            echo "previous release: $image"
+          fi
+
+      - name: Previous release works against the migrated schema
+        if: steps.previous.outputs.image != ''
+        env:
+          previous_image: ${{ steps.previous.outputs.image }}
+        run: |
+          psql -h localhost -U postgres -c "CREATE DATABASE compat"
+          url=postgres://postgres:postgres@localhost:5432/compat
+          # The previous release creates its schema and data first, like a live Instance...
+          docker run -d --name flock-previous --network host -e PORT=2100 -e FLOCK_SEED_PLAYGROUND=true -e DATABASE_URL=$url "$previous_image"
+          scripts/smoke.sh http://localhost:2100 pk_dev_playground
+          # ...the new image migrates it while the old one is still running (a rolling deploy)...
+          docker run -d --name flock-new --network host -e PORT=2101 -e DATABASE_URL=$url flock:ci
+          scripts/smoke.sh http://localhost:2101 pk_dev_playground
+          # ...and the old server must keep working against the new schema, including after a restart.
+          scripts/smoke.sh http://localhost:2100 pk_dev_playground
+          docker restart flock-previous
+          scripts/smoke.sh http://localhost:2100 pk_dev_playground
+
+      - name: Logs (previous release)
+        if: always() && steps.previous.outputs.image != ''
+        run: |
+          docker logs flock-previous 2>&1 | tail -n 100 || true
+          docker logs flock-new 2>&1 | tail -n 100 || true
+
+      - name: Tags
+        if: inputs.push
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          # v1.2.3 -> 1.2.3, 1.2, 1, latest
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+          flavor: latest=auto
+
+      - name: Log in to GHCR
+        if: inputs.push
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish
+        if: inputs.push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha

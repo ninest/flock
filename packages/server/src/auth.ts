@@ -9,20 +9,38 @@ import { HttpEffect, HttpRouter, HttpServerRequest } from "effect/http"
 import pg from "pg"
 import { Access, AuthConfig } from "./access.ts"
 
+/**
+ * Origins allowed to call the auth API. Without FLOCK_PUBLIC_URL, a request's own
+ * origin (from its Host header) is trusted: a cross-site request can't forge an
+ * Origin that matches our Host, so the CSRF check still holds.
+ */
+const trustedOrigins = (settings: AuthConfig["Service"]) => (request?: Request) => {
+  const configured = [...Option.toArray(settings.publicUrl), ...settings.trustedOrigins]
+  const host = request?.headers.get("host")
+  if (Option.isSome(settings.publicUrl) || !host) return configured
+  return [...configured, `http://${host}`, `https://${host}`]
+}
+
 const makeAuth = (options: {
   readonly settings: AuthConfig["Service"]
+  readonly secret: string
   readonly pool: pg.Pool
   readonly run: <A>(effect: Effect.Effect<A, unknown>) => Promise<A>
   readonly access: Access["Service"]
 }) => {
   const { access, run, settings } = options
   return betterAuth({
-    baseURL: settings.publicUrl,
+    // Unset: Better Auth derives it from each request. (A dynamic `allowedHosts: ["*"]`
+    // would also trust every origin.)
+    baseURL: Option.getOrUndefined(settings.publicUrl),
     basePath: "/api/auth",
-    secret: Redacted.value(settings.secret),
+    secret: options.secret,
     database: options.pool,
-    trustedOrigins: [settings.publicUrl, ...settings.trustedOrigins],
+    trustedOrigins: trustedOrigins(settings),
     telemetry: { enabled: false },
+    // Better Auth turns the origin (CSRF) check off when NODE_ENV=test; keep it on so
+    // Seam 1 tests see production behavior.
+    advanced: { disableOriginCheck: false },
     // Our names, so "user" and "session" stay free for Visitors and Sessions (GLOSSARY.md).
     user: { modelName: "member" },
     session: { modelName: "member_session" },
@@ -72,7 +90,11 @@ export class BetterAuth extends Context.Service<BetterAuth, {
           Effect.sync(() => new pg.Pool({ connectionString: Redacted.value(databaseUrl), max: 5 })),
           (pool) => Effect.promise(() => pool.end())
         )
-        const auth = makeAuth({ settings, pool, access, run: (effect) => Effect.runPromiseWith(context)(effect) })
+        const secret = yield* Option.match(settings.secret, {
+          onSome: (secret) => Effect.succeed(Redacted.value(secret)),
+          onNone: () => access.generatedSecret.pipe(Effect.orDie)
+        })
+        const auth = makeAuth({ settings, secret, pool, access, run: (effect) => Effect.runPromiseWith(context)(effect) })
 
         return BetterAuth.of({
           handler: (request) => auth.handler(request),
