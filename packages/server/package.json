@@ -14,7 +14,9 @@
     "@effect/sql-pg": "4.1.4",
     "@flock/shared": "workspace:*",
     "better-auth": "1.7.22",
+    "bowser": "2.15.0",
     "effect": "4.1.4",
+    "mmdb-lib": "3.0.5",
     "pg": "8.23.1"
   },
   "devDependencies": {
