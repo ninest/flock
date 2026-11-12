@@ -50,6 +50,12 @@ const ProjectsHandlers = HttpApiBuilder.group(FlockApi, "projects", Effect.fn(fu
     .handle("delete", ({ params }) => CurrentMember.use(({ id }) => projects.delete(id, params.projectId)))
     .handle("addEnvironment", ({ params, payload }) =>
       CurrentMember.use(({ id }) => projects.addEnvironment(id, params.projectId, payload.name)))
+    .handle("members", ({ params }) => CurrentMember.use(({ id }) => projects.members(id, params.projectId)))
+    .handle("addMember", ({ params, payload }) => CurrentMember.use(({ id }) => projects.addMember(id, params.projectId, payload)))
+    .handle("changeMemberRole", ({ params, payload }) =>
+      CurrentMember.use(({ id }) => projects.changeMemberRole(id, params.projectId, params.memberId, payload.role)))
+    .handle("removeMember", ({ params }) =>
+      CurrentMember.use(({ id }) => projects.removeMember(id, params.projectId, params.memberId)))
 }))
 
 const EnvironmentsHandlers = HttpApiBuilder.group(FlockApi, "environments", Effect.fn(function*(handlers) {
@@ -66,6 +72,7 @@ const ReportsHandlers = HttpApiBuilder.group(FlockApi, "reports", Effect.fn(func
   return handlers
     .handle("pageviewCount", ({ params, query }) =>
       CurrentMember.use(({ id }) => reports.pageviewCount(id, params.environmentId, query)).pipe(Effect.map((pageviews) => ({ pageviews }))))
+    .handle("overview", ({ params, query }) => CurrentMember.use(({ id }) => reports.overview(id, params.environmentId, query)))
     .handle("breakdown", ({ params, query }) =>
       CurrentMember.use(({ id }) =>
         reports.breakdown(id, params.environmentId, query, { property: query.property, event: query.event ?? "$pageview" })))

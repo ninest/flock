@@ -1,15 +1,21 @@
-// Ingest: a batch of raw Events for one Environment -> stored Events.
+// Ingest: a batch of raw Events for one Environment, plus who sent it -> stored Events.
 // Pipeline, one step each: key -> Environment, origin check, bot filter, per-Event
-// validation and limits, Event time, enrichment, then an idempotent insert by Event UUID.
+// validation and limits, Event time, enrichment, Visitor derivation, then (in one
+// transaction) dedupe by Event UUID, Session assignment and the insert. The rules are
+// pure functions in ingest-rules.ts; add new steps as their own services rather than
+// growing this one.
 import { PgClient } from "@effect/sql-pg"
 import { type IngestBatch, type IngestEvent, type IngestRejection, type IngestResult, OriginNotAllowed, UnknownKey } from "@flock/shared"
 import { Array as Arr, Context, DateTime, Effect, Layer, Result } from "effect"
 import { Enrichment, type RequestContext } from "./enrichment.ts"
 import { EventPartitions } from "./event-partitions.ts"
 import { eventTime, isBot, originAllowed, rawUuid, validateEvent } from "./ingest-rules.ts"
+import { Sessions } from "./sessions.ts"
+import { type VisitorId, Visitors } from "./visitors.ts"
 
 interface ValidEvent {
   readonly event: IngestEvent
+  /** The Event time: the client timestamp if recent enough, else the receive time. */
   readonly ts: DateTime.Utc
 }
 
@@ -22,10 +28,12 @@ export class Ingest extends Context.Service<Ingest, {
       const sql = yield* PgClient.PgClient
       const partitions = yield* EventPartitions
       const enrichment = yield* Enrichment
+      const visitors = yield* Visitors
+      const sessions = yield* Sessions
 
       const environmentByKey = (key: string) =>
-        sql<{ id: string; allowedOrigins: ReadonlyArray<string> }>`
-          SELECT id, allowed_origins FROM environment WHERE key = ${key}`.pipe(
+        sql<{ id: string; projectId: string; allowedOrigins: ReadonlyArray<string> }>`
+          SELECT id, project_id, allowed_origins FROM environment WHERE key = ${key}`.pipe(
           Effect.flatMap(([environment]) =>
             environment ? Effect.succeed(environment) : Effect.fail(new UnknownKey({ message: "No Environment has this key" }))
           )
@@ -44,38 +52,45 @@ export class Ingest extends Context.Service<Ingest, {
       }
 
       /**
-       * Stores Events whose UUID is new to the Environment; returns how many distinct Events it got. The event table is partitioned
-       * by day, so uniqueness lives in event_uuid, written in the same transaction (ADR 0003).
+       * Stores Events whose UUID is new to the Environment; returns how many distinct Events
+       * it got. The event table is partitioned by day, so uniqueness lives in event_uuid,
+       * written in the same transaction (ADR 0004). Repeated Events never reach Sessions.
        */
-      const insertNew = (
-        environmentId: string,
-        events: ReadonlyArray<ValidEvent>,
-        receivedAt: DateTime.Utc,
-        audience: Readonly<Record<string, unknown>>
-      ) =>
+      const insertNew = (input: {
+        readonly environmentId: string
+        readonly events: ReadonlyArray<ValidEvent>
+        readonly receivedAt: DateTime.Utc
+        readonly audience: Readonly<Record<string, unknown>>
+        readonly visitorId: VisitorId
+      }) =>
         Effect.gen(function*() {
-          const byUuid = new Map(events.map((e) => [e.event.uuid.toLowerCase(), e] as const))
-          const rows = Arr.map(Arr.fromIterable(byUuid.keys()), (uuid) => ({ environmentId, uuid }))
-          if (!Arr.isArrayNonEmpty(rows)) return 0
+          const { audience, environmentId, receivedAt, visitorId } = input
+          const byUuid = new Map(input.events.map((e) => [e.event.uuid.toLowerCase(), e] as const))
+          const uuids = Arr.map(Arr.fromIterable(byUuid.keys()), (uuid) => ({ environmentId, uuid }))
+          if (!Arr.isArrayNonEmpty(uuids)) return 0
           for (const { ts } of byUuid.values()) yield* partitions.ensureDay(ts)
           yield* sql.withTransaction(Effect.gen(function*() {
             const fresh = yield* sql<{ uuid: string }>`
-              INSERT INTO event_uuid ${sql.insert(rows)}
+              INSERT INTO event_uuid ${sql.insert(uuids)}
               ON CONFLICT DO NOTHING RETURNING uuid`
-            const events = fresh.map(({ uuid }) => {
+            const rows = yield* Effect.forEach(fresh, ({ uuid }) => {
               const { event, ts } = byUuid.get(uuid)!
-              return {
-                environmentId,
-                uuid,
-                name: event.name,
-                ts: DateTime.toDateUtc(ts),
-                receivedAt: DateTime.toDateUtc(receivedAt),
-                properties: sql.json(enrichment.enrich(event.properties ?? {}, audience))
-              }
+              return sessions.assign({ environmentId, visitorId, at: ts }).pipe(
+                Effect.map((sessionId) => ({
+                  environmentId,
+                  uuid,
+                  name: event.name,
+                  ts: DateTime.toDateUtc(ts),
+                  receivedAt: DateTime.toDateUtc(receivedAt),
+                  visitorId,
+                  sessionId,
+                  properties: sql.json(enrichment.enrich(event.properties ?? {}, audience))
+                }))
+              )
             })
-            if (Arr.isArrayNonEmpty(events)) yield* sql`INSERT INTO event ${sql.insert(events)}`
+            if (Arr.isArrayNonEmpty(rows)) yield* sql`INSERT INTO event ${sql.insert(rows)}`
           }))
-          return rows.length
+          return uuids.length
         })
 
       const send = Effect.fn("Ingest.send")(function*(batch: IngestBatch, request: RequestContext) {
@@ -90,9 +105,19 @@ export class Ingest extends Context.Service<Ingest, {
 
         const receivedAt = yield* DateTime.now
         const { rejected, valid } = validate(batch.events, receivedAt)
-        // A repeated UUID is ignored but still reported as accepted, so retries look like successes.
+        if (valid.length === 0) return { accepted: 0, rejected }
+
+        // Enrichment: audience properties are shared by the batch.
         const audience = yield* enrichment.audience(request)
-        const accepted = yield* insertNew(environment.id, valid, receivedAt, audience)
+        // Visitor derivation, outside the transaction: it may create the day's salt.
+        const visitorId = yield* visitors.cookieless({
+          projectId: environment.projectId,
+          ip: request.ip ?? "",
+          userAgent: request.userAgent ?? "",
+          at: receivedAt
+        })
+        // A repeated UUID is ignored but still reported as accepted, so retries look like successes.
+        const accepted = yield* insertNew({ environmentId: environment.id, events: valid, receivedAt, audience, visitorId })
         return { accepted, rejected }
       }, (effect) => Effect.catchTag(effect, "SqlError", Effect.die))
 

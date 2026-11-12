@@ -3,16 +3,21 @@
 // didn't exist. Changes need the owner role.
 import { PgClient } from "@effect/sql-pg"
 import {
+  AlreadyProjectMember,
   defaultAllowedOrigins,
   Environment,
   EnvironmentId,
   EnvironmentNameTaken,
   EnvironmentNotFound,
-  type MemberId,
+  LastProjectOwner,
+  MemberId,
+  NoMemberWithEmail,
   PRODUCTION,
   ProductionProtected,
   Project,
   ProjectId,
+  ProjectMember,
+  ProjectMemberNotFound,
   ProjectNotFound,
   ProjectOwnerRequired,
   type ProjectRole
@@ -111,6 +116,24 @@ export class Projects extends Context.Service<Projects, {
   readonly environment: (member: MemberId, id: EnvironmentId) => Effect.Effect<EnvironmentAccess, EnvironmentNotFound>
   /** The Project with an Environment that has this key, if any (for idempotent seeding). */
   readonly projectWithKey: (key: string) => Effect.Effect<Option.Option<ProjectId>>
+  /** Who the Project is shared with (any role may look). */
+  readonly members: (member: MemberId, id: ProjectId) => Effect.Effect<Array<ProjectMember>, ProjectNotFound>
+  readonly addMember: (
+    member: MemberId,
+    id: ProjectId,
+    add: { readonly email: string; readonly role: ProjectRole }
+  ) => Effect.Effect<ProjectMember, ProjectNotFound | ProjectOwnerRequired | NoMemberWithEmail | AlreadyProjectMember>
+  readonly changeMemberRole: (
+    member: MemberId,
+    id: ProjectId,
+    target: MemberId,
+    role: ProjectRole
+  ) => Effect.Effect<ProjectMember, ProjectNotFound | ProjectOwnerRequired | ProjectMemberNotFound | LastProjectOwner>
+  readonly removeMember: (
+    member: MemberId,
+    id: ProjectId,
+    target: MemberId
+  ) => Effect.Effect<void, ProjectNotFound | ProjectOwnerRequired | ProjectMemberNotFound | LastProjectOwner>
   /** Sets the allowed origins of the Environment with this key (for seeding). */
   readonly setAllowedOriginsByKey: (key: string, allowedOrigins: ReadonlyArray<string>) => Effect.Effect<void>
   /** Adds the Member as owner unless they already belong to the Project. */
@@ -192,7 +215,8 @@ export class Projects extends Context.Service<Projects, {
       const deleteEventsOf = (environmentIds: ReadonlyArray<string>) =>
         environmentIds.length === 0 ? Effect.void : Effect.all([
           sql`DELETE FROM event WHERE environment_id IN ${sql.in(environmentIds)}`,
-          sql`DELETE FROM event_uuid WHERE environment_id IN ${sql.in(environmentIds)}`
+          sql`DELETE FROM event_uuid WHERE environment_id IN ${sql.in(environmentIds)}`,
+          sql`DELETE FROM session WHERE environment_id IN ${sql.in(environmentIds)}`
         ], { discard: true })
 
       const ensureOwner = (id: ProjectId, member: MemberId) =>
@@ -200,6 +224,45 @@ export class Projects extends Context.Service<Projects, {
           Effect.asVoid,
           orDie
         )
+
+      const selectMembers = (id: ProjectId, target?: MemberId) =>
+        sql<{ id: string; email: string; name: string; role: ProjectRole }>`
+          SELECT m.id, m.email, m.name, pm.role
+          FROM project_member pm JOIN member m ON m.id = pm.member_id
+          WHERE pm.project_id = ${id} ${target ? sql`AND pm.member_id = ${target}` : sql``}
+          ORDER BY pm.role = 'viewer', pm.created_at, m.id`.pipe(
+          orDie,
+          Effect.map((rows) => rows.map((row) => new ProjectMember({ ...row, id: MemberId.make(row.id) })))
+        )
+
+      const projectMember = (id: ProjectId, target: MemberId) =>
+        selectMembers(id, target).pipe(
+          Effect.flatMap(([m]) => m ? Effect.succeed(m) : Effect.fail(new ProjectMemberNotFound({ id: target })))
+        )
+
+      /**
+       * Changes the target's membership as `actor`, then refuses (rolling back) if the
+       * Project would be left without an owner. Locking the Project's membership rows
+       * first makes concurrent changes take turns, so two owners can't demote each other
+       * at once, and the actor is checked to still be an owner once it holds the lock.
+       */
+      const changeMembership = (
+        actor: MemberId,
+        id: ProjectId,
+        target: MemberId,
+        change: Effect.Effect<unknown, SqlError>
+      ) =>
+        sql.withTransaction(Effect.gen(function*() {
+          const rows = yield* sql<{ memberId: string; role: ProjectRole }>`
+            SELECT member_id, role FROM project_member WHERE project_id = ${id} FOR UPDATE`
+          const roleOf = (m: MemberId) => rows.find((r) => r.memberId === m)?.role
+          if (roleOf(actor) !== "owner") return yield* new ProjectOwnerRequired({ message: "Only a Project owner can do this" })
+          if (!roleOf(target)) return yield* new ProjectMemberNotFound({ id: target })
+          yield* change
+          const [row] = yield* sql<{ owners: number }>`
+            SELECT count(*)::int AS owners FROM project_member WHERE project_id = ${id} AND role = 'owner'`
+          if (row?.owners === 0) return yield* new LastProjectOwner({ message: "A Project always keeps at least one owner" })
+        })).pipe(orDie)
 
       return Projects.of({
         list: (member) => select(member, undefined).pipe(orDie),
@@ -287,6 +350,36 @@ export class Projects extends Context.Service<Projects, {
             Effect.map(([row]) => Option.map(Option.fromNullishOr(row), (r) => ProjectId.make(r.projectId)))
           ),
 
+        members: (member, id) => get(member, id).pipe(Effect.andThen(selectMembers(id))),
+
+        addMember: (member, id, { email, role }) =>
+          Effect.gen(function*() {
+            yield* ownProject(member, id)
+            const [found] = yield* sql<{ id: string }>`
+              SELECT id FROM member WHERE lower(email) = lower(${email.trim()})`.pipe(orDie)
+            if (!found) return yield* new NoMemberWithEmail({ email })
+            const target = MemberId.make(found.id)
+            const inserted = yield* sql`
+              INSERT INTO project_member ${sql.insert({ projectId: id, memberId: target, role })}
+              ON CONFLICT DO NOTHING RETURNING member_id`.pipe(orDie)
+            if (inserted.length === 0) return yield* new AlreadyProjectMember({ id: target })
+            return yield* projectMember(id, target).pipe(Effect.orDie)
+          }),
+
+        changeMemberRole: (member, id, target, role) =>
+          Effect.gen(function*() {
+            yield* ownProject(member, id)
+            yield* changeMembership(member, id, target,
+              sql`UPDATE project_member SET role = ${role} WHERE project_id = ${id} AND member_id = ${target}`)
+            return yield* projectMember(id, target).pipe(Effect.orDie)
+          }),
+
+        removeMember: (member, id, target) =>
+          Effect.gen(function*() {
+            yield* ownProject(member, id)
+            yield* changeMembership(member, id, target,
+              sql`DELETE FROM project_member WHERE project_id = ${id} AND member_id = ${target}`)
+          }),
         setAllowedOriginsByKey: (key, allowedOrigins) =>
           sql`UPDATE environment SET allowed_origins = ${sql.json(allowedOrigins)} WHERE key = ${key}`.pipe(Effect.asVoid, orDie),
 

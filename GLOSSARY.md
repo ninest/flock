@@ -28,6 +28,13 @@ A one-time offer that lets a specific person become a Member, which works even w
 One thing being tracked (a website, mobile app or backend), with its own key and dashboard.
 _Avoid_: Site, property, app
 
+**Project owner**:
+A Member who manages a Project: its settings, keys, Environments and who it is shared with. A Project always has at least one.
+
+**Project viewer**:
+A Member a Project is shared with read-only: they see its reports for every Environment but can't change or delete anything.
+_Avoid_: Guest, read-only member
+
 **Environment**:
 A separate data stream inside a Project, with its own keys. Every Project starts with `production`. Others, such as `dev`, can be added for testing.
 _Avoid_: Stage, mode, dev project
@@ -57,6 +64,9 @@ _Avoid_: User, client
 **Session**:
 A run of Events from one Visitor that ends after 30 minutes without activity.
 _Avoid_: Visit
+
+**Bounce**:
+A Session with a single Event. The bounce rate is the share of Sessions that are bounces, and the visit duration is the average time from a Session's first Event to its last.
 
 **Tracking mode**:
 A per-Project choice of how Visitors are recognised: cookieless (an anonymous ID that resets daily) or persistent (an ID that is stored on the device and can be identified).

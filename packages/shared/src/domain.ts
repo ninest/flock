@@ -1,4 +1,5 @@
 import { Schema } from "effect"
+import { MemberId } from "./members.ts"
 
 export const ProjectId = Schema.String.pipe(Schema.brand("ProjectId"))
 export type ProjectId = typeof ProjectId.Type
@@ -116,4 +117,40 @@ export class ProjectOwnerRequired extends Schema.TaggedError<ProjectOwnerRequire
   "ProjectOwnerRequired",
   { message: Schema.String },
   { httpApiStatus: 403 }
+) {}
+
+/** A Member who belongs to a Project, with their role in it. */
+export class ProjectMember extends Schema.Class<ProjectMember>("ProjectMember")({
+  id: MemberId,
+  email: Schema.String,
+  name: Schema.String,
+  role: ProjectRole
+}) {}
+
+/** No Member of this Instance signs in with that email. */
+export class NoMemberWithEmail extends Schema.TaggedError<NoMemberWithEmail>()(
+  "NoMemberWithEmail",
+  { email: Schema.String },
+  { httpApiStatus: 404 }
+) {}
+
+/** The Member already belongs to the Project; change their role instead. */
+export class AlreadyProjectMember extends Schema.TaggedError<AlreadyProjectMember>()(
+  "AlreadyProjectMember",
+  { id: MemberId },
+  { httpApiStatus: 409 }
+) {}
+
+/** The Member doesn't belong to the Project. */
+export class ProjectMemberNotFound extends Schema.TaggedError<ProjectMemberNotFound>()(
+  "ProjectMemberNotFound",
+  { id: MemberId },
+  { httpApiStatus: 404 }
+) {}
+
+/** Refused: a Project always keeps at least one owner. */
+export class LastProjectOwner extends Schema.TaggedError<LastProjectOwner>()(
+  "LastProjectOwner",
+  { message: Schema.String },
+  { httpApiStatus: 409 }
 ) {}
