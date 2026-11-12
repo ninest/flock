@@ -5,11 +5,11 @@
 // pure functions in ingest-rules.ts; add new steps as their own services rather than
 // growing this one.
 import { PgClient } from "@effect/sql-pg"
-import { type IngestBatch, type IngestEvent, type IngestRejection, type IngestResult, OriginNotAllowed, UnknownKey } from "@flock/shared"
+import { type IngestBatch, type IngestEvent, type IngestRejection, type IngestResult, OriginNotAllowed, type TrackingMode, UnknownKey } from "@flock/shared"
 import { Array as Arr, Context, DateTime, Effect, Layer, Result } from "effect"
 import { Enrichment, type RequestContext } from "./enrichment.ts"
 import { EventPartitions } from "./event-partitions.ts"
-import { eventTime, isBot, originAllowed, rawUuid, validateEvent } from "./ingest-rules.ts"
+import { ANON_DISTINCT_ID, eventTime, IDENTIFY, isBot, originAllowed, rawUuid, validateEvent } from "./ingest-rules.ts"
 import { Sessions } from "./sessions.ts"
 import { type VisitorId, Visitors } from "./visitors.ts"
 
@@ -21,6 +21,8 @@ interface ValidEvent {
 
 export class Ingest extends Context.Service<Ingest, {
   readonly send: (batch: IngestBatch, request: RequestContext) => Effect.Effect<IngestResult, UnknownKey | OriginNotAllowed>
+  /** What the browser script needs to know about an Environment key's Project. */
+  readonly config: (key: string) => Effect.Effect<{ readonly trackingMode: TrackingMode }, UnknownKey>
 }>()("flock/Ingest") {
   static readonly layer = Layer.effect(
     Ingest,
@@ -32,11 +34,19 @@ export class Ingest extends Context.Service<Ingest, {
       const sessions = yield* Sessions
 
       const environmentByKey = (key: string) =>
-        sql<{ id: string; projectId: string; allowedOrigins: ReadonlyArray<string> }>`
-          SELECT id, project_id, allowed_origins FROM environment WHERE key = ${key}`.pipe(
+        sql<{ id: string; projectId: string; allowedOrigins: ReadonlyArray<string>; trackingMode: TrackingMode }>`
+          SELECT e.id, e.project_id, e.allowed_origins, p.tracking_mode
+          FROM environment e JOIN project p ON p.id = e.project_id
+          WHERE e.key = ${key}`.pipe(
           Effect.flatMap(([environment]) =>
             environment ? Effect.succeed(environment) : Effect.fail(new UnknownKey({ message: "No Environment has this key" }))
           )
+        )
+
+      const config = (key: string) =>
+        environmentByKey(key).pipe(
+          Effect.map(({ trackingMode }) => ({ trackingMode })),
+          Effect.catchTag("SqlError", Effect.die)
         )
 
       /** Splits the batch into valid Events (with their time) and rejections. */
@@ -55,16 +65,25 @@ export class Ingest extends Context.Service<Ingest, {
        * Stores Events whose UUID is new to the Environment; returns how many distinct Events
        * it got. The event table is partitioned by day, so uniqueness lives in event_uuid,
        * written in the same transaction (ADR 0004). Repeated Events never reach Sessions.
+       * In persistent Tracking mode, the batch's new Identify Events are applied first, so every
+       * Event in it (and the device's earlier ones) counts as the identified Visitor.
        */
       const insertNew = (input: {
         readonly environmentId: string
         readonly events: ReadonlyArray<ValidEvent>
         readonly receivedAt: DateTime.Utc
         readonly audience: Readonly<Record<string, unknown>>
-        readonly visitorId: VisitorId
+        /** Persistent Tracking mode: the Project whose Identify links and persistent Visitor IDs apply. */
+        readonly persistentProjectId: string | undefined
+        /** The cookieless Visitor, for Events not attributed to a persistent Visitor ID. */
+        readonly cookielessVisitorId: VisitorId
       }) =>
         Effect.gen(function*() {
-          const { audience, environmentId, receivedAt, visitorId } = input
+          const { audience, cookielessVisitorId, environmentId, persistentProjectId: projectId, receivedAt } = input
+          const visitorOf = (event: IngestEvent) =>
+            projectId !== undefined && event.distinct_id !== undefined
+              ? visitors.persistent({ projectId, distinctId: event.distinct_id })
+              : Effect.succeed(cookielessVisitorId)
           const byUuid = new Map(input.events.map((e) => [e.event.uuid.toLowerCase(), e] as const))
           const uuids = Arr.map(Arr.fromIterable(byUuid.keys()), (uuid) => ({ environmentId, uuid }))
           if (!Arr.isArrayNonEmpty(uuids)) return 0
@@ -73,9 +92,17 @@ export class Ingest extends Context.Service<Ingest, {
             const fresh = yield* sql<{ uuid: string }>`
               INSERT INTO event_uuid ${sql.insert(uuids)}
               ON CONFLICT DO NOTHING RETURNING uuid`
-            const rows = yield* Effect.forEach(fresh, ({ uuid }) => {
-              const { event, ts } = byUuid.get(uuid)!
-              return sessions.assign({ environmentId, visitorId, at: ts }).pipe(
+            const events = fresh.map(({ uuid }) => ({ uuid, ...byUuid.get(uuid)! }))
+            if (projectId !== undefined) {
+              for (const { event } of events) {
+                if (event.name !== IDENTIFY) continue
+                const deviceId = event.properties![ANON_DISTINCT_ID] as string // checked by validateEvent
+                yield* visitors.identify({ projectId, deviceId, visitorId: event.distinct_id! })
+              }
+            }
+            const rows = yield* Effect.forEach(events, ({ event, ts, uuid }) => Effect.gen(function*() {
+              const visitorId = yield* visitorOf(event)
+              return yield* sessions.assign({ environmentId, visitorId, at: ts }).pipe(
                 Effect.map((sessionId) => ({
                   environmentId,
                   uuid,
@@ -87,7 +114,7 @@ export class Ingest extends Context.Service<Ingest, {
                   properties: sql.json(enrichment.enrich(event.properties ?? {}, audience))
                 }))
               )
-            })
+            }))
             if (Arr.isArrayNonEmpty(rows)) yield* sql`INSERT INTO event ${sql.insert(rows)}`
           }))
           return uuids.length
@@ -109,19 +136,32 @@ export class Ingest extends Context.Service<Ingest, {
 
         // Enrichment: audience properties are shared by the batch.
         const audience = yield* enrichment.audience(request)
-        // Visitor derivation, outside the transaction: it may create the day's salt.
-        const visitorId = yield* visitors.cookieless({
-          projectId: environment.projectId,
-          ip: request.ip ?? "",
-          userAgent: request.userAgent ?? "",
-          at: receivedAt
-        })
+        // Visitor derivation (ADR 0002). Persistent Tracking mode trusts the client's `distinct_id`
+        // (resolved inside the transaction); cookieless mode ignores it. The cookieless Visitor is
+        // derived outside the transaction: it may create the day's salt.
+        const persistent = environment.trackingMode === "persistent"
+        const needsCookieless = !persistent || valid.some(({ event }) => event.distinct_id === undefined)
+        const cookielessVisitorId = needsCookieless
+          ? yield* visitors.cookieless({
+            projectId: environment.projectId,
+            ip: request.ip ?? "",
+            userAgent: request.userAgent ?? "",
+            at: receivedAt
+          })
+          : ""
         // A repeated UUID is ignored but still reported as accepted, so retries look like successes.
-        const accepted = yield* insertNew({ environmentId: environment.id, events: valid, receivedAt, audience, visitorId })
+        const accepted = yield* insertNew({
+          environmentId: environment.id,
+          events: valid,
+          receivedAt,
+          audience,
+          persistentProjectId: persistent ? environment.projectId : undefined,
+          cookielessVisitorId
+        })
         return { accepted, rejected }
       }, (effect) => Effect.catchTag(effect, "SqlError", Effect.die))
 
-      return Ingest.of({ send })
+      return Ingest.of({ send, config })
     })
   )
 }

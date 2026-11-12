@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { KEY, openPlayground, PLAYGROUND, useBrowser } from "./harness.ts"
+import { KEY, openPlayground, PLAYGROUND, type Playground, useBrowser } from "./harness.ts"
 
 const browser = useBrowser()
 
@@ -157,5 +157,67 @@ describe("Playground: pages and sources", () => {
       utm_campaign: "launch"
     })
     expect(landing!.properties.$referrer).toBe("https://news.ycombinator.com/item?id=42")
+  })
+})
+
+describe("Persistent mode", () => {
+  const storage = (site: Playground) =>
+    site.page.evaluate(() => ({ cookie: document.cookie, localStorage: localStorage.length, sessionStorage: sessionStorage.length }))
+
+  it("sends the same stored Visitor ID with every Event, across page loads", async () => {
+    const site = await openPlayground(browser(), { mode: "persistent" })
+    await site.goto("/spa")
+    await site.waitForEvents(1)
+    await site.page.click("text=Settings")
+    await site.page.evaluate(() => window.flock.track("a"))
+    await site.waitForEvents(3)
+    await site.page.reload()
+    const events = await site.waitForEvents(4)
+    const [first] = events
+    expect(first!.distinct_id).toMatch(/^[0-9a-f-]{36}$/)
+    expect(events.map((e) => e.distinct_id)).toEqual([first!.distinct_id, first!.distinct_id, first!.distinct_id, first!.distinct_id])
+    expect(await storage(site)).toEqual({ cookie: "", localStorage: 1, sessionStorage: 0 })
+  })
+
+  it("gives each device its own Visitor ID", async () => {
+    const [a, b] = [await openPlayground(browser(), { mode: "persistent" }), await openPlayground(browser(), { mode: "persistent" })]
+    await a.goto("/")
+    await b.goto("/")
+    const [[eventA], [eventB]] = [await a.waitForEvents(1), await b.waitForEvents(1)]
+    expect(eventA!.distinct_id).not.toEqual(eventB!.distinct_id)
+  })
+
+  it("identify(id) sends $identify linking the device's Visitor ID, then sends later Events as that ID", async () => {
+    const site = await openPlayground(browser(), { mode: "persistent" })
+    await site.goto("/")
+    const [pageview] = await site.waitForEvents(1)
+    const deviceId = pageview!.distinct_id
+    await site.page.click("text=Identify as test-user")
+    await site.page.evaluate(() => window.flock.track("game_completed", { score: 1 }))
+    await site.page.evaluate(() => window.flock.identify("test-user")) // already identified: nothing to send
+    await site.page.reload()
+    const events = await site.waitForEvents(4)
+    expect(await site.settledEvents()).toHaveLength(4)
+    expect(events.slice(1).map((e) => [e.name, e.distinct_id])).toEqual([
+      ["$identify", "test-user"],
+      ["game_completed", "test-user"],
+      ["$pageview", "test-user"]
+    ])
+    expect(events[1]!.properties).toMatchObject({ $anon_distinct_id: deviceId })
+  })
+})
+
+describe("Cookieless mode: identify", () => {
+  it("is a no-op that sends nothing, stores nothing and adds no Visitor ID", async () => {
+    const site = await openPlayground(browser())
+    await site.goto("/")
+    await site.waitForEvents(1)
+    await site.page.click("text=Identify as test-user")
+    await site.page.evaluate(() => window.flock.track("a"))
+    const events = await site.settledEvents()
+    expect(events.map((e) => e.name)).toEqual(["$pageview", "a"])
+    for (const event of events) expect(event).not.toHaveProperty("distinct_id")
+    const storage = await site.page.evaluate(() => ({ cookie: document.cookie, localStorage: localStorage.length, sessionStorage: sessionStorage.length }))
+    expect(storage).toEqual({ cookie: "", localStorage: 0, sessionStorage: 0 })
   })
 })

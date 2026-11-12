@@ -13,11 +13,12 @@ Run `make dev`, then:
 | Playground site | http://hel:2102 (if 2102 is taken, `make dev` prints the port it used instead, e.g. 2103) |
 | Server, API docs | http://hel:2100, http://hel:2100/api/docs |
 | Playground Project keys | `pk_dev_playground` (used by the playground), `pk_production_playground` |
+| Tracking mode and Identify | Playground Project → Project settings → Tracking mode → persistent, reload http://hel:2102 (mode shown on `/`), click **Identify as test-user**; on a second device do the same and the dashboard counts one Visitor |
 | Instance admin page (Invites, Open sign-up, Members) | http://hel:2101/instance |
 | Filtered view (property filters live in the URL; click any report row or **Add filter**) | `http://hel:2101/projects/<id>?filters=[{"property":"$country","op":"is","value":"DE"}]` |
 | OIDC sign-in ("Sign in with …" on `/sign-in`) | Off by default. Export `FLOCK_OIDC_ISSUER`, `FLOCK_OIDC_CLIENT_ID`, `FLOCK_OIDC_CLIENT_SECRET` (and optionally `FLOCK_OIDC_NAME`, `FLOCK_PASSWORD_SIGN_IN=false`) before `make dev`, with `FLOCK_PUBLIC_URL` set to the origin registered at the issuer (`http://localhost:2101` or a `tailscale serve` https URL). See [docs/self-hosting.md](docs/self-hosting.md#oidc-sign-in) |
 
-Playground pages: `/` (Pageview, **Log in** and **Complete game** buttons; the latter sends `game_completed` with a random `{ score, level }`, shown under Custom events on the dashboard), `/blog` (linked pages, for top/entry/exit pages), `/sources` (links with `utm_*` tags and simulated referrers), `/spa` (SPA navigation), `/ingest` (raw ingest form). Open the Playground Project in the dashboard and switch to the `dev` Environment to see the Events arrive.
+Playground pages: `/` (Pageview, **Log in**, **Complete game** and **Identify as test-user** buttons, Tracking mode indicator; **Complete game** sends `game_completed` with a random `{ score, level }`, shown under Custom events on the dashboard), `/blog` (linked pages, for top/entry/exit pages), `/sources` (links with `utm_*` tags and simulated referrers), `/spa` (SPA navigation), `/ingest` (raw ingest form). Open the Playground Project in the dashboard and switch to the `dev` Environment to see the Events arrive.
 
 ## Repository
 
@@ -78,7 +79,9 @@ The browser script:
 <script>flock.track("login_clicked", { plan: "pro" })</script>
 ```
 
-It sends a `$pageview` on load and on `pushState`/`popstate`, gives each Event a UUID, and sends with `sendBeacon` (falling back to `fetch` with `keepalive`) as a `text/plain` JSON body, which needs no CORS preflight. Events go to the origin the script came from, or to `data-api` if set. It writes no cookies or storage.
+It sends a `$pageview` on load and on `pushState`/`popstate`, gives each Event a UUID, and sends with `sendBeacon` (falling back to `fetch` with `keepalive`) as a `text/plain` JSON body, which needs no CORS preflight. Events go to the origin the script came from, or to `data-api` if set.
+
+`data-mode` is the Project's Tracking mode (ADR 0002), which the dashboard's snippet fills in. In `cookieless` mode (the default) the script writes no cookies or storage, and `identify` does nothing. In `persistent` mode it stores a random Visitor ID in `localStorage` and sends it as each Event's `distinct_id`. `flock.identify("user-42")` sends a `$identify` Event that links the device to `user-42`, and from then on the device sends Events as `user-42`. The server only trusts `distinct_id` when the Project is persistent, so switching the mode in the dashboard takes effect at once, and Visitor counts start afresh. `GET /api/ingest/config?key=…` returns a key's Tracking mode.
 
 ### Ingest rules
 

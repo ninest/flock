@@ -37,9 +37,10 @@ layer(Harness.layer())("Custom event list", (it) => {
       const h = yield* Harness
       const { environments: [production] } = yield* h.createProject({})
       yield* at("2026-03-01T09:00:00Z")
-      // `$pageview` is the only Built-in event clients may send; other `$` names are rejected at ingest.
-      const result = yield* h.ingest(production!.key, [pageview(), pageview({ $url: "https://example.com/pricing" })])
-      assert.strictEqual(result.accepted, 2)
+      // `$pageview` and `$identify` are the Built-in events clients may send; other `$` names are rejected at ingest.
+      const identify = { ...customEvent("$identify", { $anon_distinct_id: "device-1" }), distinct_id: "test-user" }
+      const result = yield* h.ingest(production!.key, [pageview(), pageview({ $url: "https://example.com/pricing" }), identify])
+      assert.strictEqual(result.accepted, 3)
       const { events } = yield* listEvents(h, production!.id, day)
       assert.deepStrictEqual(events, [])
     }))
