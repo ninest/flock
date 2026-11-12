@@ -19,6 +19,9 @@ const describe = (error: unknown): string => {
     if (typeof e.message === "string" && e.message !== "") return e.message
     if (e._tag === "EnvironmentNameTaken") return `An Environment named "${String(e.name)}" already exists.`
     if (e._tag === "ProjectNotFound" || e._tag === "EnvironmentNotFound") return "Not found. It may have been deleted."
+    if (e._tag === "NoMemberWithEmail") return `No Member of this Instance signs in with ${String((e as { email?: unknown }).email)}.`
+    if (e._tag === "AlreadyProjectMember") return "That Member already has access. Change their role instead."
+    if (e._tag === "ProjectMemberNotFound") return "That Member no longer has access to this Project."
     if (e._tag) return e._tag
   }
   return "Something went wrong."

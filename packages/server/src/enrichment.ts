@@ -10,6 +10,8 @@ export interface RequestContext {
   /** The client IP (first X-Forwarded-For address, else the socket address). */
   readonly ip: string | null
   readonly userAgent: string | null
+  /** The `Origin` header; browsers send it, servers and native apps usually don't. */
+  readonly origin: string | null
 }
 
 /** Properties Flock derives itself; values sent by the client are replaced. */

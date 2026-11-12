@@ -52,7 +52,8 @@ The dashboard lists your Projects. Create one (its time zone defaults to your br
 - `/blog` and its posts link to each other and to Pricing, so browsing them fills in top pages, entry pages (a Session's first Pageview) and exit pages (its last).
 - `/sources` has campaign links that land on other pages with `utm_*` tags and a simulated referrer (`?simulate_referrer=<url>` works on any page and fakes `document.referrer`). They fill in Referrers and UTM sources, mediums and campaigns, which count a Session by its first Pageview, so use a private window to start a new Visitor. The live counter next to the Environment switcher counts Visitors seen in the last 30 minutes.
 - `/spa` is a fake single-page app: its links change the route with `pushState`, and each route change (and back/forward) sends a `$pageview`.
-- `/ingest` is a raw-ingest form. Paste any JSON batch, send it to `POST /api/ingest`, and see the HTTP status and body. Malformed batches come back as a 400 that explains what's wrong.
+- `/ingest` is a raw-ingest form. Paste any JSON batch, send it to `POST /api/ingest`, and see the HTTP status and body. Malformed batches come back as a 400 that explains what's wrong. The **Send an oversized Event** and **Send a reserved name** buttons send batches that Ingest rejects, and show the reason for each rejected Event.
+- The playground's `dev` Environment allows any origin (`*`), so it works from `hel`, localhost or anywhere else.
 - `FLOCK_API` and `FLOCK_KEY` override where the playground sends Events and with which key.
 
 API docs are at `http://hel:2100/api/docs`, and the OpenAPI spec at `/api/openapi.json`.
@@ -66,7 +67,7 @@ pnpm -r typecheck
 
 Tests only go through two seams and never look at tables or internals:
 
-1. **The server's HTTP API** (`packages/server/test`). `Harness.layer()` in `test/harness.ts` runs the whole server in-process against a throwaway Postgres database (`flock_test_<random>`, created per `layer(...)` block and dropped afterwards). It provides a typed client signed in as an Instance admin (`h.client`), raw `h.fetch` without cookies, `h.browser()` (a fresh cookie jar with `signUp`/`signIn` and its own typed client), `h.seedMember(...)`, `h.adminCommand([...])` (the admin CLI command, in-process), `Harness.layer({ adminEmail })` for `FLOCK_ADMIN_EMAIL`, `h.createProject(...)` (the Projects API) for fixtures, `TestClock` (from `@effect/vitest`) for time, `Harness.layer({ geoIp: { "203.0.113.7": "DE", "198.51.100.23": { country: "US", region: "California" } } })` for a fixed GeoIP table, `h.ingest(key, events, { ip, userAgent })` to send a batch with a client IP (as `X-Forwarded-For`) and User-Agent, and `h.breakdown(environmentId, "$country", range)` / `h.propertyKeys(...)` / `h.overview(...)` / `h.top(environmentId, "pages", { period: "7d" })` / `h.live(environmentId)` to read reports back. `TEST_DATABASE_ADMIN_URL` overrides the admin connection (default `postgres://postgres:postgres@127.0.0.1:2432/postgres`).
+1. **The server's HTTP API** (`packages/server/test`). `Harness.layer()` in `test/harness.ts` runs the whole server in-process against a throwaway Postgres database (`flock_test_<random>`, created per `layer(...)` block and dropped afterwards). It provides a typed client signed in as an Instance admin (`h.client`), raw `h.fetch` without cookies, `h.sdk` (a typed client without cookies or an `Origin`, like a server sending Events), `h.browser()` (a fresh cookie jar with `signUp`/`signIn` and its own typed client), `h.seedMember(...)`, `h.adminCommand([...])` (the admin CLI command, in-process), `Harness.layer({ adminEmail })` for `FLOCK_ADMIN_EMAIL`, `h.createProject(...)` (the Projects API) for fixtures, `TestClock` (from `@effect/vitest`) for time, `Harness.layer({ geoIp: { "203.0.113.7": "DE", "198.51.100.23": { country: "US", region: "California" } } })` for a fixed GeoIP table, `h.ingest(key, events, { ip, userAgent })` to send a batch with a client IP (as `X-Forwarded-For`) and User-Agent, and `h.breakdown(environmentId, "$country", range)` / `h.propertyKeys(...)` / `h.overview(...)` / `h.top(environmentId, "pages", { period: "7d" })` / `h.live(environmentId)` to read reports back. `TEST_DATABASE_ADMIN_URL` overrides the admin connection (default `postgres://postgres:postgres@127.0.0.1:2432/postgres`).
 2. **The browser script's outgoing requests** (`packages/script/test`). `openPlayground(browser())` in `test/harness.ts` opens the playground pages in headless Chromium (Playwright), serving them and the freshly built script with request routing (no real servers), and captures every request to `/api/ingest`. Tests assert on those requests and the page only. One-time setup: `pnpm --filter @flock/script exec playwright install chromium --only-shell`. `test/size.test.ts` fails if the gzipped script exceeds 2 KB; `pnpm --filter @flock/script build` checks it too.
 
 The browser script:
@@ -77,6 +78,17 @@ The browser script:
 ```
 
 It sends a `$pageview` on load and on `pushState`/`popstate`, gives each Event a UUID, and sends with `sendBeacon` (falling back to `fetch` with `keepalive`) as a `text/plain` JSON body, which needs no CORS preflight. Events go to the origin the script came from, or to `data-api` if set. It writes no cookies or storage.
+
+### Ingest rules
+
+`POST /api/ingest` takes `{ key, events: [{ uuid, name, timestamp?, distinct_id?, properties? }] }` and answers `{ accepted, rejected: [{ index, uuid, reason }] }`. Each Event is checked on its own:
+
+- At most 50 Event properties, 8 KB of JSON, and 200 characters per Event name or Event property name.
+- `$` is reserved for Flock: only Built-in event names (`$pageview`) and Flock-defined Event properties (`$url`, `$referrer`, and the audience properties, which Flock replaces) may start with it.
+- A repeated `uuid` (per Environment) is ignored but still counted as accepted, so retries are safe.
+- `timestamp` is kept when it is at most 24 hours old; otherwise (older, in the future, unparseable) the receive time is used.
+- Browser requests (with an `Origin` header) must match the Environment's allowed origins, or the whole batch gets a 403 `OriginNotAllowed`. Empty (production's default) means any public origin, rejecting localhost and private networks; new non-production Environments allow `localhost` and `*.ts.net`. Owners edit them in the dashboard.
+- Requests from known bots and headless browsers are dropped: a 200 with nothing accepted and nothing stored.
 
 ## Self-hosting
 

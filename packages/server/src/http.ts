@@ -22,14 +22,15 @@ const IngestHandlers = HttpApiBuilder.group(FlockApi, "ingest", Effect.fn(functi
 }))
 
 /**
- * The client IP and User-Agent of an ingest request. Flock runs behind a proxy (Railway,
+ * The client IP, User-Agent and Origin of an ingest request. Flock runs behind a proxy (Railway,
  * Docker, `tailscale serve`), so the first X-Forwarded-For address wins over the socket.
  */
 const requestContext = (request: HttpServerRequest.HttpServerRequest): RequestContext => {
   const forwarded = request.headers["x-forwarded-for"]?.split(",")[0]?.trim()
   return {
     ip: forwarded || Option.getOrNull(request.remoteAddress),
-    userAgent: request.headers["user-agent"] ?? null
+    userAgent: request.headers["user-agent"] ?? null,
+    origin: request.headers["origin"] ?? null
   }
 }
 
@@ -49,11 +50,18 @@ const ProjectsHandlers = HttpApiBuilder.group(FlockApi, "projects", Effect.fn(fu
     .handle("delete", ({ params }) => CurrentMember.use(({ id }) => projects.delete(id, params.projectId)))
     .handle("addEnvironment", ({ params, payload }) =>
       CurrentMember.use(({ id }) => projects.addEnvironment(id, params.projectId, payload.name)))
+    .handle("members", ({ params }) => CurrentMember.use(({ id }) => projects.members(id, params.projectId)))
+    .handle("addMember", ({ params, payload }) => CurrentMember.use(({ id }) => projects.addMember(id, params.projectId, payload)))
+    .handle("changeMemberRole", ({ params, payload }) =>
+      CurrentMember.use(({ id }) => projects.changeMemberRole(id, params.projectId, params.memberId, payload.role)))
+    .handle("removeMember", ({ params }) =>
+      CurrentMember.use(({ id }) => projects.removeMember(id, params.projectId, params.memberId)))
 }))
 
 const EnvironmentsHandlers = HttpApiBuilder.group(FlockApi, "environments", Effect.fn(function*(handlers) {
   const projects = yield* Projects
   return handlers
+    .handle("update", ({ params, payload }) => CurrentMember.use(({ id }) => projects.updateEnvironment(id, params.environmentId, payload)))
     .handle("delete", ({ params }) => CurrentMember.use(({ id }) => projects.deleteEnvironment(id, params.environmentId)))
     .handle("rotateKey", ({ params }) => CurrentMember.use(({ id }) => projects.rotateKey(id, params.environmentId)))
     .handle("deleteEvents", ({ params }) => CurrentMember.use(({ id }) => projects.deleteEvents(id, params.environmentId)))
