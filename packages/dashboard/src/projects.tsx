@@ -1,11 +1,22 @@
 // The Member's Projects: the Project list, creating a Project, and one Project's
-// page with its Environment switcher and settings.
-import { type Environment, type EnvironmentId, PRODUCTION, type Project, type ProjectId, type TrackingMode } from "@flock/shared"
+// page with its Environment switcher, settings and sharing. Viewers see only the
+// reports and who the Project is shared with; the controls they can't use are hidden.
+import {
+  type Environment,
+  type EnvironmentId,
+  type MemberId,
+  PRODUCTION,
+  type Project,
+  type ProjectId,
+  type ProjectRole,
+  type TrackingMode
+} from "@flock/shared"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { type CSSProperties, type FormEvent, type ReactNode, useState } from "react"
 import { request } from "./api.ts"
 import { OverviewReport } from "./overview.tsx"
 import { AudienceReports } from "./audience.tsx"
+import { currentMember } from "./auth.ts"
 import { usePoll } from "./use-poll.ts"
 
 const muted: CSSProperties = { fontSize: 14, color: "#666" }
@@ -48,7 +59,10 @@ export const ProjectsPage = () => {
         {data?.map((project) => (
           <li key={project.id}>
             <Link to="/projects/$projectId" params={{ projectId: project.id }}>{project.name}</Link>{" "}
-            <span style={muted}>· {project.environments.length} Environment{project.environments.length === 1 ? "" : "s"}</span>
+            <span style={muted}>
+              · {project.environments.length} Environment{project.environments.length === 1 ? "" : "s"}
+              {project.role === "viewer" ? " · viewer" : ""}
+            </span>
           </li>
         ))}
       </ul>
@@ -95,7 +109,10 @@ export const ProjectPage = ({ projectId, env }: { projectId: ProjectId; env: str
   return (
     <>
       <h2 style={{ marginBottom: 4 }}>{project.name}</h2>
-      <p style={{ ...muted, marginTop: 0 }}>Time zone {project.timeZone} · Tracking mode {project.trackingMode}</p>
+      <p style={{ ...muted, marginTop: 0 }}>
+        Time zone {project.timeZone} · Tracking mode {project.trackingMode}
+        {project.role === "viewer" ? " · You're a viewer of this Project" : ""}
+      </p>
       <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
         Environment
         <select value={environment.name} onChange={(e) => void select(e.target.value)} data-testid="environment-switcher">
@@ -125,6 +142,7 @@ export const ProjectPage = ({ projectId, env }: { projectId: ProjectId; env: str
           </>
         )
         : null}
+      <Sharing project={project} onChange={reload} />
     </>
   )
 }
@@ -268,6 +286,86 @@ const ProjectSettings = ({ project, onChange }: { project: Project; onChange: ()
       <div>
         <button type="button" disabled={action.busy} style={danger} onClick={remove}>Delete Project</button>
       </div>
+      {action.alert}
+    </Section>
+  )
+}
+
+/** Who the Project is shared with. Owners add Members, change roles and remove people. */
+const Sharing = ({ project, onChange }: { project: Project; onChange: () => Promise<void> }) => {
+  const navigate = useNavigate()
+  const projectId = project.id
+  const isOwner = project.role === "owner"
+  const { data: members, reload } = usePoll(() => request((api) => api.projects.members({ params: { projectId } })), [projectId])
+  const action = useAction()
+  const afterChange = async () => {
+    await reload()
+    // Changing your own role or leaving changes what you may see.
+    await onChange()
+  }
+  const setRole = (memberId: MemberId, role: ProjectRole) =>
+    void action.run(async () => {
+      await request((api) => api.projects.changeMemberRole({ params: { projectId, memberId }, payload: { role } }))
+      await afterChange()
+    })
+  const remove = (memberId: MemberId, email: string) => {
+    if (!window.confirm(`Remove ${email} from ${project.name}?`)) return
+    void action.run(async () => {
+      await request((api) => api.projects.removeMember({ params: { projectId, memberId } }))
+      // Leaving the Project: it's gone from your list.
+      if ((await currentMember())?.id === memberId) return navigate({ to: "/" })
+      await afterChange()
+    })
+  }
+  const add = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const form = event.currentTarget
+    const data = new FormData(form)
+    const payload = { email: String(data.get("email")).trim(), role: String(data.get("role")) as ProjectRole }
+    void action.run(async () => {
+      await request((api) => api.projects.addMember({ params: { projectId }, payload }))
+      form.reset()
+      await reload()
+    })
+  }
+  return (
+    <Section title="Sharing">
+      <p style={{ ...muted, margin: 0 }}>Owners manage the Project; viewers see its reports for every Environment.</p>
+      <ul style={{ paddingLeft: 20, margin: 0 }} data-testid="project-members">
+        {members?.map((m) => (
+          <li key={m.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "2px 0" }}>
+            <span>{m.name} <span style={muted}>{m.email}</span></span>
+            {isOwner
+              ? (
+                <>
+                  <select
+                    aria-label={`Role of ${m.email}`}
+                    value={m.role}
+                    disabled={action.busy}
+                    onChange={(e) => setRole(m.id, e.target.value as ProjectRole)}
+                  >
+                    <option value="owner">owner</option>
+                    <option value="viewer">viewer</option>
+                  </select>
+                  <button type="button" disabled={action.busy} style={danger} onClick={() => remove(m.id, m.email)}>Remove</button>
+                </>
+              )
+              : <span style={muted}>· {m.role}</span>}
+          </li>
+        ))}
+      </ul>
+      {isOwner
+        ? (
+          <form onSubmit={add} style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <input name="email" type="email" required placeholder="Member's email" aria-label="Member's email" />
+            <select name="role" defaultValue="viewer" aria-label="Role">
+              <option value="viewer">viewer</option>
+              <option value="owner">owner</option>
+            </select>
+            <button type="submit" disabled={action.busy}>Share</button>
+          </form>
+        )
+        : null}
       {action.alert}
     </Section>
   )
