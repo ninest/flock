@@ -47,9 +47,22 @@ Tests only go through two seams and never look at tables or internals:
 1. **The server's HTTP API** (`packages/server/test`). `Harness.layer()` in `test/harness.ts` runs the whole server in-process against a throwaway Postgres database (`flock_test_<random>`, created per `layer(...)` block and dropped afterwards). It provides a typed client (`h.client`), raw `h.fetch`, `h.seedProject(...)` for fixtures, `TestClock` (from `@effect/vitest`) for time, and `Harness.layer({ geoIp: { "203.0.113.7": "DE" } })` for a fixed GeoIP table. `TEST_DATABASE_ADMIN_URL` overrides the admin connection (default `postgres://postgres:postgres@127.0.0.1:2432/postgres`).
 2. **The browser script's outgoing requests** in headless Chromium against playground pages (set up with the script in #5).
 
+## Self-hosting
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/ninest/flock/main/deploy/docker-compose.yml
+echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)" > .env
+docker compose up -d
+```
+
+The image is `ghcr.io/ninest/flock` (tags `X.Y.Z`, `X.Y`, `X`, `latest`); run it with a `DATABASE_URL` and it migrates on boot. [docs/self-hosting.md](docs/self-hosting.md) covers environment variables, Railway, upgrading and backups. Contributors: schema changes follow the expand/contract rule in [docs/migrations.md](docs/migrations.md), and releases are cut as in [docs/releasing.md](docs/releasing.md).
+
 ## Docker
 
 ```sh
 docker build -t flock .
 docker run -p 2100:2100 -e DATABASE_URL=postgres://user:pass@host:5432/flock flock
+scripts/smoke.sh http://localhost:2100   # health, dashboard, OpenAPI
 ```
+
+CI (`.github/workflows/image.yml`) builds the image on every push and pull request and boots it against Postgres, through `deploy/docker-compose.yml`, and next to the previous release.

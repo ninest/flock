@@ -2,7 +2,8 @@
 // table lock, so concurrent boots are safe). Never edit a released migration:
 // add a new `<next id>_<name>` entry. Each one must stay compatible with the
 // previous release (expand/contract), and must not use non-transactional DDL
-// such as CREATE INDEX CONCURRENTLY.
+// such as CREATE INDEX CONCURRENTLY. See docs/migrations.md; CI boots the previous
+// release's image against the migrated schema.
 import { NodeServices } from "@effect/platform-node"
 import { PgMigrator } from "@effect/sql-pg"
 import { Layer } from "effect"

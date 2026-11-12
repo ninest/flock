@@ -5,6 +5,11 @@ on:
     branches: [main, "feat/**", "ticket-*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      previous_image:
+        description: Image to treat as the previous release in the compatibility check (e.g. flock:ci)
+        type: string
+        default: ""
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -24,8 +29,8 @@ jobs:
     env:
       TEST_DATABASE_ADMIN_URL: postgres://postgres:postgres@localhost:5432/postgres
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - run: corepack enable
@@ -42,3 +47,4 @@ jobs:
       packages: write
     with:
       push: false
+      previous_image: ${{ inputs.previous_image || '' }}

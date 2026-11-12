@@ -12,6 +12,10 @@ on:
       push:
         type: boolean
         default: false
+      previous_image:
+        description: Image to treat as the previous release (overrides the latest release tag; for testing this check)
+        type: string
+        default: ""
 
 env:
   IMAGE: ghcr.io/ninest/flock
@@ -32,14 +36,14 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 3s --health-retries 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # tags, to find the previous release
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - name: Build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           load: true
@@ -80,6 +84,8 @@ jobs:
 
       - name: Find the previous release
         id: previous
+        env:
+          OVERRIDE: ${{ inputs.previous_image }}
         run: |
           current="${GITHUB_REF_NAME}"
           if [[ "$GITHUB_REF_TYPE" == tag ]]; then
@@ -88,19 +94,20 @@ jobs:
           else
             previous="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1)"
           fi
-          echo "tag=$previous" >> "$GITHUB_OUTPUT"
-          if [[ -z "$previous" ]]; then
+          image="${previous:+$IMAGE:${previous#v}}"
+          [[ -n "$OVERRIDE" ]] && image="$OVERRIDE"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          if [[ -z "$image" ]]; then
             echo "::notice title=No previous release::No earlier release tag, so the previous-release compatibility check is skipped."
           else
-            echo "previous release: $previous"
+            echo "previous release: $image"
           fi
 
       - name: Previous release works against the migrated schema
-        if: steps.previous.outputs.tag != ''
+        if: steps.previous.outputs.image != ''
         env:
-          PREVIOUS: ${{ steps.previous.outputs.tag }}
+          previous_image: ${{ steps.previous.outputs.image }}
         run: |
-          previous_image="$IMAGE:${PREVIOUS#v}"
           psql -h localhost -U postgres -c "CREATE DATABASE compat"
           url=postgres://postgres:postgres@localhost:5432/compat
           # The previous release creates its schema and data first, like a live Instance...
@@ -115,7 +122,7 @@ jobs:
           scripts/smoke.sh http://localhost:2100 pk_dev_playground
 
       - name: Logs (previous release)
-        if: always() && steps.previous.outputs.tag != ''
+        if: always() && steps.previous.outputs.image != ''
         run: |
           docker logs flock-previous 2>&1 | tail -n 100 || true
           docker logs flock-new 2>&1 | tail -n 100 || true
@@ -143,7 +150,7 @@ jobs:
 
       - name: Publish
         if: inputs.push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: true
