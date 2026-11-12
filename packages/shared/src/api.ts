@@ -16,6 +16,7 @@ import {
 } from "./domain.ts"
 import { IngestBatch, IngestResult, UnknownKey } from "./ingest.ts"
 import { Overview, OverviewQuery } from "./reports.ts"
+import { CustomEventsGroup } from "./custom-events.ts"
 import { CreatedInvite, Forbidden, Invite, InviteId, InviteNotFound, InstanceSettings, Member, MemberAuth, MemberId, MemberNotFound, SignInOptions } from "./members.ts"
 
 export class IngestGroup extends HttpApiGroup.make("ingest")
@@ -184,6 +185,7 @@ export class FlockApi extends HttpApi.make("flock")
   .add(ProjectsGroup)
   .add(EnvironmentsGroup)
   .add(ReportsGroup)
+  .add(CustomEventsGroup)
   .add(SignInGroup)
   .add(MembersGroup)
   .add(InstanceGroup)

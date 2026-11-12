@@ -4,6 +4,7 @@
 import { Layer, type Redacted } from "effect"
 import { Access } from "./access.ts"
 import { BetterAuth } from "./auth.ts"
+import { CustomEvents } from "./custom-events.ts"
 import { Enrichment } from "./enrichment.ts"
 import { EventPartitions } from "./event-partitions.ts"
 import { Ingest } from "./ingest.ts"
@@ -14,7 +15,7 @@ import { Sessions } from "./sessions.ts"
 import { Visitors } from "./visitors.ts"
 
 export const AppLive = (databaseUrl: Redacted.Redacted<string>) =>
-  Layer.mergeAll(Ingest.layer, Reports.layer, Seed.layer, EventPartitions.maintenance).pipe(
+  Layer.mergeAll(Ingest.layer, Reports.layer, CustomEvents.layer, Seed.layer, EventPartitions.maintenance).pipe(
     Layer.provideMerge(Layer.mergeAll(Projects.layer, Visitors.layer, Sessions.layer)),
     Layer.provideMerge(Enrichment.layer),
     Layer.provideMerge(EventPartitions.layer),

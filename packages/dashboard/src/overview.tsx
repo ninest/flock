@@ -32,7 +32,7 @@ const periods: ReadonlyArray<{ value: ReportPeriod; label: string }> = [
 ]
 
 /** The date range picker. Custom ranges are local dates in the Project's time zone. */
-const RangePicker = ({ query, onChange }: { query: OverviewQuery; onChange: (query: OverviewQuery) => void }) => {
+export const RangePicker = ({ query, onChange }: { query: OverviewQuery; onChange: (query: OverviewQuery) => void }) => {
   const [from, setFrom] = useState(query.from ?? "")
   const [to, setTo] = useState(query.to ?? "")
   const applyCustom = (f: string, t: string) => {

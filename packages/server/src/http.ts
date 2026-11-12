@@ -5,6 +5,7 @@ import { Effect, Layer, Option } from "effect"
 import { HttpRouter, type HttpServerRequest, HttpServerResponse, HttpStaticServer } from "effect/http"
 import { HttpApiBuilder, HttpApiMiddleware, HttpApiScalar } from "effect/http-api"
 import { Access, AuthConfig } from "./access.ts"
+import { CustomEventsHandlers } from "./custom-events.ts"
 import { AuthRoutes, currentMember, MemberAuthLive } from "./auth.ts"
 import type { RequestContext } from "./enrichment.ts"
 import { Ingest } from "./ingest.ts"
@@ -113,7 +114,7 @@ const InstanceHandlers = HttpApiBuilder.group(FlockApi, "instance", Effect.fn(fu
 }))
 
 const ApiRoutes = HttpApiBuilder.layer(FlockApi, { openapiPath: "/api/openapi.json" }).pipe(
-  Layer.provide([HealthHandlers, IngestHandlers, ProjectsHandlers, EnvironmentsHandlers, ReportsHandlers, SignInHandlers, MembersHandlers, InstanceHandlers]),
+  Layer.provide([HealthHandlers, IngestHandlers, ProjectsHandlers, EnvironmentsHandlers, ReportsHandlers, CustomEventsHandlers, SignInHandlers, MembersHandlers, InstanceHandlers]),
   Layer.provide(MemberAuthLive),
   Layer.provide(HttpApiMiddleware.layerProblemDetails({ includeDetails: true }))
 )

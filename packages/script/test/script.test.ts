@@ -51,7 +51,10 @@ describe("Custom events", () => {
     await site.waitForEvents(1)
     await site.page.click("text=Complete game")
     const [, event] = await site.waitForEvents(2)
-    expect(event).toMatchObject({ name: "game_completed", properties: { score: expect.any(Number) } })
+    expect(event).toMatchObject({
+      name: "game_completed",
+      properties: { score: expect.any(Number), level: expect.stringMatching(/^(easy|medium|hard)$/) }
+    })
   })
 
   it("track(name) sends a Custom event from the page's own code", async () => {
