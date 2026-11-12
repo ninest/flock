@@ -104,12 +104,34 @@ export class EnvironmentsGroup extends HttpApiGroup.make("environments")
 /** A half-open time range `[from, to)` for a report. */
 export const DateRange = { from: Schema.DateTimeUtcFromString, to: Schema.DateTimeUtcFromString }
 
+/** One value of an Event property and how many Events had it (`null`: Events without it). */
+export const BreakdownRow = Schema.Struct({ value: Schema.NullOr(Schema.String), count: Schema.Number })
+export type BreakdownRow = typeof BreakdownRow.Type
+
 export class ReportsGroup extends HttpApiGroup.make("reports")
   .add(
     HttpApiEndpoint.get("pageviewCount", "/:environmentId/pageviews", {
       params: { environmentId: EnvironmentId },
       query: DateRange,
       success: Schema.Struct({ pageviews: Schema.Number }),
+      error: EnvironmentNotFound
+    }),
+    /**
+     * Counts Events (Pageviews unless `event` is given) by the value of one Event property,
+     * most frequent first. Events without the property count under `null`. The audience
+     * reports are breakdowns by `$country`, `$browser`, `$os` and `$device`.
+     */
+    HttpApiEndpoint.get("breakdown", "/:environmentId/breakdown", {
+      params: { environmentId: EnvironmentId },
+      query: { ...DateRange, property: Schema.String, event: Schema.optional(Schema.String) },
+      success: Schema.Array(BreakdownRow),
+      error: EnvironmentNotFound
+    }),
+    /** Every Event property key seen on the Environment's Events in the range, sorted. */
+    HttpApiEndpoint.get("propertyKeys", "/:environmentId/property-keys", {
+      params: { environmentId: EnvironmentId },
+      query: DateRange,
+      success: Schema.Struct({ keys: Schema.Array(Schema.String) }),
       error: EnvironmentNotFound
     })
   )

@@ -20,6 +20,12 @@ RUN pnpm --filter @flock/dashboard build && pnpm --filter @flock/script build
 FROM base AS prod-deps
 RUN pnpm install --frozen-lockfile --prod --filter "@flock/server..."
 
+# The bundled GeoIP database: DB-IP IP to Country Lite (CC BY 4.0), about 8 MB.
+FROM node:24-alpine AS geoip
+WORKDIR /app
+COPY scripts/download-geoip.sh scripts/
+RUN sh scripts/download-geoip.sh /app/geoip/dbip-country-lite.mmdb
+
 FROM node:24-alpine
 LABEL org.opencontainers.image.source="https://github.com/ninest/flock" \
       org.opencontainers.image.description="Flock: self-hostable, event-based analytics on Postgres"
@@ -35,6 +41,7 @@ COPY packages/shared/package.json packages/shared/
 COPY packages/shared/src packages/shared/src
 COPY --from=build /app/packages/dashboard/dist packages/dashboard/dist
 COPY --from=build /app/packages/script/dist packages/script/dist
+COPY --from=geoip /app/geoip/dbip-country-lite.mmdb packages/server/data/dbip-country-lite.mmdb
 USER node
 EXPOSE 2100
 HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=3 \

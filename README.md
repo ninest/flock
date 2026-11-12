@@ -2,6 +2,21 @@
 
 Self-hostable, event-based analytics for websites and apps: one Docker image backed by Postgres. See `GLOSSARY.md` for the vocabulary and `docs/adr/` for decisions.
 
+## Try it (local testing cheat-sheet)
+
+Run `make dev`, then:
+
+| What | Where |
+|---|---|
+| Dashboard | http://hel:2101 (sign in at `/sign-in`) |
+| Dev admin login | `admin@flock.test` / `flock-dev-password` |
+| Playground site | http://hel:2102 (if 2102 is taken, `make dev` prints the port it used instead, e.g. 2103) |
+| Server, API docs | http://hel:2100, http://hel:2100/api/docs |
+| Playground Project keys | `pk_dev_playground` (used by the playground), `pk_production_playground` |
+| Instance admin page (Invites, Open sign-up, Members) | http://hel:2101/instance |
+
+Playground pages: `/` (Pageview, **Log in** and **Complete game** buttons), `/spa` (SPA navigation), `/ingest` (raw ingest form). Open the Playground Project in the dashboard and switch to the `dev` Environment to see the Events arrive.
+
 ## Repository
 
 A pnpm workspace:
@@ -49,7 +64,7 @@ pnpm -r typecheck
 
 Tests only go through two seams and never look at tables or internals:
 
-1. **The server's HTTP API** (`packages/server/test`). `Harness.layer()` in `test/harness.ts` runs the whole server in-process against a throwaway Postgres database (`flock_test_<random>`, created per `layer(...)` block and dropped afterwards). It provides a typed client signed in as an Instance admin (`h.client`), raw `h.fetch` without cookies, `h.sdk` (a typed client without cookies or an `Origin`, like a server sending Events), `h.browser()` (a fresh cookie jar with `signUp`/`signIn` and its own typed client), `h.seedMember(...)`, `h.adminCommand([...])` (the admin CLI command, in-process), `Harness.layer({ adminEmail })` for `FLOCK_ADMIN_EMAIL`, `h.createProject(...)` (the Projects API) for fixtures, `TestClock` (from `@effect/vitest`) for time, and `Harness.layer({ geoIp: { "203.0.113.7": "DE" } })` for a fixed GeoIP table. `TEST_DATABASE_ADMIN_URL` overrides the admin connection (default `postgres://postgres:postgres@127.0.0.1:2432/postgres`).
+1. **The server's HTTP API** (`packages/server/test`). `Harness.layer()` in `test/harness.ts` runs the whole server in-process against a throwaway Postgres database (`flock_test_<random>`, created per `layer(...)` block and dropped afterwards). It provides a typed client signed in as an Instance admin (`h.client`), raw `h.fetch` without cookies, `h.sdk` (a typed client without cookies or an `Origin`, like a server sending Events), `h.browser()` (a fresh cookie jar with `signUp`/`signIn` and its own typed client), `h.seedMember(...)`, `h.adminCommand([...])` (the admin CLI command, in-process), `Harness.layer({ adminEmail })` for `FLOCK_ADMIN_EMAIL`, `h.createProject(...)` (the Projects API) for fixtures, `TestClock` (from `@effect/vitest`) for time, `Harness.layer({ geoIp: { "203.0.113.7": "DE", "198.51.100.23": { country: "US", region: "California" } } })` for a fixed GeoIP table, `h.ingest(key, events, { ip, userAgent })` to send a batch with a client IP (as `X-Forwarded-For`) and User-Agent, and `h.breakdown(environmentId, "$country", range)` / `h.propertyKeys(...)` to read reports back. `TEST_DATABASE_ADMIN_URL` overrides the admin connection (default `postgres://postgres:postgres@127.0.0.1:2432/postgres`).
 2. **The browser script's outgoing requests** (`packages/script/test`). `openPlayground(browser())` in `test/harness.ts` opens the playground pages in headless Chromium (Playwright), serving them and the freshly built script with request routing (no real servers), and captures every request to `/api/ingest`. Tests assert on those requests and the page only. One-time setup: `pnpm --filter @flock/script exec playwright install chromium --only-shell`. `test/size.test.ts` fails if the gzipped script exceeds 2 KB; `pnpm --filter @flock/script build` checks it too.
 
 The browser script:
@@ -66,7 +81,7 @@ It sends a `$pageview` on load and on `pushState`/`popstate`, gives each Event a
 `POST /api/ingest` takes `{ key, events: [{ uuid, name, timestamp?, distinct_id?, properties? }] }` and answers `{ accepted, rejected: [{ index, uuid, reason }] }`. Each Event is checked on its own:
 
 - At most 50 Event properties, 8 KB of JSON, and 200 characters per Event name or Event property name.
-- `$` is reserved: Custom event names and their Event property names can't start with it. Built-in events (`$pageview`) may carry `$` properties.
+- `$` is reserved for Flock: only Built-in event names (`$pageview`) and Flock-defined Event properties (`$url`, `$referrer`, and the audience properties, which Flock replaces) may start with it.
 - A repeated `uuid` (per Environment) is ignored but still counted as accepted, so retries are safe.
 - `timestamp` is kept when it is at most 24 hours old; otherwise (older, in the future, unparseable) the receive time is used.
 - Browser requests (with an `Origin` header) must match the Environment's allowed origins, or the whole batch gets a 403 `OriginNotAllowed`. Empty (production's default) means any public origin, rejecting localhost and private networks; new non-production Environments allow `localhost` and `*.ts.net`. Owners edit them in the dashboard.

@@ -18,7 +18,15 @@
 // One database per `layer(...)` block (usually one per test file), dropped when
 // the block finishes. Tests observe behavior only through HTTP: never query tables.
 import { NodeHttpServer } from "@effect/platform-node"
-import { type EnvironmentId, FlockApi, type IngestEvent, type MemberId, type Project } from "@flock/shared"
+import {
+  type BreakdownRow,
+  type EnvironmentId,
+  FlockApi,
+  type IngestEvent,
+  type IngestResult,
+  type MemberId,
+  type Project
+} from "@flock/shared"
 import { Context, DateTime, Effect, Layer, Option, Redacted, type Scope } from "effect"
 import { FetchHttpClient, HttpEffect, HttpRouter } from "effect/http"
 import type { HttpServerRequest } from "effect/http/HttpServerRequest"
@@ -41,8 +49,8 @@ const publicDir = fileURLToPath(new URL("./fixtures/public", import.meta.url))
 export const scriptFile = fileURLToPath(new URL("./fixtures/flock.js", import.meta.url))
 
 export interface HarnessOptions {
-  /** IP address -> ISO country code, served by the GeoIP test layer. */
-  readonly geoIp?: Record<string, string>
+  /** IP address -> ISO country code (or country and region), served by the GeoIP test layer. */
+  readonly geoIp?: Record<string, string | { readonly country: string; readonly region?: string }>
   /** FLOCK_ADMIN_EMAIL (default `owner@flock.test`). */
   readonly adminEmail?: string
   /** Leave FLOCK_PUBLIC_URL and BETTER_AUTH_SECRET unset, like a fresh self-hosted Instance. */
@@ -135,6 +143,27 @@ export class Harness extends Context.Service<Harness, {
     environmentId: EnvironmentId,
     range: { readonly from: string; readonly to: string }
   ) => Effect.Effect<number, unknown>
+  /**
+   * POSTs a batch to the ingest endpoint like a browser behind a proxy would:
+   * `ip` goes in X-Forwarded-For, `userAgent` in User-Agent.
+   */
+  readonly ingest: (
+    key: string,
+    events: ReadonlyArray<IngestEvent>,
+    request: { readonly ip?: string; readonly userAgent?: string }
+  ) => Effect.Effect<IngestResult>
+  /** Convenience: a breakdown report (Pageviews unless `event`) by one Event property. */
+  readonly breakdown: (
+    environmentId: EnvironmentId,
+    property: string,
+    range: { readonly from: string; readonly to: string },
+    event?: string
+  ) => Effect.Effect<ReadonlyArray<BreakdownRow>>
+  /** Convenience: the Event property keys seen in `[from, to)`. */
+  readonly propertyKeys: (
+    environmentId: EnvironmentId,
+    range: { readonly from: string; readonly to: string }
+  ) => Effect.Effect<ReadonlyArray<string>>
 }>()("test/Harness") {
   static readonly layer = (options: HarnessOptions = {}) =>
     Layer.effect(
@@ -203,7 +232,32 @@ export class Harness extends Context.Service<Harness, {
             query: { from: DateTime.makeUnsafe(range.from), to: DateTime.makeUnsafe(range.to) }
           }).pipe(Effect.map((r) => r.pageviews))
 
+        const toRange = (range: { readonly from: string; readonly to: string }) => ({
+          from: DateTime.makeUnsafe(range.from),
+          to: DateTime.makeUnsafe(range.to)
+        })
+
+        const ingest: Harness["Service"]["ingest"] = (key, events, request) =>
+          Effect.promise(async () => {
+            const headers = new Headers({ "content-type": "application/json" })
+            if (request.ip !== undefined) headers.set("x-forwarded-for", request.ip)
+            if (request.userAgent !== undefined) headers.set("user-agent", request.userAgent)
+            const response = await fetch("/api/ingest", { method: "POST", headers, body: JSON.stringify({ key, events }) })
+            if (!response.ok) throw new Error(`ingest answered ${response.status}: ${await response.text()}`)
+            return (await response.json()) as IngestResult
+          })
+
+        const breakdown: Harness["Service"]["breakdown"] = (environmentId, property, range, event) =>
+          client.reports.breakdown({ params: { environmentId }, query: { ...toRange(range), property, event } }).pipe(Effect.orDie)
+
+        const propertyKeys: Harness["Service"]["propertyKeys"] = (environmentId, range) =>
+          client.reports.propertyKeys({ params: { environmentId }, query: toRange(range) }).pipe(
+            Effect.map((r) => r.keys),
+            Effect.orDie
+          )
+
         return Harness.of({
+          ingest, breakdown, propertyKeys,
           handler,
           fetch,
           sdk,

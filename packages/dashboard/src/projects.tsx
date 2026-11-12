@@ -5,6 +5,7 @@ import { Link, useNavigate } from "@tanstack/react-router"
 import { DateTime } from "effect"
 import { type CSSProperties, type FormEvent, type ReactNode, useState } from "react"
 import { request } from "./api.ts"
+import { AudienceReports } from "./audience.tsx"
 import { usePoll } from "./use-poll.ts"
 
 const muted: CSSProperties = { fontSize: 14, color: "#666" }
@@ -107,6 +108,7 @@ export const ProjectPage = ({ projectId, env }: { projectId: ProjectId; env: str
         </select>
       </label>
       <EnvironmentPageviews key={environment.id} environment={environment} />
+      <AudienceReports key={`audience-${environment.id}`} environment={environment} />
       {project.role === "owner"
         ? (
           <>

@@ -20,6 +20,14 @@
       <button id="game">Complete game</button>
       sends <code>game_completed</code> with a random <code>score</code> Event property.
     </p>
+    <h2>Enrichment</h2>
+    <p>
+      <a id="tracked-link" href="/pricing?token=s3cret&amp;email=someone%40example.com&amp;utm_source=playground&amp;utm_campaign=enrichment">Open Pricing with a token, an email and UTM tags</a>
+      in the URL. Flock stores the Pageview's URL with only the <code>utm_*</code> parameters left, and adds
+      <code>$country</code>, <code>$browser</code>, <code>$os</code> and <code>$device</code> from the request
+      (never the IP itself). See them under Audience on the dashboard. Visiting from localhost or a private
+      network gives an unknown country.
+    </p>
     <script>
       document.getElementById("config").textContent = `Script from ${FLOCK.api}/flock.js, key ${FLOCK.key}`
       document.getElementById("login").onclick = () => {

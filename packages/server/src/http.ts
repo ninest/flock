@@ -2,10 +2,11 @@
 import { PgClient } from "@effect/sql-pg"
 import { CurrentMember, FlockApi, Forbidden, InviteNotFound, MemberNotFound } from "@flock/shared"
 import { Effect, Layer, Option } from "effect"
-import { HttpRouter, HttpServerResponse, HttpStaticServer } from "effect/http"
+import { HttpRouter, type HttpServerRequest, HttpServerResponse, HttpStaticServer } from "effect/http"
 import { HttpApiBuilder, HttpApiMiddleware, HttpApiScalar } from "effect/http-api"
 import { Access } from "./access.ts"
 import { AuthRoutes, currentMember, MemberAuthLive } from "./auth.ts"
+import type { RequestContext } from "./enrichment.ts"
 import { Ingest } from "./ingest.ts"
 import { Projects } from "./projects.ts"
 import { Reports } from "./reports.ts"
@@ -17,9 +18,21 @@ const HealthHandlers = HttpApiBuilder.group(FlockApi, "health", Effect.fn(functi
 
 const IngestHandlers = HttpApiBuilder.group(FlockApi, "ingest", Effect.fn(function*(handlers) {
   const ingest = yield* Ingest
-  return handlers.handle("send", ({ payload, request }) =>
-    ingest.send(payload, { origin: request.headers["origin"], userAgent: request.headers["user-agent"] }))
+  return handlers.handle("send", ({ payload, request }) => ingest.send(payload, requestContext(request)))
 }))
+
+/**
+ * The client IP, User-Agent and Origin of an ingest request. Flock runs behind a proxy (Railway,
+ * Docker, `tailscale serve`), so the first X-Forwarded-For address wins over the socket.
+ */
+const requestContext = (request: HttpServerRequest.HttpServerRequest): RequestContext => {
+  const forwarded = request.headers["x-forwarded-for"]?.split(",")[0]?.trim()
+  return {
+    ip: forwarded || Option.getOrNull(request.remoteAddress),
+    userAgent: request.headers["user-agent"] ?? null,
+    origin: request.headers["origin"] ?? null
+  }
+}
 
 const ProjectsHandlers = HttpApiBuilder.group(FlockApi, "projects", Effect.fn(function*(handlers) {
   const projects = yield* Projects
@@ -50,8 +63,14 @@ const EnvironmentsHandlers = HttpApiBuilder.group(FlockApi, "environments", Effe
 
 const ReportsHandlers = HttpApiBuilder.group(FlockApi, "reports", Effect.fn(function*(handlers) {
   const reports = yield* Reports
-  return handlers.handle("pageviewCount", ({ params, query }) =>
-    CurrentMember.use(({ id }) => reports.pageviewCount(id, params.environmentId, query)).pipe(Effect.map((pageviews) => ({ pageviews }))))
+  return handlers
+    .handle("pageviewCount", ({ params, query }) =>
+      CurrentMember.use(({ id }) => reports.pageviewCount(id, params.environmentId, query)).pipe(Effect.map((pageviews) => ({ pageviews }))))
+    .handle("breakdown", ({ params, query }) =>
+      CurrentMember.use(({ id }) =>
+        reports.breakdown(id, params.environmentId, query, { property: query.property, event: query.event ?? "$pageview" })))
+    .handle("propertyKeys", ({ params, query }) =>
+      CurrentMember.use(({ id }) => reports.propertyKeys(id, params.environmentId, query)).pipe(Effect.map((keys) => ({ keys }))))
 }))
 
 const MembersHandlers = HttpApiBuilder.group(FlockApi, "members", (handlers) => handlers.handle("me", () => currentMember))

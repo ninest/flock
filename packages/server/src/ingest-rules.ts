@@ -2,6 +2,7 @@
 // origin check, bot filter, per-Event validation and limits, and the Event time.
 import { IngestEvent, IngestLimits } from "@flock/shared"
 import { DateTime, Duration, Option, Result, Schema } from "effect"
+import { AUDIENCE_PROPERTIES } from "./enrichment.ts"
 
 // --- Origins -----------------------------------------------------------------
 
@@ -66,6 +67,13 @@ export const isBot = (userAgent: string | undefined) => userAgent !== undefined 
 /** Built-in events a client may send. Every other name starting with `$` is reserved. */
 export const BUILT_IN_EVENTS: ReadonlySet<string> = new Set(["$pageview"])
 
+/**
+ * Flock-defined Event properties a client may send on any Event: the URLs the browser
+ * script adds, and the audience properties (which Enrichment replaces anyway). Every
+ * other property name starting with `$` is reserved.
+ */
+export const CLIENT_FLOCK_PROPERTIES: ReadonlySet<string> = new Set(["$url", "$referrer", ...AUDIENCE_PROPERTIES])
+
 const decodeEvent = Schema.decodeUnknownResult(IngestEvent)
 
 const describeShapeError = (raw: unknown) => {
@@ -88,15 +96,14 @@ export const validateEvent = (raw: unknown): Result.Result<IngestEvent, string> 
 
   if (event.name === "") return Result.fail("`name` must not be empty")
   if (event.name.length > maxNameLength) return Result.fail(`Event names are limited to ${maxNameLength} characters`)
-  const builtIn = event.name.startsWith("$")
-  if (builtIn && !BUILT_IN_EVENTS.has(event.name)) {
+  if (event.name.startsWith("$") && !BUILT_IN_EVENTS.has(event.name)) {
     return Result.fail("Event names starting with $ are reserved for Built-in events")
   }
   if (properties.length > maxProperties) return Result.fail(`Events are limited to ${maxProperties} Event properties`)
   if (properties.some((name) => name.length > maxNameLength)) {
     return Result.fail(`Event property names are limited to ${maxNameLength} characters`)
   }
-  if (!builtIn && properties.some((name) => name.startsWith("$"))) {
+  if (properties.some((name) => name.startsWith("$") && !CLIENT_FLOCK_PROPERTIES.has(name))) {
     return Result.fail("Event property names starting with $ are reserved for Flock")
   }
   if (Buffer.byteLength(JSON.stringify(raw)) > maxEventBytes) {

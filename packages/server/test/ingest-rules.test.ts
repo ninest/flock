@@ -67,18 +67,20 @@ layer(Harness.layer())("Ingest limits and reserved names", (it) => {
       assert.deepStrictEqual(fine.body, { accepted: 3, rejected: [] })
     }))
 
-  it.effect("rejects the reserved $ prefix in Custom event names and their Event properties", () =>
+  it.effect("rejects the reserved $ prefix in Custom event names and in Event property names Flock doesn't define", () =>
     Effect.gen(function*() {
       const h = yield* Harness
       const { environments: [production] } = yield* h.createProject({})
       const { body } = yield* send(h, production!.key, [
         customEvent("$login"),
         customEvent("game_completed", { $score: 34 }),
+        pageview({ $mine: 1 }),
         pageview({ $referrer: "https://news.example/" }),
-        customEvent("game_completed", { score: 34 })
+        // The browser script adds $url to every Event, Custom events included.
+        customEvent("game_completed", { score: 34, $url: "https://example.com/play" })
       ])
       assert.strictEqual(body.accepted, 2)
-      assert.deepStrictEqual(body.rejected.map((r) => r.index), [0, 1])
+      assert.deepStrictEqual(body.rejected.map((r) => r.index), [0, 1, 2])
       for (const r of body.rejected) assert.match(r.reason, /\$/)
       assert.strictEqual(yield* count(h, production!.id), 1)
     }))

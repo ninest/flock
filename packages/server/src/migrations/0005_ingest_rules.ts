@@ -9,7 +9,7 @@ export default Effect.gen(function*() {
   yield* sql`ALTER TABLE environment ADD COLUMN allowed_origins jsonb NOT NULL DEFAULT '[]'::jsonb`
   yield* sql`UPDATE environment SET allowed_origins = '["localhost", "*.ts.net"]'::jsonb WHERE name <> 'production'`
   // One row per stored Event: the partitioned event table can't hold a unique index
-  // without the partition key, so UUID uniqueness lives here (ADR 0003).
+  // without the partition key, so UUID uniqueness lives here (ADR 0004).
   yield* sql`
     CREATE TABLE event_uuid (
       environment_id text NOT NULL REFERENCES environment (id) ON DELETE CASCADE,
