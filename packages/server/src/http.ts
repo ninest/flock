@@ -1,4 +1,5 @@
 // HTTP: the FlockApi handlers, the dashboard and the script as static files.
+import { PgClient } from "@effect/sql-pg"
 import { FlockApi } from "@flock/shared"
 import { Effect, Layer } from "effect"
 import { HttpRouter, HttpServerResponse, HttpStaticServer } from "effect/http"
@@ -6,6 +7,11 @@ import { HttpApiBuilder, HttpApiMiddleware, HttpApiScalar } from "effect/http-ap
 import { Ingest } from "./ingest.ts"
 import { Projects } from "./projects.ts"
 import { Reports } from "./reports.ts"
+
+const HealthHandlers = HttpApiBuilder.group(FlockApi, "health", Effect.fn(function*(handlers) {
+  const sql = yield* PgClient.PgClient
+  return handlers.handle("check", () => sql`SELECT 1`.pipe(Effect.as({ status: "ok" as const }), Effect.orDie))
+}))
 
 const IngestHandlers = HttpApiBuilder.group(FlockApi, "ingest", Effect.fn(function*(handlers) {
   const ingest = yield* Ingest
@@ -23,7 +29,7 @@ const ReportsHandlers = HttpApiBuilder.group(FlockApi, "reports", Effect.fn(func
 }))
 
 const ApiRoutes = HttpApiBuilder.layer(FlockApi, { openapiPath: "/api/openapi.json" }).pipe(
-  Layer.provide([IngestHandlers, ProjectsHandlers, ReportsHandlers]),
+  Layer.provide([HealthHandlers, IngestHandlers, ProjectsHandlers, ReportsHandlers]),
   Layer.provide(HttpApiMiddleware.layerProblemDetails({ includeDetails: true }))
 )
 

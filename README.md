@@ -58,9 +58,22 @@ The browser script:
 
 It sends a `$pageview` on load and on `pushState`/`popstate`, gives each Event a UUID, and sends with `sendBeacon` (falling back to `fetch` with `keepalive`) as a `text/plain` JSON body, which needs no CORS preflight. Events go to the origin the script came from, or to `data-api` if set. It writes no cookies or storage.
 
+## Self-hosting
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/ninest/flock/main/deploy/docker-compose.yml
+echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)" > .env
+docker compose up -d
+```
+
+The image is `ghcr.io/ninest/flock` (tags `X.Y.Z`, `X.Y`, `X`, `latest`); run it with a `DATABASE_URL` and it migrates on boot. [docs/self-hosting.md](docs/self-hosting.md) covers environment variables, Railway, upgrading and backups. Contributors: schema changes follow the expand/contract rule in [docs/migrations.md](docs/migrations.md), and releases are cut as in [docs/releasing.md](docs/releasing.md).
+
 ## Docker
 
 ```sh
 docker build -t flock .
 docker run -p 2100:2100 -e DATABASE_URL=postgres://user:pass@host:5432/flock flock
+scripts/smoke.sh http://localhost:2100   # health, dashboard, OpenAPI
 ```
+
+CI (`.github/workflows/image.yml`) builds the image on every push and pull request and boots it against Postgres, through `deploy/docker-compose.yml`, and next to the previous release.

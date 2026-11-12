@@ -1,8 +1,19 @@
-name: CI
+name: ci
+
 on:
   push:
-    branches: [main]
+    branches: [main, "feat/**", "ticket-*"]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      previous_image:
+        description: Image to treat as the previous release in the compatibility check (e.g. flock:ci)
+        type: string
+        default: ""
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -12,19 +23,30 @@ jobs:
         image: postgres:16-alpine
         env:
           POSTGRES_PASSWORD: postgres
-        ports: ["2432:5432"]
+        ports: ["5432:5432"]
         options: >-
-          --health-cmd pg_isready --health-interval 2s --health-timeout 5s --health-retries 15
+          --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 3s --health-retries 30
+    env:
+      TEST_DATABASE_ADMIN_URL: postgres://postgres:postgres@localhost:5432/postgres
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
-          cache: pnpm
+      - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @flock/script exec playwright install --with-deps chromium --only-shell
       - run: pnpm -r typecheck
-      # Includes Seam 1, Seam 2 and the browser script size check (fails above 2 KB gzipped).
+      # Seam 1, Seam 2 (headless Chromium) and the browser script size check (fails above 2 KB gzipped).
       - run: pnpm test
-      - run: pnpm build
+
+  # Builds the image and boots it (alone, via compose, and next to the previous
+  # release). Never publishes: only release tags do (release.yml).
+  image:
+    uses: ./.github/workflows/image.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      push: false
+      previous_image: ${{ inputs.previous_image || '' }}

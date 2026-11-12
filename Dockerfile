@@ -21,6 +21,8 @@ FROM base AS prod-deps
 RUN pnpm install --frozen-lockfile --prod --filter "@flock/server..."
 
 FROM node:24-alpine
+LABEL org.opencontainers.image.source="https://github.com/ninest/flock" \
+      org.opencontainers.image.description="Flock: self-hostable, event-based analytics on Postgres"
 WORKDIR /app
 ENV NODE_ENV=production PORT=2100
 COPY --from=prod-deps /app/node_modules node_modules
@@ -35,4 +37,6 @@ COPY --from=build /app/packages/dashboard/dist packages/dashboard/dist
 COPY --from=build /app/packages/script/dist packages/script/dist
 USER node
 EXPOSE 2100
+HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=3 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:' + (process.env.PORT || 2100) + '/api/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
 CMD ["node", "packages/server/src/main.ts"]
