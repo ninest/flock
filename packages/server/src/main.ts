@@ -21,7 +21,7 @@ const Main = Layer.unwrap(Effect.gen(function*() {
   return Server.pipe(
     Layer.provide(AppWithSeed),
     Layer.provide(GeoIp.layerMmdb(config.geoIpDatabase)),
-    Layer.provide(Layer.succeed(AuthConfig, authSettings(config))),
+    Layer.provide(Layer.effect(AuthConfig, authSettings(config))),
     Layer.provide(MigratorLive), // migrations finish before anything else is built
     Layer.provide(PgLive(config.databaseUrl))
   )

@@ -4,7 +4,7 @@ import { CurrentMember, FlockApi, Forbidden, InviteNotFound, MemberNotFound } fr
 import { Effect, Layer, Option } from "effect"
 import { HttpRouter, type HttpServerRequest, HttpServerResponse, HttpStaticServer } from "effect/http"
 import { HttpApiBuilder, HttpApiMiddleware, HttpApiScalar } from "effect/http-api"
-import { Access } from "./access.ts"
+import { Access, AuthConfig } from "./access.ts"
 import { AuthRoutes, currentMember, MemberAuthLive } from "./auth.ts"
 import type { RequestContext } from "./enrichment.ts"
 import { Ingest } from "./ingest.ts"
@@ -71,6 +71,12 @@ const ReportsHandlers = HttpApiBuilder.group(FlockApi, "reports", Effect.fn(func
       CurrentMember.use(({ id }) => reports.propertyKeys(id, params.environmentId, query)).pipe(Effect.map((keys) => ({ keys }))))
 }))
 
+const SignInHandlers = HttpApiBuilder.group(FlockApi, "signIn", Effect.fn(function*(handlers) {
+  const { oidc, passwordSignIn } = yield* AuthConfig
+  const options = { password: passwordSignIn, oidc: Option.match(oidc, { onNone: () => null, onSome: ({ name }) => ({ name }) }) }
+  return handlers.handle("options", () => Effect.succeed(options))
+}))
+
 const MembersHandlers = HttpApiBuilder.group(FlockApi, "members", (handlers) => handlers.handle("me", () => currentMember))
 
 /** Runs `effect` only when the signed-in Member is an Instance admin. */
@@ -106,7 +112,7 @@ const InstanceHandlers = HttpApiBuilder.group(FlockApi, "instance", Effect.fn(fu
 }))
 
 const ApiRoutes = HttpApiBuilder.layer(FlockApi, { openapiPath: "/api/openapi.json" }).pipe(
-  Layer.provide([HealthHandlers, IngestHandlers, ProjectsHandlers, EnvironmentsHandlers, ReportsHandlers, MembersHandlers, InstanceHandlers]),
+  Layer.provide([HealthHandlers, IngestHandlers, ProjectsHandlers, EnvironmentsHandlers, ReportsHandlers, SignInHandlers, MembersHandlers, InstanceHandlers]),
   Layer.provide(MemberAuthLive),
   Layer.provide(HttpApiMiddleware.layerProblemDetails({ includeDetails: true }))
 )

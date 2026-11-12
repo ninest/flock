@@ -3,11 +3,25 @@
 // back into Access through a promise bridge for sign-up gating and the admin bootstrap.
 import { CurrentMember, Member, MemberAuth, MemberId, Unauthorized } from "@flock/shared"
 import { betterAuth } from "better-auth"
-import { APIError } from "better-auth/api"
+import { APIError, getOAuthState } from "better-auth/api"
+import { genericOAuth } from "better-auth/plugins/generic-oauth"
 import { Context, Effect, Layer, Option, Redacted } from "effect"
 import { HttpEffect, HttpRouter, HttpServerRequest } from "effect/http"
 import pg from "pg"
-import { Access, AuthConfig } from "./access.ts"
+import { Access, AuthConfig, type SignInMethod } from "./access.ts"
+
+/** Better Auth's id for the configured OIDC issuer. */
+export const OIDC_PROVIDER_ID = "misc"
+/**
+ * The callback path registered with the issuer (in auth-misc, for the owner's Instance).
+ * Better Auth serves the callback at /api/auth/callback/misc; AuthRoutes maps this onto it.
+ */
+const OIDC_CALLBACK_PATH = `/api/auth/oauth2/callback/${OIDC_PROVIDER_ID}`
+
+const passwordPaths = new Set(["/sign-up/email", "/sign-in/email"])
+/** Which kind of sign-in a Better Auth endpoint call is. Anything but a password form counts as OIDC. */
+const signInMethod = (context: { readonly path?: string } | null | undefined): SignInMethod =>
+  context?.path !== undefined && passwordPaths.has(context.path) ? "password" : "oidc"
 
 /**
  * Origins allowed to call the auth API. Without FLOCK_PUBLIC_URL, a request's own
@@ -46,17 +60,44 @@ const makeAuth = (options: {
     session: { modelName: "member_session" },
     account: { modelName: "member_account" },
     verification: { modelName: "auth_verification" },
-    emailAndPassword: { enabled: true, autoSignIn: true },
+    emailAndPassword: { enabled: settings.passwordSignIn, autoSignIn: true },
+    plugins: Option.match(settings.oidc, {
+      onNone: () => [],
+      onSome: (oidc) => [
+        genericOAuth({
+          config: [{
+            providerId: OIDC_PROVIDER_ID,
+            discoveryUrl: `${oidc.issuer}/.well-known/openid-configuration`,
+            clientId: oidc.clientId,
+            clientSecret: Redacted.value(oidc.clientSecret),
+            scopes: ["openid", "email", "profile"],
+            pkce: true,
+            requireIdTokenVerification: true,
+            // authSettings requires FLOCK_PUBLIC_URL with an issuer.
+            redirectURI: `${Option.getOrThrow(settings.publicUrl)}${OIDC_CALLBACK_PATH}`
+          }]
+        })
+      ]
+    }),
     databaseHooks: {
       user: {
         create: {
           before: async (member, context) => {
             // No endpoint context: a trusted server-side call (the admin CLI, seeding).
             if (!context) return
-            // Email + password sign-up passes an Invite token as `invite` in its body.
-            const invite = (context.body as { invite?: unknown } | undefined)?.invite
+            const method = signInMethod(context)
+            // Email + password sign-up passes an Invite token as `invite` in its body; OIDC
+            // sign-in passes it as `additionalData.invite`, which comes back in the OAuth state.
+            const invite = method === "password"
+              ? (context.body as { invite?: unknown } | undefined)?.invite
+              : ((await getOAuthState()) as { invite?: unknown } | null)?.invite
             const verdict = await run(
-              access.admitSignUp({ email: member.email, invite: typeof invite === "string" ? invite : undefined })
+              access.admitSignUp({
+                email: member.email,
+                method,
+                emailVerified: member.emailVerified === true,
+                invite: typeof invite === "string" ? invite : undefined
+              })
             )
             if (!verdict.ok) throw new APIError("FORBIDDEN", { code: verdict.code, message: verdict.message })
           }
@@ -64,8 +105,8 @@ const makeAuth = (options: {
       },
       session: {
         create: {
-          after: async (session) => {
-            await run(access.signedIn(MemberId.make(session.userId)))
+          after: async (session, context) => {
+            await run(access.signedIn(MemberId.make(session.userId), signInMethod(context)))
           }
         }
       }
@@ -157,5 +198,14 @@ export const currentMember = Effect.gen(function*() {
 /** Better Auth's endpoints (sign-up, sign-in, sign-out, get-session). */
 export const AuthRoutes = Layer.unwrap(Effect.gen(function*() {
   const auth = yield* BetterAuth
-  return HttpRouter.add("*", "/api/auth/*", HttpEffect.fromWebHandler((request) => auth.handler(request)))
+  return HttpRouter.add(
+    "*",
+    "/api/auth/*",
+    HttpEffect.fromWebHandler((request) => {
+      const url = new URL(request.url)
+      if (url.pathname !== OIDC_CALLBACK_PATH) return auth.handler(request)
+      url.pathname = `/api/auth/callback/${OIDC_PROVIDER_ID}`
+      return auth.handler(new Request(url, request))
+    })
+  )
 }))
