@@ -1,17 +1,23 @@
 import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware, HttpApiSchema, OpenApi } from "effect/http-api"
 import {
+  AlreadyProjectMember,
   Environment,
   EnvironmentId,
   EnvironmentName,
   EnvironmentNameTaken,
   EnvironmentNotFound,
+  LastProjectOwner,
+  NoMemberWithEmail,
   ProductionProtected,
   Project,
   ProjectId,
+  ProjectMember,
+  ProjectMemberNotFound,
   ProjectName,
   ProjectNotFound,
   ProjectOwnerRequired,
+  ProjectRole,
   TimeZone
 } from "./domain.ts"
 import { IngestBatch, IngestResult, UnknownKey } from "./ingest.ts"
@@ -37,6 +43,7 @@ export class HealthGroup extends HttpApiGroup.make("health")
   .annotateMerge(OpenApi.annotations({ title: "Health" })) {}
 
 const projectParams = { projectId: ProjectId }
+const memberParams = { projectId: ProjectId, memberId: MemberId }
 const environmentParams = { environmentId: EnvironmentId }
 
 /** The signed-in Member's Projects. Other Members' Projects answer 404, as if they didn't exist. */
@@ -66,6 +73,31 @@ export class ProjectsGroup extends HttpApiGroup.make("projects")
       payload: Schema.Struct({ name: EnvironmentName }),
       success: Environment,
       error: [ProjectNotFound, ProjectOwnerRequired, EnvironmentNameTaken]
+    }),
+    /** Who the Project is shared with: owners first, then viewers, each in the order they were added. */
+    HttpApiEndpoint.get("members", "/:projectId/members", {
+      params: projectParams,
+      success: Schema.Array(ProjectMember),
+      error: ProjectNotFound
+    }),
+    /** Shares the Project with another Member of the Instance, found by their sign-in email. */
+    HttpApiEndpoint.post("addMember", "/:projectId/members", {
+      params: projectParams,
+      payload: Schema.Struct({ email: Schema.String, role: ProjectRole }),
+      success: ProjectMember,
+      error: [ProjectNotFound, ProjectOwnerRequired, NoMemberWithEmail, AlreadyProjectMember]
+    }),
+    /** Changes a Member's role. Demoting the last owner is refused. */
+    HttpApiEndpoint.patch("changeMemberRole", "/:projectId/members/:memberId", {
+      params: memberParams,
+      payload: Schema.Struct({ role: ProjectRole }),
+      success: ProjectMember,
+      error: [ProjectNotFound, ProjectOwnerRequired, ProjectMemberNotFound, LastProjectOwner]
+    }),
+    /** Removes a Member from the Project. Removing the last owner is refused. */
+    HttpApiEndpoint.delete("removeMember", "/:projectId/members/:memberId", {
+      params: memberParams,
+      error: [ProjectNotFound, ProjectOwnerRequired, ProjectMemberNotFound, LastProjectOwner]
     })
   )
   .middleware(MemberAuth)
