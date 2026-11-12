@@ -1,10 +1,8 @@
-import type { Environment, Project } from "@flock/shared"
+import { ProjectId } from "@flock/shared"
 import { createRootRoute, createRoute, createRouter, Link, Outlet, redirect, useNavigate } from "@tanstack/react-router"
-import { DateTime } from "effect"
 import { type FormEvent, useState } from "react"
-import { request } from "./api.ts"
 import { currentMember, signIn, signOut, signUp } from "./auth.ts"
-import { usePoll } from "./use-poll.ts"
+import { ProjectPage, ProjectsPage } from "./projects.tsx"
 
 const rootRoute = createRootRoute({
   component: () => (
@@ -14,47 +12,6 @@ const rootRoute = createRootRoute({
     </main>
   )
 })
-
-const ProjectsPage = () => {
-  const { data, error } = usePoll(() => request((api) => api.projects.list()), [])
-  if (error && !data) return <p role="alert">Could not load Projects.</p>
-  if (!data) return <p>Loading…</p>
-  if (data.length === 0) return <p>No Projects yet.</p>
-  return data.map((project) => <ProjectCard key={project.id} project={project} />)
-}
-
-const ProjectCard = ({ project }: { project: Project }) => (
-  <section>
-    <h2>{project.name}</h2>
-    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-      {project.environments.map((environment) => (
-        <EnvironmentPageviews key={environment.id} environment={environment} />
-      ))}
-    </div>
-  </section>
-)
-
-const last30Days = () => {
-  const to = DateTime.nowUnsafe()
-  return { from: DateTime.subtract(to, { days: 30 }), to: DateTime.add(to, { minutes: 1 }) }
-}
-
-const EnvironmentPageviews = ({ environment }: { environment: Environment }) => {
-  const { data } = usePoll(
-    () => request((api) => api.reports.pageviewCount({ params: { environmentId: environment.id }, query: last30Days() })),
-    [environment.id]
-  )
-  return (
-    <article style={{ border: "1px solid #ccc", borderRadius: 8, padding: 12, minWidth: 160 }}>
-      <div style={{ fontSize: 14, color: "#666" }}>{environment.name}</div>
-      <div style={{ fontSize: 32, fontWeight: 600 }} data-testid={`pageviews-${environment.name}`}>
-        {data?.pageviews ?? "–"}
-      </div>
-      <div style={{ fontSize: 12, color: "#666" }}>Pageviews, last 30 days</div>
-      <code style={{ fontSize: 11, wordBreak: "break-all" }}>{environment.key}</code>
-    </article>
-  )
-}
 
 const SignInPage = () => {
   const navigate = useNavigate()
@@ -135,7 +92,20 @@ const memberRoute = createRoute({
 
 const indexRoute = createRoute({ getParentRoute: () => memberRoute, path: "/", component: ProjectsPage })
 
-export const router = createRouter({ routeTree: rootRoute.addChildren([signInRoute, memberRoute.addChildren([indexRoute])]) })
+/** One Project; `?env=dev` picks the Environment (default `production`). */
+const projectRoute = createRoute({
+  getParentRoute: () => memberRoute,
+  path: "/projects/$projectId",
+  validateSearch: (search: Record<string, unknown>): { env?: string } =>
+    typeof search.env === "string" && search.env !== "" ? { env: search.env } : {},
+  component: () => {
+    const { projectId } = projectRoute.useParams()
+    const { env } = projectRoute.useSearch()
+    return <ProjectPage key={projectId} projectId={ProjectId.make(projectId)} env={env} />
+  }
+})
+
+export const router = createRouter({ routeTree: rootRoute.addChildren([signInRoute, memberRoute.addChildren([indexRoute, projectRoute])]) })
 
 declare module "@tanstack/react-router" {
   interface Register {

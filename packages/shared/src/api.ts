@@ -1,6 +1,19 @@
 import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware, HttpApiSchema, OpenApi } from "effect/http-api"
-import { EnvironmentId, EnvironmentNotFound, Project } from "./domain.ts"
+import {
+  Environment,
+  EnvironmentId,
+  EnvironmentName,
+  EnvironmentNameTaken,
+  EnvironmentNotFound,
+  ProductionProtected,
+  Project,
+  ProjectId,
+  ProjectName,
+  ProjectNotFound,
+  ProjectOwnerRequired,
+  TimeZone
+} from "./domain.ts"
 import { IngestBatch, IngestResult, UnknownKey } from "./ingest.ts"
 import { Member, MemberAuth } from "./members.ts"
 
@@ -21,11 +34,64 @@ export class HealthGroup extends HttpApiGroup.make("health")
   .add(HttpApiEndpoint.get("check", "/api/health", { success: Schema.Struct({ status: Schema.Literal("ok") }) }))
   .annotateMerge(OpenApi.annotations({ title: "Health" })) {}
 
+const projectParams = { projectId: ProjectId }
+const environmentParams = { environmentId: EnvironmentId }
+
+/** The signed-in Member's Projects. Other Members' Projects answer 404, as if they didn't exist. */
 export class ProjectsGroup extends HttpApiGroup.make("projects")
-  .add(HttpApiEndpoint.get("list", "/", { success: Schema.Array(Project) }))
+  .add(
+    HttpApiEndpoint.get("list", "/", { success: Schema.Array(Project) }),
+    /** Creates a Project with its `production` Environment; the creator becomes its owner. */
+    HttpApiEndpoint.post("create", "/", {
+      payload: Schema.Struct({ name: ProjectName, timeZone: TimeZone }),
+      success: Project
+    }),
+    HttpApiEndpoint.get("get", "/:projectId", { params: projectParams, success: Project, error: ProjectNotFound }),
+    HttpApiEndpoint.patch("update", "/:projectId", {
+      params: projectParams,
+      payload: Schema.Struct({ name: Schema.optional(ProjectName), timeZone: Schema.optional(TimeZone) }),
+      success: Project,
+      error: [ProjectNotFound, ProjectOwnerRequired]
+    }),
+    /** Deletes the Project with all its Environments and Events. */
+    HttpApiEndpoint.delete("delete", "/:projectId", {
+      params: projectParams,
+      error: [ProjectNotFound, ProjectOwnerRequired]
+    }),
+    /** Adds a named Environment (such as `dev`) with its own key. */
+    HttpApiEndpoint.post("addEnvironment", "/:projectId/environments", {
+      params: projectParams,
+      payload: Schema.Struct({ name: EnvironmentName }),
+      success: Environment,
+      error: [ProjectNotFound, ProjectOwnerRequired, EnvironmentNameTaken]
+    })
+  )
   .middleware(MemberAuth)
   .prefix("/api/projects")
   .annotateMerge(OpenApi.annotations({ title: "Projects" })) {}
+
+export class EnvironmentsGroup extends HttpApiGroup.make("environments")
+  .add(
+    /** Deletes an Environment and its Events. `production` can't be deleted. */
+    HttpApiEndpoint.delete("delete", "/:environmentId", {
+      params: environmentParams,
+      error: [EnvironmentNotFound, ProjectOwnerRequired, ProductionProtected]
+    }),
+    /** Replaces the Environment's key; the old key stops being accepted at ingest. */
+    HttpApiEndpoint.post("rotateKey", "/:environmentId/rotate-key", {
+      params: environmentParams,
+      success: Environment,
+      error: [EnvironmentNotFound, ProjectOwnerRequired]
+    }),
+    /** Deletes all Events in a non-production Environment. */
+    HttpApiEndpoint.delete("deleteEvents", "/:environmentId/events", {
+      params: environmentParams,
+      error: [EnvironmentNotFound, ProjectOwnerRequired, ProductionProtected]
+    })
+  )
+  .middleware(MemberAuth)
+  .prefix("/api/environments")
+  .annotateMerge(OpenApi.annotations({ title: "Environments" })) {}
 
 /** A half-open time range `[from, to)` for a report. */
 export const DateRange = { from: Schema.DateTimeUtcFromString, to: Schema.DateTimeUtcFromString }
@@ -52,6 +118,7 @@ export class FlockApi extends HttpApi.make("flock")
   .add(HealthGroup)
   .add(IngestGroup)
   .add(ProjectsGroup)
+  .add(EnvironmentsGroup)
   .add(ReportsGroup)
   .add(MembersGroup)
   .middleware(HttpApiMiddleware.ProblemDetails) // malformed requests get an RFC 9457 400 explaining why

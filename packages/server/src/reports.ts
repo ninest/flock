@@ -1,7 +1,8 @@
-// Reports: (Environment, date range) -> dashboard numbers. The dashboard never touches SQL.
+// Reports: (Member, Environment, date range) -> dashboard numbers. The dashboard never touches SQL.
 import { PgClient } from "@effect/sql-pg"
-import { type EnvironmentId, EnvironmentNotFound } from "@flock/shared"
+import type { EnvironmentId, EnvironmentNotFound, MemberId } from "@flock/shared"
 import { Context, DateTime, Effect, Layer } from "effect"
+import { Projects } from "./projects.ts"
 
 export interface DateRange {
   readonly from: DateTime.Utc
@@ -10,6 +11,7 @@ export interface DateRange {
 
 export class Reports extends Context.Service<Reports, {
   readonly pageviewCount: (
+    member: MemberId,
     environmentId: EnvironmentId,
     range: DateRange
   ) => Effect.Effect<number, EnvironmentNotFound>
@@ -19,13 +21,10 @@ export class Reports extends Context.Service<Reports, {
     Effect.gen(function*() {
       const sql = yield* PgClient.PgClient
 
-      const requireEnvironment = Effect.fn(function*(id: EnvironmentId) {
-        const rows = yield* sql`SELECT 1 FROM environment WHERE id = ${id}`
-        if (rows.length === 0) return yield* new EnvironmentNotFound({ id })
-      })
+      const projects = yield* Projects
 
-      const pageviewCount = Effect.fn("Reports.pageviewCount")(function*(environmentId: EnvironmentId, range: DateRange) {
-        yield* requireEnvironment(environmentId)
+      const pageviewCount = Effect.fn("Reports.pageviewCount")(function*(member: MemberId, environmentId: EnvironmentId, range: DateRange) {
+        yield* projects.environment(member, environmentId)
         const [row] = yield* sql<{ count: number }>`
           SELECT count(*)::int AS count FROM event
           WHERE environment_id = ${environmentId} AND name = '$pageview'

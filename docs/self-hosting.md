@@ -51,7 +51,7 @@ Deploy from the Flock template (image source `ghcr.io/ninest/flock:1` plus a Pos
 | `FLOCK_TRUSTED_ORIGINS` | no | | Comma-separated extra origins allowed to sign in, e.g. a second domain. |
 | `BETTER_AUTH_SECRET` | no | generated on first boot and kept in Postgres | Signs Member sessions; at least 32 random characters. Changing it signs every Member out. |
 | `FLOCK_PUBLIC_DIR` | no | the built dashboard inside the image | Directory served as the dashboard. Only for development. |
-| `FLOCK_SEED_PLAYGROUND` | no | `false` | Creates a "Playground" Project with the fixed keys `pk_production_playground` and `pk_dev_playground`. Only for development and CI; never turn it on for a real Instance. |
+| `FLOCK_SEED_PLAYGROUND` | no | `false` | Creates a "Playground" Project with the fixed keys `pk_production_playground` and `pk_dev_playground`, owned by the `FLOCK_ADMIN_EMAIL` Member if they exist at boot. Only for development and CI; never turn it on for a real Instance. |
 
 Contributors: every new environment variable gets a row here.
 
