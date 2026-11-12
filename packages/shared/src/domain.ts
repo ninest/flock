@@ -43,6 +43,14 @@ export const ProjectName = Schema.String.check(
 export const ProjectRole = Schema.Literals(["owner", "viewer"])
 export type ProjectRole = typeof ProjectRole.Type
 
+/**
+ * How a Project recognises Visitors (ADR 0002). `cookieless` (the default) hashes the IP and
+ * user agent with a daily salt and stores nothing on the device; `persistent` uses an ID the
+ * browser script stores on the device, which Identify can link to the tracked app's own ID.
+ */
+export const TrackingMode = Schema.Literals(["cookieless", "persistent"])
+export type TrackingMode = typeof TrackingMode.Type
+
 /** A separate data stream inside a Project, written to with its public key. */
 export class Environment extends Schema.Class<Environment>("Environment")({
   id: EnvironmentId,
@@ -55,6 +63,7 @@ export class Project extends Schema.Class<Project>("Project")({
   id: ProjectId,
   name: Schema.String,
   timeZone: Schema.String,
+  trackingMode: TrackingMode,
   /** The signed-in Member's role in this Project. */
   role: ProjectRole,
   /** `production` first, then the others by name. */

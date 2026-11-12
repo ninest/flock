@@ -14,7 +14,8 @@ import {
   ProjectId,
   ProjectNotFound,
   ProjectOwnerRequired,
-  type ProjectRole
+  type ProjectRole,
+  type TrackingMode
 } from "@flock/shared"
 import { Context, Effect, Layer, Option } from "effect"
 import { isSqlError, type SqlError } from "effect/sql/SqlError"
@@ -24,6 +25,7 @@ interface Row {
   readonly projectId: string
   readonly projectName: string
   readonly timeZone: string
+  readonly trackingMode: TrackingMode
   readonly role: ProjectRole
   readonly environmentId: string | null
   readonly environmentName: string | null
@@ -37,7 +39,7 @@ const toProjects = (rows: ReadonlyArray<Row>): Array<Project> => {
     let entry = byId.get(row.projectId)
     if (!entry) {
       entry = {
-        project: { id: ProjectId.make(row.projectId), name: row.projectName, timeZone: row.timeZone, role: row.role },
+        project: { id: ProjectId.make(row.projectId), name: row.projectName, timeZone: row.timeZone, trackingMode: row.trackingMode, role: row.role },
         environments: []
       }
       byId.set(row.projectId, entry)
@@ -76,7 +78,11 @@ export class Projects extends Context.Service<Projects, {
   readonly update: (
     member: MemberId,
     id: ProjectId,
-    changes: { readonly name?: string | undefined; readonly timeZone?: string | undefined }
+    changes: {
+      readonly name?: string | undefined
+      readonly timeZone?: string | undefined
+      readonly trackingMode?: TrackingMode | undefined
+    }
   ) => Effect.Effect<Project, ProjectNotFound | ProjectOwnerRequired>
   readonly delete: (member: MemberId, id: ProjectId) => Effect.Effect<void, ProjectNotFound | ProjectOwnerRequired>
   readonly addEnvironment: (
@@ -110,7 +116,7 @@ export class Projects extends Context.Service<Projects, {
 
       const select = (member: MemberId, project: ProjectId | undefined) =>
         sql<Row>`
-          SELECT p.id AS project_id, p.name AS project_name, p.time_zone, pm.role,
+          SELECT p.id AS project_id, p.name AS project_name, p.time_zone, p.tracking_mode, pm.role,
                  e.id AS environment_id, e.name AS environment_name, e.key
           FROM project p
           JOIN project_member pm ON pm.project_id = p.id AND pm.member_id = ${member}
@@ -191,7 +197,8 @@ export class Projects extends Context.Service<Projects, {
             yield* ownProject(member, id)
             const set = {
               ...(changes.name === undefined ? {} : { name: changes.name }),
-              ...(changes.timeZone === undefined ? {} : { timeZone: changes.timeZone })
+              ...(changes.timeZone === undefined ? {} : { timeZone: changes.timeZone }),
+              ...(changes.trackingMode === undefined ? {} : { trackingMode: changes.trackingMode })
             }
             if (Object.keys(set).length > 0) yield* sql`UPDATE project SET ${sql.update(set)} WHERE id = ${id}`.pipe(orDie)
             return yield* get(member, id)

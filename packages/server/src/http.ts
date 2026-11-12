@@ -18,7 +18,9 @@ const HealthHandlers = HttpApiBuilder.group(FlockApi, "health", Effect.fn(functi
 
 const IngestHandlers = HttpApiBuilder.group(FlockApi, "ingest", Effect.fn(function*(handlers) {
   const ingest = yield* Ingest
-  return handlers.handle("send", ({ payload, request }) => ingest.send(payload, requestContext(request)))
+  return handlers
+    .handle("send", ({ payload, request }) => ingest.send(payload, requestContext(request)))
+    .handle("config", ({ query }) => ingest.config(query.key))
 }))
 
 /**

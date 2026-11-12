@@ -9,7 +9,12 @@ export interface PlaygroundConfig {
   readonly api: string
   /** The Environment key the script is configured with. */
   readonly key: string
+  /** The Project's Tracking mode, which the page tells the script with `data-mode`. */
+  readonly mode: TrackingMode
 }
+
+/** The Project's Tracking mode, as the server's `/api/ingest/config` reports it. */
+export type TrackingMode = "cookieless" | "persistent"
 
 export interface PlaygroundResponse {
   readonly status: number
@@ -21,7 +26,7 @@ const root = fileURLToPath(new URL("./pages", import.meta.url))
 const types: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css" }
 
 /**
- * Every HTML page gets the browser script tag and `window.FLOCK = { api, key }` injected,
+ * Every HTML page gets the browser script tag and `window.FLOCK = { api, key, mode }` injected,
  * so pages need no build step.
  */
 export const renderPlayground = async (path: string, config: PlaygroundConfig): Promise<PlaygroundResponse> => {
@@ -40,7 +45,7 @@ export const renderPlayground = async (path: string, config: PlaygroundConfig): 
     if (contentType.startsWith("text/html")) {
       const inject = [
         `<script>window.FLOCK = ${JSON.stringify(config)}</script>`,
-        `<script defer src="${config.api}/flock.js" data-key="${config.key}"></script>`
+        `<script defer src="${config.api}/flock.js" data-key="${config.key}" data-mode="${config.mode}"></script>`
       ].join("\n    ")
       body = body.toString().replace("<head>", `<head>\n    ${inject}`)
     }

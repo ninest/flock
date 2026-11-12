@@ -12,7 +12,8 @@ import {
   ProjectName,
   ProjectNotFound,
   ProjectOwnerRequired,
-  TimeZone
+  TimeZone,
+  TrackingMode
 } from "./domain.ts"
 import { IngestBatch, IngestResult, UnknownKey } from "./ingest.ts"
 import { Overview, OverviewQuery } from "./reports.ts"
@@ -25,6 +26,15 @@ export class IngestGroup extends HttpApiGroup.make("ingest")
       // cross-origin fetch can send without a CORS preflight.
       payload: [IngestBatch, IngestBatch.pipe(HttpApiSchema.asJson({ contentType: "text/plain" }))],
       success: IngestResult,
+      error: UnknownKey
+    }),
+    /**
+     * Public: the Project's Tracking mode for an Environment key, for the browser script and
+     * pages that embed it. Switching the mode starts Visitor counts afresh (ADR 0002).
+     */
+    HttpApiEndpoint.get("config", "/api/ingest/config", {
+      query: { key: Schema.String },
+      success: Schema.Struct({ trackingMode: TrackingMode }),
       error: UnknownKey
     })
   )
@@ -50,7 +60,12 @@ export class ProjectsGroup extends HttpApiGroup.make("projects")
     HttpApiEndpoint.get("get", "/:projectId", { params: projectParams, success: Project, error: ProjectNotFound }),
     HttpApiEndpoint.patch("update", "/:projectId", {
       params: projectParams,
-      payload: Schema.Struct({ name: Schema.optional(ProjectName), timeZone: Schema.optional(TimeZone) }),
+      payload: Schema.Struct({
+        name: Schema.optional(ProjectName),
+        timeZone: Schema.optional(TimeZone),
+        /** Switching starts the Project's Visitor counts afresh: the two kinds of Visitor ID can't be compared. */
+        trackingMode: Schema.optional(TrackingMode)
+      }),
       success: Project,
       error: [ProjectNotFound, ProjectOwnerRequired]
     }),

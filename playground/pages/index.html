@@ -20,6 +20,14 @@
       <button id="game">Complete game</button>
       sends <code>game_completed</code> with a random <code>score</code> Event property.
     </p>
+    <h2>Tracking mode</h2>
+    <p>Tracking mode: <strong id="mode"></strong>. Change it on the Playground Project in the dashboard, then reload.</p>
+    <p>
+      <button id="identify">Identify as test-user</button>
+      calls <code>flock.identify("test-user")</code>. In persistent mode it sends <code>$identify</code> and
+      later Events count as the Visitor <code>test-user</code>, on every device that does the same. In
+      cookieless mode it does nothing.
+    </p>
     <h2>Enrichment</h2>
     <p>
       <a id="tracked-link" href="/pricing?token=s3cret&amp;email=someone%40example.com&amp;utm_source=playground&amp;utm_campaign=enrichment">Open Pricing with a token, an email and UTM tags</a>
@@ -30,6 +38,10 @@
     </p>
     <script>
       document.getElementById("config").textContent = `Script from ${FLOCK.api}/flock.js, key ${FLOCK.key}`
+      document.getElementById("mode").textContent = FLOCK.mode === "persistent"
+        ? `persistent (Visitor ID stored on this device: ${localStorage.getItem("flock_id") ?? "none yet"})`
+        : "cookieless (nothing stored on this device)"
+      document.getElementById("identify").onclick = () => flock.identify("test-user")
       document.getElementById("login").onclick = () => {
         flock.track("login_clicked")
         location.href = "/pricing"

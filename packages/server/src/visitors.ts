@@ -1,6 +1,9 @@
-// Visitor identity. Cookieless Tracking mode (ADR 0002): the Visitor is a hash of the
-// IP, user agent and Project with a salt that rotates every UTC day, so the same device
-// is a new Visitor each day and the hash can't be reversed once the salt is deleted.
+// Visitor identity, per Tracking mode (ADR 0002).
+// Cookieless: the Visitor is a hash of the IP, user agent and Project with a salt that rotates
+// every UTC day, so the same device is a new Visitor each day and the hash can't be reversed
+// once the salt is deleted.
+// Persistent: the Visitor is the ID the client sends (`distinct_id`): the random device ID the
+// browser script stores, or, after Identify, the tracked app's own ID for that person.
 import { PgClient } from "@effect/sql-pg"
 import { Context, DateTime, Effect, Layer } from "effect"
 import type { SqlError } from "effect/sql/SqlError"
@@ -17,10 +20,28 @@ export interface CookielessVisitorInput {
   readonly at: DateTime.Utc
 }
 
+export interface IdentifyInput {
+  readonly projectId: string
+  /** The device's own persistent Visitor ID. */
+  readonly deviceId: VisitorId
+  /** The tracked app's ID for the person, which becomes the Visitor ID. */
+  readonly visitorId: VisitorId
+}
+
 const utcDay = (at: DateTime.Utc) => DateTime.formatIso(at).slice(0, 10)
 
 export class Visitors extends Context.Service<Visitors, {
   readonly cookieless: (input: CookielessVisitorInput) => Effect.Effect<VisitorId, SqlError>
+  /** The Visitor for a client-sent persistent ID: the identified Visitor if the ID is an identified device's. */
+  readonly persistent: (input: { readonly projectId: string; readonly distinctId: string }) => Effect.Effect<VisitorId, SqlError>
+  /**
+   * Links a device to an identified Visitor: from now on its Events count as that Visitor, and its
+   * earlier Events and Sessions in the Project move over to it. A device that already identified
+   * as someone else switches to the new ID (the person signed in as another account). An ID that
+   * is itself an identified Visitor is never linked, so two identified Visitors are never merged.
+   * Run it inside the ingest transaction.
+   */
+  readonly identify: (input: IdentifyInput) => Effect.Effect<void, SqlError>
 }>()("flock/Visitors") {
   static readonly layer = Layer.effect(
     Visitors,
@@ -54,7 +75,26 @@ export class Visitors extends Context.Service<Visitors, {
           .slice(0, 22)
       })
 
-      return Visitors.of({ cookieless })
+      const persistent = Effect.fn("Visitors.persistent")(function*(input: { readonly projectId: string; readonly distinctId: string }) {
+        const [alias] = yield* sql<{ visitorId: string }>`
+          SELECT visitor_id FROM visitor_alias WHERE project_id = ${input.projectId} AND device_id = ${input.distinctId}`
+        return alias?.visitorId ?? input.distinctId
+      })
+
+      const identify = Effect.fn("Visitors.identify")(function*({ deviceId, projectId, visitorId }: IdentifyInput) {
+        if (deviceId === visitorId) return
+        const [identified] = yield* sql`
+          SELECT 1 FROM visitor_alias WHERE project_id = ${projectId} AND visitor_id = ${deviceId} LIMIT 1`
+        if (identified) return
+        yield* sql`
+          INSERT INTO visitor_alias ${sql.insert({ projectId, deviceId, visitorId })}
+          ON CONFLICT (project_id, device_id) DO UPDATE SET visitor_id = excluded.visitor_id`
+        const environments = sql`SELECT id FROM environment WHERE project_id = ${projectId}`
+        yield* sql`UPDATE event SET visitor_id = ${visitorId} WHERE environment_id IN (${environments}) AND visitor_id = ${deviceId}`
+        yield* sql`UPDATE session SET visitor_id = ${visitorId} WHERE environment_id IN (${environments}) AND visitor_id = ${deviceId}`
+      })
+
+      return Visitors.of({ cookieless, persistent, identify })
     })
   )
 }
