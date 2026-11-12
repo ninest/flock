@@ -2,6 +2,21 @@
 
 Self-hostable, event-based analytics for websites and apps: one Docker image backed by Postgres. See `GLOSSARY.md` for the vocabulary and `docs/adr/` for decisions.
 
+## Try it (local testing cheat-sheet)
+
+Run `make dev`, then:
+
+| What | Where |
+|---|---|
+| Dashboard | http://hel:2101 (sign in at `/sign-in`) |
+| Dev admin login | `admin@flock.test` / `flock-dev-password` |
+| Playground site | http://hel:2102 (if 2102 is taken, `make dev` prints the port it used instead, e.g. 2103) |
+| Server, API docs | http://hel:2100, http://hel:2100/api/docs |
+| Playground Project keys | `pk_dev_playground` (used by the playground), `pk_production_playground` |
+| Instance admin page (Invites, Open sign-up, Members) | http://hel:2101/instance |
+
+Playground pages: `/` (Pageview, **Log in** and **Complete game** buttons), `/spa` (SPA navigation), `/ingest` (raw ingest form). Open the Playground Project in the dashboard and switch to the `dev` Environment to see the Events arrive.
+
 ## Repository
 
 A pnpm workspace:
