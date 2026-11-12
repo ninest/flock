@@ -93,6 +93,35 @@ layer(Harness.layer())("Project sharing", (it) => {
       assert.deepStrictEqual(yield* other.browser.client.projects.list(), [])
     }))
 
+  it.effect("a viewer reads every report; a Member outside the Project gets none of them", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const owner = yield* signedIn("orla@example.com")
+      const viewer = yield* signedIn("vic@example.com")
+      const stranger = yield* signedIn("sam@example.com")
+      const project = yield* h.createProject({ name: "Reports", as: owner.browser })
+      const environmentId = project.environments[0]!.id
+      yield* owner.browser.client.projects.addMember({ params: { projectId: project.id }, payload: { email: "vic@example.com", role: "viewer" } })
+      yield* TestClock.setTime(Date.parse("2026-03-01T10:00:00Z"))
+      yield* h.ingest(project.environments[0]!.key, [pageview(), pageview()], { ip: "198.51.100.7" })
+
+      const reports = (api: Browser["client"]) => [
+        api.reports.pageviewCount({ params: { environmentId }, query: allTime }),
+        api.reports.overview({ params: { environmentId }, query: { period: "custom", from: "2026-03-01", to: "2026-03-01" } }),
+        api.reports.breakdown({ params: { environmentId }, query: { ...allTime, property: "$pathname" } }),
+        api.reports.propertyKeys({ params: { environmentId }, query: allTime })
+      ] as const
+
+      const [count, overview, breakdown, keys] = yield* Effect.all(reports(viewer.browser.client))
+      assert.strictEqual(count.pageviews, 2)
+      assert.strictEqual(overview.totals.pageviews, 2)
+      assert.strictEqual(overview.totals.visitors, 1)
+      assert.strictEqual(breakdown.reduce((sum, row) => sum + row.count, 0), 2)
+      assert.isTrue(keys.keys.length > 0)
+
+      assert.deepStrictEqual(yield* tags(reports(stranger.browser.client)), Array(4).fill("EnvironmentNotFound"))
+    }))
+
   it.effect("owners change roles and remove people; the last owner can't be removed or demoted", () =>
     Effect.gen(function*() {
       const h = yield* Harness
