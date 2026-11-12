@@ -15,7 +15,8 @@ const post = async (path: string, body: object) => {
 }
 
 export const signIn = (input: { email: string; password: string }) => post("/sign-in/email", input)
-export const signUp = (input: { email: string; password: string; name: string }) => post("/sign-up/email", input)
+/** `invite` is the token from an Invite link; without one, sign-up needs Open sign-up or FLOCK_ADMIN_EMAIL. */
+export const signUp = (input: { email: string; password: string; name: string; invite?: string | undefined }) => post("/sign-up/email", input)
 export const signOut = () => post("/sign-out", {})
 
 /** The signed-in Member, or null when nobody is signed in. */

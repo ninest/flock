@@ -25,7 +25,7 @@ make dev
 
 `make dev` starts the shared Postgres (docker compose, container `flock-postgres` on host port 2432) if it isn't already running, then starts the server (2100), the dashboard (2101, proxies `/api` to the server) and the playground (2102). It prints `http://hel:<port>` links. A port that's already taken is replaced by the next free one. For a second copy from another worktree, override the ports and the dev database: `SERVER_PORT=2200 DASHBOARD_PORT=2201 PLAYGROUND_PORT=2202 DEV_DB=flock_other make dev`.
 
-The dashboard needs a signed-in Member. In development, sign up at `http://hel:2101/sign-in` as `admin@flock.test` (the dev `FLOCK_ADMIN_EMAIL`) to create the Instance admin; sign-up with any other email is refused.
+The dashboard needs a signed-in Member. In development, sign up at `http://hel:2101/sign-in` as `admin@flock.test` (the dev `FLOCK_ADMIN_EMAIL`) to create the Instance admin. Other people join with an Invite link from the Instance page (`/instance`), or freely once Open sign-up is turned on there.
 
 In development the server seeds a "Playground" Project with fixed keys, `pk_production_playground` and `pk_dev_playground`.
 
