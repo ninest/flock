@@ -1,12 +1,14 @@
 import { Schema } from "effect"
-import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware, OpenApi } from "effect/http-api"
+import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware, HttpApiSchema, OpenApi } from "effect/http-api"
 import { EnvironmentId, EnvironmentNotFound, Project } from "./domain.ts"
 import { IngestBatch, IngestResult, UnknownKey } from "./ingest.ts"
 
 export class IngestGroup extends HttpApiGroup.make("ingest")
   .add(
     HttpApiEndpoint.post("send", "/api/ingest", {
-      payload: IngestBatch,
+      // JSON either way. The browser script sends text/plain, which sendBeacon and
+      // cross-origin fetch can send without a CORS preflight.
+      payload: [IngestBatch, IngestBatch.pipe(HttpApiSchema.asJson({ contentType: "text/plain" }))],
       success: IngestResult,
       error: UnknownKey
     })

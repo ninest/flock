@@ -32,6 +32,8 @@ import { TestDatabase } from "./test-database.ts"
 
 export const BASE_URL = "http://flock.test"
 const publicDir = fileURLToPath(new URL("./fixtures/public", import.meta.url))
+/** Stands in for the built browser script. */
+export const scriptFile = fileURLToPath(new URL("./fixtures/flock.js", import.meta.url))
 
 export interface HarnessOptions {
   /** IP address -> ISO country code, served by the GeoIP test layer. */
@@ -76,7 +78,7 @@ export class Harness extends Context.Service<Harness, {
         const deps = yield* TestClock.withLive(Layer.build(Deps))
         yield* TestClock.setTime(Date.now())
 
-        const app = yield* HttpRouter.toHttpEffect(AppRoutes(publicDir)).pipe(Effect.provide(deps))
+        const app = yield* HttpRouter.toHttpEffect(AppRoutes({ publicDir, scriptFile })).pipe(Effect.provide(deps))
         const context = yield* Effect.context<never>() // includes the TestClock
         const handler: (request: Request) => Promise<Response> = HttpEffect.toWebHandlerWith<
           never,

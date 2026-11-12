@@ -35,7 +35,9 @@ jobs:
           node-version: 24
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @flock/script exec playwright install --with-deps chromium --only-shell
       - run: pnpm -r typecheck
+      # Seam 1, Seam 2 (headless Chromium) and the browser script size check (fails above 2 KB gzipped).
       - run: pnpm test
 
   # Builds the image and boots it (alone, via compose, and next to the previous

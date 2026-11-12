@@ -29,7 +29,12 @@ fi
 docker exec flock-postgres psql -U postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '$DEV_DB'" | grep -q 1 \
   || docker exec flock-postgres createdb -U postgres "$DEV_DB"
 
+# The server serves the built browser script at /flock.js; build it once, then keep rebuilding on change.
+pnpm --filter @flock/script build
+
 trap 'trap - EXIT; kill 0' INT TERM EXIT
+
+pnpm --filter @flock/script dev 2>&1 | sed -u 's/^/[script]     /' &
 
 DATABASE_URL="postgres://postgres:postgres@127.0.0.1:2432/$DEV_DB" PORT=$SERVER_PORT FLOCK_SEED_PLAYGROUND=true \
   pnpm --filter @flock/server dev 2>&1 | sed -u 's/^/[server]     /' &

@@ -2,7 +2,7 @@
 import { PgClient } from "@effect/sql-pg"
 import { FlockApi } from "@flock/shared"
 import { Effect, Layer } from "effect"
-import { HttpRouter, HttpStaticServer } from "effect/http"
+import { HttpRouter, HttpServerResponse, HttpStaticServer } from "effect/http"
 import { HttpApiBuilder, HttpApiMiddleware, HttpApiScalar } from "effect/http-api"
 import { Ingest } from "./ingest.ts"
 import { Projects } from "./projects.ts"
@@ -38,10 +38,29 @@ const DocsRoute = HttpApiScalar.layer(FlockApi, { path: "/api/docs" })
 /** Serves the built dashboard; extension-less HTML requests fall back to index.html. */
 const StaticRoutes = (publicDir: string) => HttpStaticServer.layer({ root: publicDir, spa: true })
 
+/** Serves the built browser script; any site may load it. */
+const ScriptRoute = (scriptFile: string) =>
+  HttpRouter.add(
+    "GET",
+    "/flock.js",
+    HttpServerResponse.file(scriptFile, {
+      contentType: "text/javascript; charset=utf-8",
+      headers: { "cache-control": "public, max-age=300" }
+    }).pipe(Effect.orDie)
+  )
+
 /**
  * Responses carry `Access-Control-Allow-Origin: *` without credentials, so any site
  * can send Events, while cookie-authenticated responses stay unreadable cross-origin.
  */
 const Cors = HttpRouter.cors({ allowedHeaders: ["content-type"] })
 
-export const AppRoutes = (publicDir: string) => Layer.mergeAll(ApiRoutes, DocsRoute, StaticRoutes(publicDir), Cors)
+export interface AppRoutesOptions {
+  /** Directory with the built dashboard. */
+  readonly publicDir: string
+  /** The built browser script, served at /flock.js. */
+  readonly scriptFile: string
+}
+
+export const AppRoutes = (options: AppRoutesOptions) =>
+  Layer.mergeAll(ApiRoutes, DocsRoute, ScriptRoute(options.scriptFile), StaticRoutes(options.publicDir), Cors)
