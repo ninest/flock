@@ -17,6 +17,7 @@ import { request } from "./api.ts"
 import { OverviewReport } from "./overview.tsx"
 import { AudienceReports } from "./audience.tsx"
 import { LiveVisitors, PagesAndSources } from "./pages-sources.tsx"
+import { CustomEventsReport } from "./custom-events.tsx"
 import { currentMember } from "./auth.ts"
 import { usePoll } from "./use-poll.ts"
 
@@ -128,6 +129,7 @@ export const ProjectPage = ({ projectId, env }: { projectId: ProjectId; env: str
       <OverviewReport key={environment.id} environment={environment} timeZone={project.timeZone} query={range} onQueryChange={setRange} />
       <PagesAndSources key={`pages-${environment.id}`} environment={environment} range={range} />
       <AudienceReports key={`audience-${environment.id}`} environment={environment} range={range} />
+      <CustomEventsReport key={`custom-events-${environment.id}`} environment={environment} />
       {project.role === "owner"
         ? (
           <>

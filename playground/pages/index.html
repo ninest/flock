@@ -18,7 +18,9 @@
     </p>
     <p>
       <button id="game">Complete game</button>
-      sends <code>game_completed</code> with a random <code>score</code> Event property.
+      sends <code>game_completed</code> with a random <code>score</code> (a number) and <code>level</code>
+      (easy, medium or hard). Open it under Custom events on the dashboard to break it down by
+      <code>level</code> and see statistics for <code>score</code>.
     </p>
     <h2>Enrichment</h2>
     <p>
@@ -35,7 +37,11 @@
         location.href = "/pricing"
       }
       document.getElementById("game").onclick = () => {
-        flock.track("game_completed", { score: Math.floor(Math.random() * 100) })
+        const levels = ["easy", "medium", "hard"]
+        flock.track("game_completed", {
+          score: Math.floor(Math.random() * 100),
+          level: levels[Math.floor(Math.random() * levels.length)]
+        })
       }
     </script>
   </body>
