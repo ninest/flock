@@ -76,12 +76,12 @@ const ReportsHandlers = HttpApiBuilder.group(FlockApi, "reports", Effect.fn(func
     .handle("pageviewCount", ({ params, query }) =>
       CurrentMember.use(({ id }) => reports.pageviewCount(id, params.environmentId, query)).pipe(Effect.map((pageviews) => ({ pageviews }))))
     .handle("overview", ({ params, query }) => CurrentMember.use(({ id }) => reports.overview(id, params.environmentId, query)))
-    .handle("live", ({ params }) =>
-      CurrentMember.use(({ id }) => reports.liveVisitors(id, params.environmentId)).pipe(Effect.map((visitors) => ({ visitors }))))
+    .handle("live", ({ params, query }) =>
+      CurrentMember.use(({ id }) => reports.liveVisitors(id, params.environmentId, query.filters)).pipe(Effect.map((visitors) => ({ visitors }))))
     .handle("top", ({ params, query }) => CurrentMember.use(({ id }) => reports.top(id, params.environmentId, query)))
     .handle("breakdown", ({ params, query }) =>
       CurrentMember.use(({ id }) =>
-        reports.breakdown(id, params.environmentId, query, { property: query.property, event: query.event ?? "$pageview" })))
+        reports.breakdown(id, params.environmentId, query, { property: query.property, event: query.event ?? "$pageview", filters: query.filters })))
     .handle("propertyKeys", ({ params, query }) =>
       CurrentMember.use(({ id }) => reports.propertyKeys(id, params.environmentId, query)).pipe(Effect.map((keys) => ({ keys }))))
 }))

@@ -225,7 +225,7 @@ layer(Harness.layer())("Live counter", (it) => {
       yield* outsider.signIn({ email: "outsider@example.com", password })
 
       const params = { environmentId: production!.id }
-      const live = yield* outsider.client.reports.live({ params }).pipe(Effect.flip)
+      const live = yield* outsider.client.reports.live({ params, query: {} }).pipe(Effect.flip)
       assert.strictEqual(live._tag, "EnvironmentNotFound")
       const top = yield* outsider.client.reports.top({ params, query: { ...day, report: "pages" } }).pipe(Effect.flip)
       assert.strictEqual(top._tag, "EnvironmentNotFound")

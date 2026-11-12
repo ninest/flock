@@ -4,6 +4,7 @@ import { type FormEvent, useEffect, useState } from "react"
 import { currentMember, oidcSignIn, signIn, signInOptions, signOut, signUp } from "./auth.ts"
 import { ProjectPage, ProjectsPage } from "./projects.tsx"
 import { InstancePage } from "./instance.tsx"
+import { validateProjectSearch } from "./filters.tsx"
 
 const rootRoute = createRootRoute({
   component: () => (
@@ -133,16 +134,18 @@ const memberRoute = createRoute({
 
 const indexRoute = createRoute({ getParentRoute: () => memberRoute, path: "/", component: ProjectsPage })
 
-/** One Project; `?env=dev` picks the Environment (default `production`). */
+/**
+ * One Project; `?env=dev` picks the Environment (default `production`). The shared date range
+ * (`period`, `from`, `to`) and property `filters` live in the URL too, so views can be shared.
+ */
 const projectRoute = createRoute({
   getParentRoute: () => memberRoute,
   path: "/projects/$projectId",
-  validateSearch: (search: Record<string, unknown>): { env?: string } =>
-    typeof search.env === "string" && search.env !== "" ? { env: search.env } : {},
+  validateSearch: validateProjectSearch,
   component: () => {
     const { projectId } = projectRoute.useParams()
-    const { env } = projectRoute.useSearch()
-    return <ProjectPage key={projectId} projectId={ProjectId.make(projectId)} env={env} />
+    const search = projectRoute.useSearch()
+    return <ProjectPage key={projectId} projectId={ProjectId.make(projectId)} search={search} />
   }
 })
 

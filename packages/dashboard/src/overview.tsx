@@ -3,6 +3,7 @@ import type { Environment, Overview, OverviewBucket, OverviewNumbers, OverviewQu
 import { type CSSProperties, useState } from "react"
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { request } from "./api.ts"
+import { queryDeps } from "./filters.tsx"
 import { usePoll } from "./use-poll.ts"
 
 const muted: CSSProperties = { fontSize: 14, color: "#666" }
@@ -31,14 +32,14 @@ const periods: ReadonlyArray<{ value: ReportPeriod; label: string }> = [
   { value: "custom", label: "Custom" }
 ]
 
-/** The date range picker. Custom ranges are local dates in the Project's time zone. */
+/** The date range picker. Custom ranges are local dates in the Project's time zone; filters are kept. */
 export const RangePicker = ({ query, onChange }: { query: OverviewQuery; onChange: (query: OverviewQuery) => void }) => {
   const [from, setFrom] = useState(query.from ?? "")
   const [to, setTo] = useState(query.to ?? "")
   const applyCustom = (f: string, t: string) => {
     setFrom(f)
     setTo(t)
-    if (f && t && f <= t) onChange({ period: "custom", from: f, to: t })
+    if (f && t && f <= t) onChange({ period: "custom", from: f, to: t, filters: query.filters })
   }
   return (
     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -47,8 +48,8 @@ export const RangePicker = ({ query, onChange }: { query: OverviewQuery; onChang
         data-testid="date-range"
         onChange={(e) => {
           const period = e.target.value as ReportPeriod
-          if (period !== "custom") onChange({ period })
-          else onChange({ period, from: from || undefined, to: to || undefined })
+          if (period !== "custom") onChange({ period, filters: query.filters })
+          else onChange({ period, from: from || undefined, to: to || undefined, filters: query.filters })
         }}
       >
         {periods.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
@@ -119,7 +120,7 @@ export const OverviewReport = ({ environment, timeZone, query, onQueryChange: se
   const valid = query.period !== "custom" || (query.from !== undefined && query.to !== undefined)
   const { data, error } = usePoll(
     () => valid ? request((api) => api.reports.overview({ params: { environmentId: environment.id }, query })) : Promise.resolve(undefined),
-    [environment.id, query.period, query.from, query.to]
+    [environment.id, ...queryDeps(query)]
   )
   const metric = metrics.find((m) => m.key === metricKey)!
   return (

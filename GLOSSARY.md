@@ -71,5 +71,9 @@ A Session with a single Event. The bounce rate is the share of Sessions that are
 **Tracking mode**:
 A per-Project choice of how Visitors are recognised: cookieless (an anonymous ID that resets daily) or persistent (an ID that is stored on the device and can be identified).
 
+**Filter**:
+A condition on one top-level Event property (is, is not, contains) that narrows every report to the Events that match. Several Filters combine with AND.
+_Avoid_: Segment, query
+
 **Identify**:
 Linking a persistent Visitor to an ID from the tracked app's own user system. Only possible in persistent Tracking mode.

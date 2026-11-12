@@ -1,7 +1,7 @@
 // Reports (the Queries module): (Member, Environment, date range) -> dashboard numbers.
 // The dashboard never touches SQL. Each report starts from `scopedEvents`, the
-// Environment's Events inside the range with their local time bucket, so filters and
-// new reports plug in at one place.
+// Environment's Events inside the range that match the filters, with their local time
+// bucket, so every report counts the same filtered Events.
 import { PgClient } from "@effect/sql-pg"
 import type {
   BreakdownRow,
@@ -11,11 +11,13 @@ import type {
   Overview,
   OverviewNumbers,
   OverviewQuery,
+  PropertyFilter,
   Top,
   TopQuery
 } from "@flock/shared"
 import { TOP_LIMIT } from "@flock/shared"
 import { Context, DateTime, Effect, Layer } from "effect"
+import { matchesFilters, pathOf, referringDomainOf } from "./filters.ts"
 import { Projects } from "./projects.ts"
 import { type ReportRange, resolveRange } from "./report-range.ts"
 
@@ -62,7 +64,7 @@ export class Reports extends Context.Service<Reports, {
     member: MemberId,
     environmentId: EnvironmentId,
     range: DateRange,
-    by: { readonly property: string; readonly event: string }
+    by: { readonly property: string; readonly event: string; readonly filters?: ReadonlyArray<PropertyFilter> | undefined }
   ) => Effect.Effect<ReadonlyArray<BreakdownRow>, EnvironmentNotFound>
   /** Every Event property key seen in the range, sorted. */
   readonly propertyKeys: (
@@ -77,7 +79,11 @@ export class Reports extends Context.Service<Reports, {
     query: OverviewQuery
   ) => Effect.Effect<Overview, EnvironmentNotFound>
   /** The live counter: unique Visitors with an Event in the last 30 minutes. */
-  readonly liveVisitors: (member: MemberId, environmentId: EnvironmentId) => Effect.Effect<number, EnvironmentNotFound>
+  readonly liveVisitors: (
+    member: MemberId,
+    environmentId: EnvironmentId,
+    filters?: ReadonlyArray<PropertyFilter>
+  ) => Effect.Effect<number, EnvironmentNotFound>
   /** A ranked-list report: top pages, entry and exit pages, referrers, UTM tags or audience. */
   readonly top: (
     member: MemberId,
@@ -97,7 +103,7 @@ export class Reports extends Context.Service<Reports, {
         Effect.gen(function*() {
           const environment = yield* projects.environment(member, environmentId)
           const range = resolveRange(query, environment.timeZone, yield* DateTime.now)
-          return { environmentId: environment.id, range }
+          return { environmentId: environment.id, range, filters: query.filters }
         })
 
       /**
@@ -105,13 +111,14 @@ export class Reports extends Context.Service<Reports, {
        * (per Session in range: `bucket` where it starts, `duration` in seconds, `bounce`).
        * A bounce is a Session with a single Event.
        */
-      const scopedEvents = (environmentId: string, range: ReportRange) => sql`
+      const scopedEvents = (environmentId: string, range: ReportRange, filters: ReadonlyArray<PropertyFilter> | undefined) => sql`
         scoped AS (
           SELECT e.*, date_trunc(${range.interval}, e.ts AT TIME ZONE ${range.timeZone}) AS bucket
           FROM event e
           WHERE e.environment_id = ${environmentId}
             AND e.ts >= (${range.from}::date::timestamp AT TIME ZONE ${range.timeZone})
             AND e.ts < ((${range.to}::date + 1)::timestamp AT TIME ZONE ${range.timeZone})
+            AND ${matchesFilters(sql, filters)}
         ),
         sessions AS (
           SELECT session_id, min(bucket) AS bucket,
@@ -129,15 +136,15 @@ export class Reports extends Context.Service<Reports, {
         round(avg(duration))::int AS visit_duration`
 
       const overview = Effect.fn("Reports.overview")(function*(member: MemberId, environmentId: EnvironmentId, query: OverviewQuery) {
-        const { environmentId: id, range } = yield* scope(member, environmentId, query)
+        const { environmentId: id, range, filters } = yield* scope(member, environmentId, query)
         const label = range.interval === "hour" ? `YYYY-MM-DD"T"HH24:MI` : "YYYY-MM-DD"
 
         const [totals] = yield* sql<NumbersRow>`
-          WITH ${scopedEvents(id, range)}
+          WITH ${scopedEvents(id, range, filters)}
           SELECT ev.*, se.* FROM (SELECT ${eventNumbers} FROM scoped) ev, (SELECT ${sessionNumbers} FROM sessions) se`
 
         const series = yield* sql<NumbersRow & { readonly bucket: string }>`
-          WITH ${scopedEvents(id, range)},
+          WITH ${scopedEvents(id, range, filters)},
           buckets AS (
             SELECT generate_series(
               ${range.from}::date::timestamp,
@@ -160,18 +167,6 @@ export class Reports extends Context.Service<Reports, {
         }
       }, (effect) => Effect.catchTag(effect, "SqlError", Effect.die))
 
-      /** The path of a URL property (`/pricing`): no scheme, host, query or fragment; `/` when empty. */
-      const pathOf = () => {
-        const url = sql`(properties ->> '$url')`
-        return sql`CASE WHEN ${url} ~* '^[a-z][a-z0-9+.-]*://'
-          THEN coalesce(nullif(substring(${url} FROM '(?i)^[a-z][a-z0-9+.-]*://[^/?#]*([^?#]*)'), ''), '/')
-          ELSE substring(${url} FROM '^[^?#]*') END`
-      }
-
-      /** The host of a URL Event property, lowercased, without port or `www.`; null when it isn't a URL. */
-      const hostOf = (property: "$url" | "$referrer") =>
-        sql`regexp_replace(lower(substring(properties ->> ${property} FROM '(?i)^[a-z][a-z0-9+.-]*://(?:[^@/?#]*@)?([^/?#:]+)')), '^www[.]', '')`
-
       /** The first (or last) Pageview of each Session in the range, as `properties`. */
       const sessionPageview = (which: "first" | "last") => sql`
         SELECT DISTINCT ON (session_id) properties FROM scoped
@@ -182,18 +177,15 @@ export class Reports extends Context.Service<Reports, {
       const topRows = (report: TopQuery["report"]) => {
         switch (report) {
           case "pages":
-            return sql`SELECT ${pathOf()} AS value, count(*)::int AS count
+            return sql`SELECT ${pathOf(sql)} AS value, count(*)::int AS count
               FROM scoped WHERE name = '$pageview' GROUP BY 1`
           case "entryPages":
           case "exitPages":
-            return sql`SELECT ${pathOf()} AS value, count(*)::int AS count
+            return sql`SELECT ${pathOf(sql)} AS value, count(*)::int AS count
               FROM (${sessionPageview(report === "entryPages" ? "first" : "last")}) s GROUP BY 1`
-          case "referrers": {
-            const referrer = hostOf("$referrer")
-            const own = hostOf("$url")
-            return sql`SELECT CASE WHEN ${referrer} = ${own} THEN NULL ELSE ${referrer} END AS value, count(*)::int AS count
+          case "referrers":
+            return sql`SELECT ${referringDomainOf(sql)} AS value, count(*)::int AS count
               FROM (${sessionPageview("first")}) s GROUP BY 1`
-          }
           case "utmSources":
           case "utmMediums":
           case "utmCampaigns": {
@@ -212,23 +204,28 @@ export class Reports extends Context.Service<Reports, {
       }
 
       const top = Effect.fn("Reports.top")(function*(member: MemberId, environmentId: EnvironmentId, query: TopQuery) {
-        const { environmentId: id, range } = yield* scope(member, environmentId, query)
+        const { environmentId: id, range, filters } = yield* scope(member, environmentId, query)
         const rows = yield* sql<{ readonly value: string | null; readonly count: number }>`
-          WITH ${scopedEvents(id, range)}
+          WITH ${scopedEvents(id, range, filters)}
           SELECT value, count FROM (${topRows(query.report)}) t
           ORDER BY count DESC, value ASC NULLS LAST
           LIMIT ${TOP_LIMIT}`
         return { from: range.from, to: range.to, timeZone: range.timeZone, report: query.report, rows }
       }, (effect) => Effect.catchTag(effect, "SqlError", Effect.die))
 
-      const liveVisitors = Effect.fn("Reports.liveVisitors")(function*(member: MemberId, environmentId: EnvironmentId) {
+      const liveVisitors = Effect.fn("Reports.liveVisitors")(function*(
+        member: MemberId,
+        environmentId: EnvironmentId,
+        filters?: ReadonlyArray<PropertyFilter>
+      ) {
         const environment = yield* projects.environment(member, environmentId)
         const now = yield* DateTime.now
         const [row] = yield* sql<{ readonly visitors: number }>`
           SELECT count(DISTINCT visitor_id)::int AS visitors FROM event
           WHERE environment_id = ${environment.id}
             AND ts > ${DateTime.toDateUtc(DateTime.subtract(now, { minutes: LIVE_MINUTES }))}
-            AND ts <= ${DateTime.toDateUtc(now)}`
+            AND ts <= ${DateTime.toDateUtc(now)}
+            AND ${matchesFilters(sql, filters)}`
         return row?.visitors ?? 0
       }, (effect) => Effect.catchTag(effect, "SqlError", Effect.die))
 
@@ -245,13 +242,14 @@ export class Reports extends Context.Service<Reports, {
         member: MemberId,
         environmentId: EnvironmentId,
         range: DateRange,
-        by: { readonly property: string; readonly event: string }
+        by: { readonly property: string; readonly event: string; readonly filters?: ReadonlyArray<PropertyFilter> | undefined }
       ) {
         yield* projects.environment(member, environmentId)
         return yield* sql<BreakdownRow>`
           SELECT properties ->> ${by.property} AS value, count(*)::int AS count FROM event
           WHERE environment_id = ${environmentId} AND name = ${by.event}
             AND ts >= ${DateTime.toDateUtc(range.from)} AND ts < ${DateTime.toDateUtc(range.to)}
+            AND ${matchesFilters(sql, by.filters)}
           GROUP BY 1
           ORDER BY count DESC, value ASC NULLS LAST`
       }, (effect) => Effect.catchTag(effect, "SqlError", Effect.die))

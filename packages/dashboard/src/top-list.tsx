@@ -1,8 +1,10 @@
 // A ranked-list report card (the `top` endpoint) with proportional bars. One card can offer
-// several reports as tabs, e.g. top, entry and exit pages. Follows the shared date range.
-import type { Environment, ReportRangeQuery, TopReport, TopRow } from "@flock/shared"
+// several reports as tabs, e.g. top, entry and exit pages. Follows the shared date range and
+// filters; clicking a row adds its value as a filter.
+import type { Environment, PropertyFilter, ReportRangeQuery, TopReport, TopRow } from "@flock/shared"
 import { type CSSProperties, useState } from "react"
 import { request } from "./api.ts"
+import { queryDeps } from "./filters.tsx"
 import { usePoll } from "./use-poll.ts"
 
 export const muted: CSSProperties = { fontSize: 14, color: "#666" }
@@ -19,6 +21,8 @@ export interface TopTab {
   readonly label?: (value: string) => string
   /** What a `null` value means (default "Unknown"). */
   readonly nullLabel?: string
+  /** The Event property a row's value filters by, e.g. `$path` for pages. */
+  readonly filterKey: string
 }
 
 /** True when the range can be sent: a custom range needs both dates. */
@@ -26,7 +30,12 @@ export const isComplete = (range: ReportRangeQuery) =>
   range.period !== "custom" || (range.from !== undefined && range.to !== undefined)
 
 export const TopList = (
-  { environment, range, tabs }: { environment: Environment; range: ReportRangeQuery; tabs: ReadonlyArray<TopTab> }
+  { environment, range, tabs, onAddFilter }: {
+    environment: Environment
+    range: ReportRangeQuery
+    tabs: ReadonlyArray<TopTab>
+    onAddFilter: (filter: PropertyFilter) => void
+  }
 ) => {
   const [selected, setSelected] = useState(0)
   const tab = tabs[selected] ?? tabs[0]!
@@ -38,7 +47,7 @@ export const TopList = (
           api.reports.top({ params: { environmentId: environment.id }, query: { ...range, report: tab.report } })
         )
         : Promise.resolve(undefined),
-    [environment.id, tab.report, range.period, range.from, range.to]
+    [environment.id, tab.report, ...queryDeps(range)]
   )
   const rows = data?.report === tab.report ? data.rows : undefined
   return (
@@ -66,12 +75,16 @@ export const TopList = (
       {error && !rows ? <p role="alert" style={muted}>Could not load.</p> : null}
       {complete && !rows && !error ? <p style={muted}>Loading…</p> : null}
       {rows?.length === 0 ? <p style={muted}>Nothing in this range.</p> : null}
-      {rows && rows.length > 0 ? <Rows rows={rows} tab={tab} /> : null}
+      {rows && rows.length > 0 ? <Rows rows={rows} tab={tab} onAddFilter={onAddFilter} /> : null}
     </article>
   )
 }
 
-const Rows = ({ rows, tab }: { rows: ReadonlyArray<TopRow>; tab: TopTab }) => {
+const Rows = ({ rows, tab, onAddFilter }: {
+  rows: ReadonlyArray<TopRow>
+  tab: TopTab
+  onAddFilter: (filter: PropertyFilter) => void
+}) => {
   const total = rows.reduce((sum, row) => sum + row.count, 0)
   const max = Math.max(...rows.map((row) => row.count))
   return (
@@ -89,9 +102,18 @@ const Rows = ({ rows, tab }: { rows: ReadonlyArray<TopRow>; tab: TopTab }) => {
             }}
           />
           <span style={{ position: "relative", display: "flex", justifyContent: "space-between", gap: 8 }}>
-            <span style={{ ...(row.value === null ? muted : {}), overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {row.value === null ? (tab.nullLabel ?? "Unknown") : tab.label ? tab.label(row.value) : row.value}
-            </span>
+            {row.value === null
+              ? <span style={{ ...muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tab.nullLabel ?? "Unknown"}</span>
+              : (
+                <button
+                  type="button"
+                  title={`Filter by ${tab.filterKey} is ${row.value}`}
+                  onClick={() => onAddFilter({ property: tab.filterKey, op: "is", value: row.value! })}
+                  style={{ all: "unset", cursor: "pointer", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                >
+                  {tab.label ? tab.label(row.value) : row.value}
+                </button>
+              )}
             <span title={`${Math.round((row.count / total) * 100)}%`}>{row.count.toLocaleString()}</span>
           </span>
         </li>
