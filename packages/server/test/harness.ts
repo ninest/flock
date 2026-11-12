@@ -26,6 +26,7 @@ import { HttpApiClient } from "effect/http-api"
 import { TestClock } from "effect/testing"
 import { fileURLToPath } from "node:url"
 import { Access, AuthConfig } from "../src/access.ts"
+import { type AdminCommandError, adminCommand } from "../src/admin-command.ts"
 import { AppLive } from "../src/app.ts"
 import { PgLive } from "../src/db.ts"
 import { GeoIp } from "../src/geoip.ts"
@@ -102,6 +103,8 @@ export class Harness extends Context.Service<Harness, {
   readonly fetch: typeof globalThis.fetch
   /** Typed client derived from the shared FlockApi, signed in as an Instance admin. */
   readonly client: HttpApiClient.ForApi<typeof FlockApi>
+  /** Runs the `admin` CLI command against this Instance and returns its output. */
+  readonly adminCommand: (args: ReadonlyArray<string>) => Effect.Effect<string, AdminCommandError>
   /** A fresh browser (empty cookie jar). */
   readonly browser: () => Effect.Effect<Browser>
   /** Creates a Member who signs in with email + password (not an Instance admin). */
@@ -182,7 +185,12 @@ export class Harness extends Context.Service<Harness, {
             query: { from: DateTime.makeUnsafe(range.from), to: DateTime.makeUnsafe(range.to) }
           }).pipe(Effect.map((r) => r.pageviews))
 
-        return Harness.of({ handler, fetch, client, browser, seedMember, seedProject, pageviewCount })
+        return Harness.of({
+          handler,
+          fetch,
+          client,
+          adminCommand: (args) => adminCommand(args).pipe(Effect.provide(deps)),
+          browser, seedMember, seedProject, pageviewCount })
       })
     ).pipe(Layer.provide(TestDatabase.layer))
 }

@@ -6,7 +6,8 @@
     "typecheck": "tsc -p .",
     "test": "vitest run",
     "dev": "node --experimental-strip-types --no-warnings=ExperimentalWarning --watch src/main.ts",
-    "start": "node --experimental-strip-types --no-warnings=ExperimentalWarning src/main.ts"
+    "start": "node --experimental-strip-types --no-warnings=ExperimentalWarning src/main.ts",
+    "cli": "node --experimental-strip-types --no-warnings=ExperimentalWarning src/cli.ts"
   },
   "dependencies": {
     "@effect/platform-node": "4.1.4",
