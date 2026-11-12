@@ -214,7 +214,52 @@ const EnvironmentSettings = (props: {
         )}
       </div>
       {action.alert}
+      <AllowedOrigins environment={environment} onChange={props.onChange} />
     </Section>
+  )
+}
+
+/** Edits the browser origins an Environment accepts Events from, one host per line. */
+const AllowedOrigins = ({ environment, onChange }: { environment: Environment; onChange: () => Promise<void> }) => {
+  const action = useAction()
+  const [saved, setSaved] = useState(false)
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const allowedOrigins = String(new FormData(event.currentTarget).get("allowedOrigins"))
+      .split(/[\s,]+/)
+      .map((line) => line.trim())
+      .filter((line) => line !== "")
+    setSaved(false)
+    void action.run(async () => {
+      await request((api) => api.environments.update({ params: { environmentId: environment.id }, payload: { allowedOrigins } }))
+      await onChange()
+      setSaved(true)
+    })
+  }
+  return (
+    <form onSubmit={submit} style={{ display: "grid", gap: 4, maxWidth: 480 }}>
+      <label style={{ display: "grid", gap: 4 }}>
+        Allowed origins
+        <textarea
+          key={`${environment.id}:${environment.allowedOrigins.join(",")}`}
+          name="allowedOrigins"
+          rows={4}
+          spellCheck={false}
+          defaultValue={environment.allowedOrigins.join("\n")}
+          placeholder={"blog.example.com\n*.example.com"}
+        />
+      </label>
+      <span style={muted}>
+        One host per line: <code>blog.example.com</code>, <code>*.example.com</code> (subdomains), <code>localhost</code>, or{" "}
+        <code>*</code> for any origin. Leave empty to accept any public website and reject localhost and private networks.
+        Requests from servers and apps (no <code>Origin</code> header) are always accepted.
+      </span>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <button type="submit" disabled={action.busy}>Save origins</button>
+        {saved ? <span style={muted}>Saved.</span> : null}
+      </div>
+      {action.alert}
+    </form>
   )
 }
 

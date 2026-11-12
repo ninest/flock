@@ -17,7 +17,8 @@ const HealthHandlers = HttpApiBuilder.group(FlockApi, "health", Effect.fn(functi
 
 const IngestHandlers = HttpApiBuilder.group(FlockApi, "ingest", Effect.fn(function*(handlers) {
   const ingest = yield* Ingest
-  return handlers.handle("send", ({ payload }) => ingest.send(payload))
+  return handlers.handle("send", ({ payload, request }) =>
+    ingest.send(payload, { origin: request.headers["origin"], userAgent: request.headers["user-agent"] }))
 }))
 
 const ProjectsHandlers = HttpApiBuilder.group(FlockApi, "projects", Effect.fn(function*(handlers) {
@@ -41,6 +42,7 @@ const ProjectsHandlers = HttpApiBuilder.group(FlockApi, "projects", Effect.fn(fu
 const EnvironmentsHandlers = HttpApiBuilder.group(FlockApi, "environments", Effect.fn(function*(handlers) {
   const projects = yield* Projects
   return handlers
+    .handle("update", ({ params, payload }) => CurrentMember.use(({ id }) => projects.updateEnvironment(id, params.environmentId, payload)))
     .handle("delete", ({ params }) => CurrentMember.use(({ id }) => projects.deleteEnvironment(id, params.environmentId)))
     .handle("rotateKey", ({ params }) => CurrentMember.use(({ id }) => projects.rotateKey(id, params.environmentId)))
     .handle("deleteEvents", ({ params }) => CurrentMember.use(({ id }) => projects.deleteEvents(id, params.environmentId)))

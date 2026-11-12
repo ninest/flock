@@ -3,6 +3,7 @@
 // didn't exist. Changes need the owner role.
 import { PgClient } from "@effect/sql-pg"
 import {
+  defaultAllowedOrigins,
   Environment,
   EnvironmentId,
   EnvironmentNameTaken,
@@ -28,6 +29,7 @@ interface Row {
   readonly environmentId: string | null
   readonly environmentName: string | null
   readonly key: string | null
+  readonly allowedOrigins: ReadonlyArray<string> | null
 }
 
 /** Groups joined project/environment rows into Projects, keeping row order. */
@@ -44,7 +46,12 @@ const toProjects = (rows: ReadonlyArray<Row>): Array<Project> => {
     }
     if (row.environmentId !== null) {
       entry.environments.push(
-        new Environment({ id: EnvironmentId.make(row.environmentId), name: row.environmentName!, key: row.key! })
+        new Environment({
+          id: EnvironmentId.make(row.environmentId),
+          name: row.environmentName!,
+          key: row.key!,
+          allowedOrigins: row.allowedOrigins ?? []
+        })
       )
     }
   }
@@ -55,6 +62,8 @@ const toProjects = (rows: ReadonlyArray<Row>): Array<Project> => {
 export interface EnvironmentAccess {
   readonly id: EnvironmentId
   readonly name: string
+  readonly key: string
+  readonly allowedOrigins: ReadonlyArray<string>
   readonly projectId: ProjectId
   readonly timeZone: string
   readonly role: ProjectRole
@@ -66,7 +75,7 @@ export interface NewProject {
   /** Becomes the Project's owner. None only for the development playground. */
   readonly owner: Option.Option<MemberId>
   /** Environments with fixed keys (the playground's). Default: `production` with a fresh key. */
-  readonly environments?: ReadonlyArray<{ readonly name: string; readonly key: string }>
+  readonly environments?: ReadonlyArray<{ readonly name: string; readonly key: string; readonly allowedOrigins?: ReadonlyArray<string> }>
 }
 
 export class Projects extends Context.Service<Projects, {
@@ -84,6 +93,11 @@ export class Projects extends Context.Service<Projects, {
     id: ProjectId,
     name: string
   ) => Effect.Effect<Environment, ProjectNotFound | ProjectOwnerRequired | EnvironmentNameTaken>
+  readonly updateEnvironment: (
+    member: MemberId,
+    id: EnvironmentId,
+    changes: { readonly allowedOrigins?: ReadonlyArray<string> | undefined }
+  ) => Effect.Effect<Environment, EnvironmentNotFound | ProjectOwnerRequired>
   readonly deleteEnvironment: (
     member: MemberId,
     id: EnvironmentId
@@ -97,6 +111,8 @@ export class Projects extends Context.Service<Projects, {
   readonly environment: (member: MemberId, id: EnvironmentId) => Effect.Effect<EnvironmentAccess, EnvironmentNotFound>
   /** The Project with an Environment that has this key, if any (for idempotent seeding). */
   readonly projectWithKey: (key: string) => Effect.Effect<Option.Option<ProjectId>>
+  /** Sets the allowed origins of the Environment with this key (for seeding). */
+  readonly setAllowedOriginsByKey: (key: string, allowedOrigins: ReadonlyArray<string>) => Effect.Effect<void>
   /** Adds the Member as owner unless they already belong to the Project. */
   readonly ensureOwner: (id: ProjectId, member: MemberId) => Effect.Effect<void>
 }>()("flock/Projects") {
@@ -111,7 +127,7 @@ export class Projects extends Context.Service<Projects, {
       const select = (member: MemberId, project: ProjectId | undefined) =>
         sql<Row>`
           SELECT p.id AS project_id, p.name AS project_name, p.time_zone, pm.role,
-                 e.id AS environment_id, e.name AS environment_name, e.key
+                 e.id AS environment_id, e.name AS environment_name, e.key, e.allowed_origins
           FROM project p
           JOIN project_member pm ON pm.project_id = p.id AND pm.member_id = ${member}
           LEFT JOIN environment e ON e.project_id = p.id
@@ -132,8 +148,8 @@ export class Projects extends Context.Service<Projects, {
         get(member, id).pipe(Effect.tap((project) => requireOwner(project.role)))
 
       const environment = (member: MemberId, id: EnvironmentId) =>
-        sql<{ name: string; projectId: string; timeZone: string; role: ProjectRole }>`
-          SELECT e.name, e.project_id, p.time_zone, pm.role
+        sql<{ name: string; key: string; allowedOrigins: ReadonlyArray<string>; projectId: string; timeZone: string; role: ProjectRole }>`
+          SELECT e.name, e.key, e.allowed_origins, e.project_id, p.time_zone, pm.role
           FROM environment e
           JOIN project p ON p.id = e.project_id
           JOIN project_member pm ON pm.project_id = p.id AND pm.member_id = ${member}
@@ -141,7 +157,15 @@ export class Projects extends Context.Service<Projects, {
           orDie,
           Effect.flatMap(([row]) =>
             row
-              ? Effect.succeed({ id, name: row.name, projectId: ProjectId.make(row.projectId), timeZone: row.timeZone, role: row.role })
+              ? Effect.succeed({
+                id,
+                name: row.name,
+                key: row.key,
+                allowedOrigins: row.allowedOrigins,
+                projectId: ProjectId.make(row.projectId),
+                timeZone: row.timeZone,
+                role: row.role
+              })
               : Effect.fail(new EnvironmentNotFound({ id }))
           )
         )
@@ -152,15 +176,24 @@ export class Projects extends Context.Service<Projects, {
       const notProduction = (env: EnvironmentAccess, message: string) =>
         env.name === PRODUCTION ? Effect.fail(new ProductionProtected({ message })) : Effect.void
 
-      const insertEnvironment = (projectId: ProjectId, name: string, key: string) => {
-        const row = { id: EnvironmentId.make(makeId("env")), projectId, name, key }
-        return sql`INSERT INTO environment ${sql.insert(row)}`.pipe(
-          Effect.as(new Environment({ id: row.id, name, key }))
+      const insertEnvironment = (
+        projectId: ProjectId,
+        name: string,
+        key: string,
+        allowedOrigins: ReadonlyArray<string> = defaultAllowedOrigins(name)
+      ) => {
+        const id = EnvironmentId.make(makeId("env"))
+        return sql`INSERT INTO environment ${sql.insert({ id, projectId, name, key, allowedOrigins: sql.json(allowedOrigins) })}`.pipe(
+          Effect.as(new Environment({ id, name, key, allowedOrigins }))
         )
       }
 
+      /** Deletes Events and their UUIDs, so the same Events can be sent again. */
       const deleteEventsOf = (environmentIds: ReadonlyArray<string>) =>
-        environmentIds.length === 0 ? Effect.void : sql`DELETE FROM event WHERE environment_id IN ${sql.in(environmentIds)}`.pipe(Effect.asVoid)
+        environmentIds.length === 0 ? Effect.void : Effect.all([
+          sql`DELETE FROM event WHERE environment_id IN ${sql.in(environmentIds)}`,
+          sql`DELETE FROM event_uuid WHERE environment_id IN ${sql.in(environmentIds)}`
+        ], { discard: true })
 
       const ensureOwner = (id: ProjectId, member: MemberId) =>
         sql`INSERT INTO project_member ${sql.insert({ projectId: id, memberId: member, role: "owner" })} ON CONFLICT DO NOTHING`.pipe(
@@ -177,7 +210,7 @@ export class Projects extends Context.Service<Projects, {
             const id = ProjectId.make(makeId("prj"))
             yield* sql`INSERT INTO project ${sql.insert({ id, name, timeZone })}`
             for (const env of environments ?? [{ name: PRODUCTION, key: makeEnvironmentKey(PRODUCTION) }]) {
-              yield* insertEnvironment(id, env.name, env.key)
+              yield* insertEnvironment(id, env.name, env.key, "allowedOrigins" in env ? env.allowedOrigins : undefined)
             }
             if (Option.isSome(owner)) yield* ensureOwner(id, owner.value)
             return id
@@ -211,6 +244,16 @@ export class Projects extends Context.Service<Projects, {
             return yield* insertEnvironment(id, name, makeEnvironmentKey(name)).pipe(orDie)
           }),
 
+        updateEnvironment: (member, id, changes) =>
+          Effect.gen(function*() {
+            const env = yield* ownEnvironment(member, id)
+            const allowedOrigins = changes.allowedOrigins ?? env.allowedOrigins
+            if (changes.allowedOrigins !== undefined) {
+              yield* sql`UPDATE environment SET allowed_origins = ${sql.json(allowedOrigins)} WHERE id = ${id}`.pipe(orDie)
+            }
+            return new Environment({ id, name: env.name, key: env.key, allowedOrigins })
+          }),
+
         deleteEnvironment: (member, id) =>
           Effect.gen(function*() {
             const env = yield* ownEnvironment(member, id)
@@ -226,7 +269,7 @@ export class Projects extends Context.Service<Projects, {
             const env = yield* ownEnvironment(member, id)
             const key = makeEnvironmentKey(env.name)
             yield* sql`UPDATE environment SET key = ${key} WHERE id = ${id}`.pipe(orDie)
-            return new Environment({ id, name: env.name, key })
+            return new Environment({ id, name: env.name, key, allowedOrigins: env.allowedOrigins })
           }),
 
         deleteEvents: (member, id) =>
@@ -243,6 +286,9 @@ export class Projects extends Context.Service<Projects, {
             orDie,
             Effect.map(([row]) => Option.map(Option.fromNullishOr(row), (r) => ProjectId.make(r.projectId)))
           ),
+
+        setAllowedOriginsByKey: (key, allowedOrigins) =>
+          sql`UPDATE environment SET allowed_origins = ${sql.json(allowedOrigins)} WHERE key = ${key}`.pipe(Effect.asVoid, orDie),
 
         ensureOwner
       })
