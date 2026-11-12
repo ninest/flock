@@ -2,6 +2,7 @@ import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware, OpenApi } from "effect/http-api"
 import { EnvironmentId, EnvironmentNotFound, Project } from "./domain.ts"
 import { IngestBatch, IngestResult, UnknownKey } from "./ingest.ts"
+import { Member, MemberAuth } from "./members.ts"
 
 export class IngestGroup extends HttpApiGroup.make("ingest")
   .add(
@@ -15,6 +16,7 @@ export class IngestGroup extends HttpApiGroup.make("ingest")
 
 export class ProjectsGroup extends HttpApiGroup.make("projects")
   .add(HttpApiEndpoint.get("list", "/", { success: Schema.Array(Project) }))
+  .middleware(MemberAuth)
   .prefix("/api/projects")
   .annotateMerge(OpenApi.annotations({ title: "Projects" })) {}
 
@@ -30,12 +32,19 @@ export class ReportsGroup extends HttpApiGroup.make("reports")
       error: EnvironmentNotFound
     })
   )
+  .middleware(MemberAuth)
   .prefix("/api/environments")
   .annotateMerge(OpenApi.annotations({ title: "Reports" })) {}
+
+export class MembersGroup extends HttpApiGroup.make("members")
+  .add(HttpApiEndpoint.get("me", "/api/me", { success: Member }))
+  .middleware(MemberAuth)
+  .annotateMerge(OpenApi.annotations({ title: "Members" })) {}
 
 export class FlockApi extends HttpApi.make("flock")
   .add(IngestGroup)
   .add(ProjectsGroup)
   .add(ReportsGroup)
+  .add(MembersGroup)
   .middleware(HttpApiMiddleware.ProblemDetails) // malformed requests get an RFC 9457 400 explaining why
   .annotateMerge(OpenApi.annotations({ title: "Flock API" })) {}

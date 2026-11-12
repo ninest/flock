@@ -3,6 +3,7 @@ import { FlockApi } from "@flock/shared"
 import { Effect, Layer } from "effect"
 import { HttpRouter, HttpStaticServer } from "effect/http"
 import { HttpApiBuilder, HttpApiMiddleware, HttpApiScalar } from "effect/http-api"
+import { AuthRoutes, currentMember, MemberAuthLive } from "./auth.ts"
 import { Ingest } from "./ingest.ts"
 import { Projects } from "./projects.ts"
 import { Reports } from "./reports.ts"
@@ -22,8 +23,11 @@ const ReportsHandlers = HttpApiBuilder.group(FlockApi, "reports", Effect.fn(func
   return handlers.handle("pageviewCount", ({ params, query }) => reports.pageviewCount(params.environmentId, query).pipe(Effect.map((pageviews) => ({ pageviews }))))
 }))
 
+const MembersHandlers = HttpApiBuilder.group(FlockApi, "members", (handlers) => handlers.handle("me", () => currentMember))
+
 const ApiRoutes = HttpApiBuilder.layer(FlockApi, { openapiPath: "/api/openapi.json" }).pipe(
-  Layer.provide([IngestHandlers, ProjectsHandlers, ReportsHandlers]),
+  Layer.provide([IngestHandlers, ProjectsHandlers, ReportsHandlers, MembersHandlers]),
+  Layer.provide(MemberAuthLive),
   Layer.provide(HttpApiMiddleware.layerProblemDetails({ includeDetails: true }))
 )
 
@@ -38,4 +42,4 @@ const StaticRoutes = (publicDir: string) => HttpStaticServer.layer({ root: publi
  */
 const Cors = HttpRouter.cors({ allowedHeaders: ["content-type"] })
 
-export const AppRoutes = (publicDir: string) => Layer.mergeAll(ApiRoutes, DocsRoute, StaticRoutes(publicDir), Cors)
+export const AppRoutes = (publicDir: string) => Layer.mergeAll(ApiRoutes, AuthRoutes, DocsRoute, StaticRoutes(publicDir), Cors)

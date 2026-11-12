@@ -12,16 +12,20 @@
 //     }))
 //   })
 //
+// `h.client` is signed in as an Instance admin; `h.fetch` sends no cookies. `h.browser()`
+// gives a fresh cookie jar for sign-up/sign-in flows. FLOCK_ADMIN_EMAIL is `options.adminEmail`.
+//
 // One database per `layer(...)` block (usually one per test file), dropped when
 // the block finishes. Tests observe behavior only through HTTP: never query tables.
 import { NodeHttpServer } from "@effect/platform-node"
-import { type EnvironmentId, FlockApi, type IngestEvent, type Project } from "@flock/shared"
-import { Context, DateTime, Effect, Layer, Redacted, type Scope } from "effect"
+import { type EnvironmentId, FlockApi, type IngestEvent, type MemberId, type Project } from "@flock/shared"
+import { Context, DateTime, Effect, Layer, Option, Redacted, type Scope } from "effect"
 import { FetchHttpClient, HttpEffect, HttpRouter } from "effect/http"
 import type { HttpServerRequest } from "effect/http/HttpServerRequest"
 import { HttpApiClient } from "effect/http-api"
 import { TestClock } from "effect/testing"
 import { fileURLToPath } from "node:url"
+import { Access, AuthConfig } from "../src/access.ts"
 import { AppLive } from "../src/app.ts"
 import { PgLive } from "../src/db.ts"
 import { GeoIp } from "../src/geoip.ts"
@@ -36,15 +40,72 @@ const publicDir = fileURLToPath(new URL("./fixtures/public", import.meta.url))
 export interface HarnessOptions {
   /** IP address -> ISO country code, served by the GeoIP test layer. */
   readonly geoIp?: Record<string, string>
+  /** FLOCK_ADMIN_EMAIL (default `owner@flock.test`). */
+  readonly adminEmail?: string
 }
+
+/** A browser with its own cookie jar, talking to the server. */
+export interface Browser {
+  /** `fetch` that sends and stores cookies, with an `Origin` header like a browser. */
+  readonly fetch: typeof globalThis.fetch
+  /** Typed client sending this browser's cookies. */
+  readonly client: HttpApiClient.ForApi<typeof FlockApi>
+  /** POSTs JSON to a Better Auth endpoint, e.g. `auth("/sign-up/email", {...})`. */
+  readonly auth: (path: string, body?: object) => Effect.Effect<Response>
+  readonly signUp: (input: { readonly email: string; readonly password: string; readonly name?: string }) => Effect.Effect<Response>
+  readonly signIn: (input: { readonly email: string; readonly password: string }) => Effect.Effect<Response>
+}
+
+const makeBrowser = (handler: (request: Request) => Promise<Response>) =>
+  Effect.gen(function*() {
+    const jar = new Map<string, string>()
+    const fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(new URL(input.toString(), BASE_URL), init)
+      const headers = new Headers(request.headers)
+      if (jar.size > 0) headers.set("cookie", [...jar].map(([k, v]) => `${k}=${v}`).join("; "))
+      if (!headers.has("origin")) headers.set("origin", BASE_URL)
+      const response = await handler(new Request(request, { headers }))
+      for (const cookie of response.headers.getSetCookie()) {
+        const [pair = ""] = cookie.split(";")
+        const i = pair.indexOf("=")
+        const name = pair.slice(0, i)
+        const value = pair.slice(i + 1)
+        if (value === "" || /max-age=0/i.test(cookie)) jar.delete(name)
+        else jar.set(name, value)
+      }
+      return response
+    }) as typeof globalThis.fetch
+    const client = yield* makeClient(fetch)
+    const auth: Browser["auth"] = (path, body = {}) =>
+      Effect.promise(() =>
+        fetch(`/api/auth${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+      )
+    return {
+      fetch,
+      client,
+      auth,
+      signUp: ({ email, name, password }) => auth("/sign-up/email", { email, password, name: name ?? email.split("@")[0] }),
+      signIn: (input) => auth("/sign-in/email", input)
+    } satisfies Browser
+  })
+
+const makeClient = (fetch: typeof globalThis.fetch) =>
+  HttpApiClient.make(FlockApi, { baseUrl: BASE_URL }).pipe(
+    Effect.provide(FetchHttpClient.layer),
+    Effect.provideService(FetchHttpClient.Fetch, fetch)
+  )
 
 export class Harness extends Context.Service<Harness, {
   /** The server as a fetch-style handler (no port). */
   readonly handler: (request: Request) => Promise<Response>
-  /** `fetch` against the server; relative URLs resolve against BASE_URL. */
+  /** `fetch` against the server without cookies; relative URLs resolve against BASE_URL. */
   readonly fetch: typeof globalThis.fetch
-  /** Typed client derived from the shared FlockApi. */
+  /** Typed client derived from the shared FlockApi, signed in as an Instance admin. */
   readonly client: HttpApiClient.ForApi<typeof FlockApi>
+  /** A fresh browser (empty cookie jar). */
+  readonly browser: () => Effect.Effect<Browser>
+  /** Creates a Member who signs in with email + password (not an Instance admin). */
+  readonly seedMember: (input: { readonly email: string; readonly password: string; readonly name?: string }) => Effect.Effect<MemberId>
   /**
    * Creates a Project with the given Environments and returns it with their keys.
    * Uses the server's seeding (the only way to create Projects until the Projects API exists).
@@ -64,11 +125,18 @@ export class Harness extends Context.Service<Harness, {
     Layer.effect(
       Harness,
       Effect.gen(function*() {
-        const databaseUrl = yield* TestDatabase
-        const Deps = AppLive.pipe(
+        const databaseUrl = Redacted.make(yield* TestDatabase)
+        const settings: AuthConfig["Service"] = {
+          publicUrl: BASE_URL,
+          trustedOrigins: [],
+          secret: Redacted.make("test-secret-test-secret-test-secret-0123"),
+          adminEmail: Option.some(options.adminEmail ?? "owner@flock.test")
+        }
+        const Deps = AppLive(databaseUrl).pipe(
+          Layer.provideMerge(Layer.succeed(AuthConfig, settings)),
           Layer.provideMerge(GeoIp.layerFixed(options.geoIp ?? {})),
           Layer.provideMerge(MigratorLive),
-          Layer.provideMerge(PgLive(Redacted.make(databaseUrl))),
+          Layer.provideMerge(PgLive(databaseUrl)),
           Layer.provideMerge(NodeHttpServer.layerHttpServices)
         )
         // Infra (pool timers, background fibers) must run on the live clock, or
@@ -88,12 +156,18 @@ export class Harness extends Context.Service<Harness, {
             input instanceof Request ? input : new Request(new URL(input.toString(), BASE_URL), init)
           )) as typeof globalThis.fetch
 
-        const client = yield* HttpApiClient.make(FlockApi, { baseUrl: BASE_URL }).pipe(
-          Effect.provide(FetchHttpClient.layer),
-          Effect.provideService(FetchHttpClient.Fetch, fetch)
-        )
-
         const seed = Context.get(deps, Seed)
+        const browser = () => makeBrowser(handler)
+        const seedMember: Harness["Service"]["seedMember"] = (input) => seed.member(input)
+
+        // The default client: a seeded Member, made Instance admin, signed in.
+        const admin = { email: "harness-admin@flock.test", password: "harness-password" }
+        const adminId = yield* seedMember(admin)
+        yield* Context.get(deps, Access).grantAdmin(adminId).pipe(Effect.orDie)
+        const adminBrowser = yield* browser()
+        yield* adminBrowser.signIn(admin)
+        const client = adminBrowser.client
+
         let projects = 0
         const seedProject: Harness["Service"]["seedProject"] = (o) =>
           seed.project({
@@ -108,7 +182,7 @@ export class Harness extends Context.Service<Harness, {
             query: { from: DateTime.makeUnsafe(range.from), to: DateTime.makeUnsafe(range.to) }
           }).pipe(Effect.map((r) => r.pageviews))
 
-        return Harness.of({ handler, fetch, client, seedProject, pageviewCount })
+        return Harness.of({ handler, fetch, client, browser, seedMember, seedProject, pageviewCount })
       })
     ).pipe(Layer.provide(TestDatabase.layer))
 }
