@@ -6,7 +6,7 @@
 //   layer(Harness.layer())("Suite", (it) => {
 //     it.effect("does a thing", () => Effect.gen(function*() {
 //       const h = yield* Harness
-//       const project = yield* h.seedProject({ environments: ["production", "dev"] })
+//       const project = yield* h.createProject({ environments: ["production", "dev"] })
 //       yield* TestClock.setTime(Date.parse("2026-03-01T10:00:00Z"))
 //       yield* h.client.ingest.send({ payload: { key: project.environments[0]!.key, events: [pageview()] } })
 //     }))
@@ -105,6 +105,8 @@ export class Harness extends Context.Service<Harness, {
   readonly handler: (request: Request) => Promise<Response>
   /** `fetch` against the server without cookies; relative URLs resolve against BASE_URL. */
   readonly fetch: typeof globalThis.fetch
+  /** The browser signed in as an Instance admin; `client` is its typed client. */
+  readonly admin: Browser
   /** Typed client derived from the shared FlockApi, signed in as an Instance admin. */
   readonly client: HttpApiClient.ForApi<typeof FlockApi>
   /** Runs the `admin` CLI command against this Instance and returns its output. */
@@ -114,13 +116,14 @@ export class Harness extends Context.Service<Harness, {
   /** Creates a Member who signs in with email + password (not an Instance admin). */
   readonly seedMember: (input: { readonly email: string; readonly password: string; readonly name?: string }) => Effect.Effect<MemberId>
   /**
-   * Creates a Project with the given Environments and returns it with their keys.
-   * Uses the server's seeding (the only way to create Projects until the Projects API exists).
+   * Creates a Project through the Projects API as `h.client` (or `as`), adds the other
+   * Environments (`production` always exists), and returns it with their keys.
    */
-  readonly seedProject: (options: {
+  readonly createProject: (options: {
     readonly name?: string
     readonly timeZone?: string
-    readonly environments: ReadonlyArray<string>
+    readonly environments?: ReadonlyArray<string>
+    readonly as?: Browser
   }) => Effect.Effect<Project>
   /** Convenience: the Pageview count for an Environment in `[from, to)` (ISO strings). */
   readonly pageviewCount: (
@@ -176,11 +179,16 @@ export class Harness extends Context.Service<Harness, {
         const client = adminBrowser.client
 
         let projects = 0
-        const seedProject: Harness["Service"]["seedProject"] = (o) =>
-          seed.project({
-            name: o.name ?? `Project ${++projects}`,
-            timeZone: o.timeZone ?? "UTC",
-            environments: o.environments.map((name) => ({ name }))
+        const createProject: Harness["Service"]["createProject"] = (o) =>
+          Effect.gen(function*() {
+            const api = o.as?.client ?? client
+            const project = yield* api.projects.create({
+              payload: { name: o.name ?? `Project ${++projects}`, timeZone: o.timeZone ?? "UTC" }
+            })
+            for (const name of o.environments ?? []) {
+              if (name !== "production") yield* api.projects.addEnvironment({ params: { projectId: project.id }, payload: { name } })
+            }
+            return yield* api.projects.get({ params: { projectId: project.id } })
           }).pipe(Effect.orDie)
 
         const pageviewCount: Harness["Service"]["pageviewCount"] = (environmentId, range) =>
@@ -192,9 +200,10 @@ export class Harness extends Context.Service<Harness, {
         return Harness.of({
           handler,
           fetch,
+          admin: adminBrowser,
           client,
           adminCommand: (args) => adminCommand(args).pipe(Effect.provide(deps)),
-          browser, seedMember, seedProject, pageviewCount })
+          browser, seedMember, createProject, pageviewCount })
       })
     ).pipe(Layer.provide(TestDatabase.layer))
 }

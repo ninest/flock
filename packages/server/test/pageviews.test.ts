@@ -10,7 +10,7 @@ layer(Harness.layer())("Pageviews", (it) => {
   it.effect("ingest a Pageview, then count it, isolated per Environment", () =>
     Effect.gen(function*() {
       const h = yield* Harness
-      const project = yield* h.seedProject({ environments: ["production", "dev"] })
+      const project = yield* h.createProject({ environments: ["production", "dev"] })
       const [production, dev] = project.environments
 
       yield* TestClock.setTime(Date.parse("2026-03-01T10:00:00Z"))
@@ -27,7 +27,7 @@ layer(Harness.layer())("Pageviews", (it) => {
   it.effect("counts only Pageviews inside the date range", () =>
     Effect.gen(function*() {
       const h = yield* Harness
-      const { environments: [production] } = yield* h.seedProject({ environments: ["production"] })
+      const { environments: [production] } = yield* h.createProject({ environments: ["production"] })
       const key = production!.key
 
       yield* TestClock.setTime(Date.parse("2026-03-01T23:59:00Z"))
@@ -46,7 +46,7 @@ layer(Harness.layer())("Pageviews", (it) => {
   it.effect("stores Pageviews on days long after the server started", () =>
     Effect.gen(function*() {
       const h = yield* Harness
-      const { environments: [production] } = yield* h.seedProject({ environments: ["production"] })
+      const { environments: [production] } = yield* h.createProject({ environments: ["production"] })
       for (const date of ["2027-01-15", "2027-01-16", "2028-06-30"]) {
         yield* TestClock.setTime(Date.parse(`${date}T12:00:00Z`))
         yield* h.client.ingest.send({ payload: { key: production!.key, events: [pageview()] } })

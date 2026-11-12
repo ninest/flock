@@ -1,0 +1,278 @@
+// The Member's Projects: the Project list, creating a Project, and one Project's
+// page with its Environment switcher and settings.
+import { type Environment, type EnvironmentId, PRODUCTION, type Project, type ProjectId } from "@flock/shared"
+import { Link, useNavigate } from "@tanstack/react-router"
+import { DateTime } from "effect"
+import { type CSSProperties, type FormEvent, type ReactNode, useState } from "react"
+import { request } from "./api.ts"
+import { usePoll } from "./use-poll.ts"
+
+const muted: CSSProperties = { fontSize: 14, color: "#666" }
+const card: CSSProperties = { border: "1px solid #ccc", borderRadius: 8, padding: 12 }
+const danger: CSSProperties = { color: "#b00020" }
+
+/** The browser's time zone, the default for a new Project. */
+const browserTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone
+
+/** Runs an action, showing its error to the Member. Returns whether it succeeded. */
+const useAction = () => {
+  const [error, setError] = useState<string>()
+  const [busy, setBusy] = useState(false)
+  const run = async (action: () => Promise<unknown>) => {
+    setBusy(true)
+    setError(undefined)
+    try {
+      await action()
+      return true
+    } catch (e) {
+      setError((e as Error).message)
+      return false
+    } finally {
+      setBusy(false)
+    }
+  }
+  const alert = error ? <p role="alert" style={{ ...danger, margin: 0 }}>{error}</p> : null
+  return { run, busy, alert }
+}
+
+export const ProjectsPage = () => {
+  const { data, error } = usePoll(() => request((api) => api.projects.list()), [])
+  return (
+    <>
+      <h2>Projects</h2>
+      {error && !data ? <p role="alert">Could not load Projects.</p> : null}
+      {!data && !error ? <p>Loading…</p> : null}
+      {data?.length === 0 ? <p>No Projects yet. Create one to get a key for the browser script.</p> : null}
+      <ul style={{ paddingLeft: 20 }}>
+        {data?.map((project) => (
+          <li key={project.id}>
+            <Link to="/projects/$projectId" params={{ projectId: project.id }}>{project.name}</Link>{" "}
+            <span style={muted}>· {project.environments.length} Environment{project.environments.length === 1 ? "" : "s"}</span>
+          </li>
+        ))}
+      </ul>
+      <CreateProject />
+    </>
+  )
+}
+
+const CreateProject = () => {
+  const navigate = useNavigate()
+  const action = useAction()
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    const payload = { name: String(form.get("name")).trim(), timeZone: String(form.get("timeZone")).trim() }
+    void action.run(async () => {
+      const project = await request((api) => api.projects.create({ payload }))
+      await navigate({ to: "/projects/$projectId", params: { projectId: project.id } })
+    })
+  }
+  return (
+    <form onSubmit={submit} style={{ ...card, display: "grid", gap: 8, maxWidth: 360 }}>
+      <strong>New Project</strong>
+      <label style={{ display: "grid", gap: 4 }}>Name<input name="name" required maxLength={100} /></label>
+      <label style={{ display: "grid", gap: 4 }}>
+        Time zone<input name="timeZone" required defaultValue={browserTimeZone()} />
+      </label>
+      {action.alert}
+      <button type="submit" disabled={action.busy}>Create Project</button>
+    </form>
+  )
+}
+
+const last30Days = () => {
+  const to = DateTime.nowUnsafe()
+  return { from: DateTime.subtract(to, { days: 30 }), to: DateTime.add(to, { minutes: 1 }) }
+}
+
+export const ProjectPage = ({ projectId, env }: { projectId: ProjectId; env: string | undefined }) => {
+  const navigate = useNavigate()
+  const { data: project, error, reload } = usePoll(() => request((api) => api.projects.get({ params: { projectId } })), [projectId])
+  if (error && !project) return <p role="alert">{(error as Error).message}</p>
+  if (!project) return <p>Loading…</p>
+
+  const environment = project.environments.find((e) => e.name === (env ?? PRODUCTION)) ?? project.environments[0]!
+  const select = (name: string) =>
+    navigate({ to: "/projects/$projectId", params: { projectId }, search: name === PRODUCTION ? {} : { env: name } })
+
+  return (
+    <>
+      <h2 style={{ marginBottom: 4 }}>{project.name}</h2>
+      <p style={{ ...muted, marginTop: 0 }}>Time zone {project.timeZone}</p>
+      <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        Environment
+        <select value={environment.name} onChange={(e) => void select(e.target.value)} data-testid="environment-switcher">
+          {project.environments.map((e) => <option key={e.id} value={e.name}>{e.name}</option>)}
+        </select>
+      </label>
+      <EnvironmentPageviews key={environment.id} environment={environment} />
+      {project.role === "owner"
+        ? (
+          <>
+            <EnvironmentSettings
+              key={`settings-${environment.id}`}
+              environment={environment}
+              onChange={reload}
+              onDeleted={async () => {
+                await select(PRODUCTION)
+                await reload()
+              }}
+            />
+            <AddEnvironment project={project} onAdded={async (name) => {
+              await reload()
+              await select(name)
+            }} />
+            <ProjectSettings project={project} onChange={reload} />
+          </>
+        )
+        : null}
+    </>
+  )
+}
+
+const EnvironmentPageviews = ({ environment }: { environment: Environment }) => {
+  const { data } = usePoll(
+    () => request((api) => api.reports.pageviewCount({ params: { environmentId: environment.id }, query: last30Days() })),
+    [environment.id]
+  )
+  return (
+    <article style={{ ...card, margin: "12px 0", maxWidth: 240 }}>
+      <div style={{ fontSize: 32, fontWeight: 600 }} data-testid={`pageviews-${environment.name}`}>
+        {data?.pageviews ?? "–"}
+      </div>
+      <div style={muted}>Pageviews, last 30 days</div>
+    </article>
+  )
+}
+
+const Section = ({ title, children }: { title: string; children: ReactNode }) => (
+  <section style={{ ...card, display: "grid", gap: 8, margin: "12px 0" }}>
+    <strong>{title}</strong>
+    {children}
+  </section>
+)
+
+const EnvironmentSettings = (props: {
+  environment: Environment
+  onChange: () => Promise<void>
+  onDeleted: () => Promise<void>
+}) => {
+  const { environment } = props
+  const action = useAction()
+  const environmentId: EnvironmentId = environment.id
+  const isProduction = environment.name === PRODUCTION
+  const confirmThen = (message: string, f: () => Promise<unknown>) => {
+    if (window.confirm(message)) void action.run(f)
+  }
+  return (
+    <Section title={`Environment: ${environment.name}`}>
+      <div>
+        <div style={muted}>Public key (for the browser script and the ingest API)</div>
+        <code style={{ wordBreak: "break-all" }}>{environment.key}</code>
+      </div>
+      <pre style={{ fontSize: 12, background: "#f5f5f5", padding: 8, overflowX: "auto", margin: 0 }}>
+        {`<script defer src="${window.location.origin}/flock.js" data-key="${environment.key}"></script>`}
+      </pre>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button
+          type="button"
+          disabled={action.busy}
+          onClick={() =>
+            confirmThen(`Rotate the ${environment.name} key? The current key stops working immediately.`, async () => {
+              await request((api) => api.environments.rotateKey({ params: { environmentId } }))
+              await props.onChange()
+            })}
+        >
+          Rotate key
+        </button>
+        {isProduction ? null : (
+          <>
+            <button
+              type="button"
+              disabled={action.busy}
+              style={danger}
+              onClick={() =>
+                confirmThen(`Delete all Events in ${environment.name}? This can't be undone.`, () =>
+                  request((api) => api.environments.deleteEvents({ params: { environmentId } })))}
+            >
+              Delete all Events
+            </button>
+            <button
+              type="button"
+              disabled={action.busy}
+              style={danger}
+              onClick={() =>
+                confirmThen(`Delete the ${environment.name} Environment, its key and its Events?`, async () => {
+                  await request((api) => api.environments.delete({ params: { environmentId } }))
+                  await props.onDeleted()
+                })}
+            >
+              Delete Environment
+            </button>
+          </>
+        )}
+      </div>
+      {action.alert}
+    </Section>
+  )
+}
+
+const AddEnvironment = ({ project, onAdded }: { project: Project; onAdded: (name: string) => Promise<void> }) => {
+  const action = useAction()
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const form = event.currentTarget
+    const name = String(new FormData(form).get("name")).trim()
+    void action.run(async () => {
+      await request((api) => api.projects.addEnvironment({ params: { projectId: project.id }, payload: { name } }))
+      form.reset()
+      await onAdded(name)
+    })
+  }
+  return (
+    <Section title="Add an Environment">
+      <form onSubmit={submit} style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <input name="name" required placeholder="dev" pattern="[a-z][a-z0-9\-]{0,31}" title="Lowercase letters, digits and dashes" />
+        <button type="submit" disabled={action.busy}>Add</button>
+      </form>
+      {action.alert}
+    </Section>
+  )
+}
+
+const ProjectSettings = ({ project, onChange }: { project: Project; onChange: () => Promise<void> }) => {
+  const navigate = useNavigate()
+  const action = useAction()
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    const payload = { name: String(form.get("name")).trim(), timeZone: String(form.get("timeZone")).trim() }
+    void action.run(async () => {
+      await request((api) => api.projects.update({ params: { projectId: project.id }, payload }))
+      await onChange()
+    })
+  }
+  const remove = () => {
+    if (!window.confirm(`Delete ${project.name} with all its Environments and Events? This can't be undone.`)) return
+    void action.run(async () => {
+      await request((api) => api.projects.delete({ params: { projectId: project.id } }))
+      await navigate({ to: "/" })
+    })
+  }
+  return (
+    <Section title="Project settings">
+      <form onSubmit={submit} style={{ display: "grid", gap: 8, maxWidth: 360 }}>
+        <label style={{ display: "grid", gap: 4 }}>Name<input name="name" required maxLength={100} defaultValue={project.name} /></label>
+        <label style={{ display: "grid", gap: 4 }}>
+          Time zone<input name="timeZone" required defaultValue={project.timeZone} />
+        </label>
+        <button type="submit" disabled={action.busy}>Save</button>
+      </form>
+      <div>
+        <button type="button" disabled={action.busy} style={danger} onClick={remove}>Delete Project</button>
+      </div>
+      {action.alert}
+    </Section>
+  )
+}

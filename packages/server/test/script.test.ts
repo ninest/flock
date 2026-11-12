@@ -17,7 +17,7 @@ layer(Harness.layer())("Browser script", (it) => {
   it.effect("accepts a batch sent as text/plain, the way sendBeacon sends it", () =>
     Effect.gen(function*() {
       const h = yield* Harness
-      const { environments: [production] } = yield* h.seedProject({ environments: ["production"] })
+      const { environments: [production] } = yield* h.createProject({ environments: ["production"] })
       yield* TestClock.setTime(Date.parse("2026-03-01T10:00:00Z"))
       const response = yield* Effect.promise(() =>
         h.fetch("/api/ingest", {
