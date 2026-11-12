@@ -13,6 +13,11 @@ export class IngestGroup extends HttpApiGroup.make("ingest")
   )
   .annotateMerge(OpenApi.annotations({ title: "Ingest" })) {}
 
+/** Liveness for container healthchecks: 200 once the server is up and Postgres answers. */
+export class HealthGroup extends HttpApiGroup.make("health")
+  .add(HttpApiEndpoint.get("check", "/api/health", { success: Schema.Struct({ status: Schema.Literal("ok") }) }))
+  .annotateMerge(OpenApi.annotations({ title: "Health" })) {}
+
 export class ProjectsGroup extends HttpApiGroup.make("projects")
   .add(HttpApiEndpoint.get("list", "/", { success: Schema.Array(Project) }))
   .prefix("/api/projects")
@@ -34,6 +39,7 @@ export class ReportsGroup extends HttpApiGroup.make("reports")
   .annotateMerge(OpenApi.annotations({ title: "Reports" })) {}
 
 export class FlockApi extends HttpApi.make("flock")
+  .add(HealthGroup)
   .add(IngestGroup)
   .add(ProjectsGroup)
   .add(ReportsGroup)
