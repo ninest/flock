@@ -46,7 +46,7 @@ Deploy from the Flock template (image source `ghcr.io/ninest/flock:1` plus a Pos
 |---|---|---|---|
 | `DATABASE_URL` | yes | | Postgres connection string, e.g. `postgres://flock:secret@db:5432/flock`. The database must exist; Flock creates its tables on boot. |
 | `PORT` | no | `2100` | Port the server listens on. |
-| `FLOCK_ADMIN_EMAIL` | no | | Signing up or signing in with this email makes that Member the Instance admin. This is how the first account is created: set it, open the dashboard and sign up with it. Sign-up is otherwise closed. |
+| `FLOCK_ADMIN_EMAIL` | no | | Signing up or signing in with this email makes that Member the Instance admin. This is how the first account is created: set it, open the dashboard and sign up with it. Everyone else needs an Invite link (created on the dashboard's Instance page) unless the Instance admin turns Open sign-up on there. |
 | `FLOCK_PUBLIC_URL` | no | the origin of each request | The URL Members open Flock on, e.g. `https://flock.example.com`. Set it when Flock is public. |
 | `FLOCK_TRUSTED_ORIGINS` | no | | Comma-separated extra origins allowed to sign in, e.g. a second domain. |
 | `BETTER_AUTH_SECRET` | no | generated on first boot and kept in Postgres | Signs Member sessions; at least 32 random characters. Changing it signs every Member out. |

@@ -3,6 +3,7 @@ import { createRootRoute, createRoute, createRouter, Link, Outlet, redirect, use
 import { type FormEvent, useState } from "react"
 import { currentMember, signIn, signOut, signUp } from "./auth.ts"
 import { ProjectPage, ProjectsPage } from "./projects.tsx"
+import { InstancePage } from "./instance.tsx"
 
 const rootRoute = createRootRoute({
   component: () => (
@@ -15,7 +16,9 @@ const rootRoute = createRootRoute({
 
 const SignInPage = () => {
   const navigate = useNavigate()
-  const [mode, setMode] = useState<"sign-in" | "sign-up">("sign-in")
+  // An Invite link opens /sign-in?invite=<token>.
+  const [invite] = useState(() => new URLSearchParams(window.location.search).get("invite") ?? undefined)
+  const [mode, setMode] = useState<"sign-in" | "sign-up">(invite ? "sign-up" : "sign-in")
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
 
@@ -28,7 +31,7 @@ const SignInPage = () => {
     setError(undefined)
     try {
       if (mode === "sign-in") await signIn({ email, password })
-      else await signUp({ email, password, name: String(form.get("name")) })
+      else await signUp({ email, password, name: String(form.get("name")), invite })
       await navigate({ to: "/" })
     } catch (e) {
       setError((e as Error).message)
@@ -40,7 +43,7 @@ const SignInPage = () => {
   const field = { display: "grid", gap: 4 } as const
   return (
     <form onSubmit={submit} style={{ display: "grid", gap: 12, maxWidth: 320 }}>
-      <h2>{mode === "sign-in" ? "Sign in" : "Create the admin account"}</h2>
+      <h2>{mode === "sign-in" ? "Sign in" : invite ? "Accept your Invite" : "Sign up"}</h2>
       {mode === "sign-up" && (
         <label style={field}>Name<input name="name" required autoComplete="name" /></label>
       )}
@@ -58,7 +61,7 @@ const SignInPage = () => {
       {error && <p role="alert" style={{ color: "#b00020", margin: 0 }}>{error}</p>}
       <button type="submit" disabled={busy}>{mode === "sign-in" ? "Sign in" : "Sign up"}</button>
       <button type="button" onClick={() => setMode(mode === "sign-in" ? "sign-up" : "sign-in")} style={{ all: "unset", color: "#06c", cursor: "pointer" }}>
-        {mode === "sign-in" ? "First time? Sign up with the Instance admin email" : "Have an account? Sign in"}
+        {mode === "sign-in" ? "First time? Sign up" : "Have an account? Sign in"}
       </button>
     </form>
   )
@@ -82,6 +85,7 @@ const memberRoute = createRoute({
       <>
         <p style={{ fontSize: 14, color: "#666" }}>
           Signed in as {member.email}{member.isAdmin ? " (Instance admin)" : ""} ·{" "}
+          {member.isAdmin && <><Link to="/instance">Instance</Link> ·{" "}</>}
           <button type="button" onClick={() => signOut().then(() => navigate({ to: "/sign-in" }))}>Sign out</button>
         </p>
         <Outlet />
@@ -105,7 +109,16 @@ const projectRoute = createRoute({
   }
 })
 
-export const router = createRouter({ routeTree: rootRoute.addChildren([signInRoute, memberRoute.addChildren([indexRoute, projectRoute])]) })
+const instanceRoute = createRoute({
+  getParentRoute: () => memberRoute,
+  path: "/instance",
+  beforeLoad: ({ context }) => {
+    if (!context.member.isAdmin) throw redirect({ to: "/" })
+  },
+  component: () => <InstancePage me={instanceRoute.useRouteContext().member} />
+})
+
+export const router = createRouter({ routeTree: rootRoute.addChildren([signInRoute, memberRoute.addChildren([indexRoute, projectRoute, instanceRoute])]) })
 
 declare module "@tanstack/react-router" {
   interface Register {

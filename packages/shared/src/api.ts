@@ -15,7 +15,7 @@ import {
   TimeZone
 } from "./domain.ts"
 import { IngestBatch, IngestResult, UnknownKey } from "./ingest.ts"
-import { Member, MemberAuth } from "./members.ts"
+import { CreatedInvite, Forbidden, Invite, InviteId, InviteNotFound, InstanceSettings, Member, MemberAuth, MemberId, MemberNotFound } from "./members.ts"
 
 export class IngestGroup extends HttpApiGroup.make("ingest")
   .add(
@@ -114,6 +114,35 @@ export class MembersGroup extends HttpApiGroup.make("members")
   .middleware(MemberAuth)
   .annotateMerge(OpenApi.annotations({ title: "Members" })) {}
 
+/** Instance membership: settings, Invites and Members. Instance admin only. */
+export class InstanceGroup extends HttpApiGroup.make("instance")
+  .add(HttpApiEndpoint.get("settings", "/settings", { success: InstanceSettings, error: Forbidden }))
+  .add(HttpApiEndpoint.patch("updateSettings", "/settings", { payload: InstanceSettings, success: InstanceSettings, error: Forbidden }))
+  .add(HttpApiEndpoint.get("members", "/members", { success: Schema.Array(Member), error: Forbidden }))
+  .add(
+    HttpApiEndpoint.delete("removeMember", "/members/:memberId", {
+      params: { memberId: MemberId },
+      error: [Forbidden, MemberNotFound]
+    })
+  )
+  .add(HttpApiEndpoint.get("invites", "/invites", { success: Schema.Array(Invite), error: Forbidden }))
+  .add(
+    HttpApiEndpoint.post("createInvite", "/invites", {
+      payload: Schema.Struct({ note: Schema.String }),
+      success: CreatedInvite,
+      error: Forbidden
+    })
+  )
+  .add(
+    HttpApiEndpoint.delete("revokeInvite", "/invites/:inviteId", {
+      params: { inviteId: InviteId },
+      error: [Forbidden, InviteNotFound]
+    })
+  )
+  .middleware(MemberAuth)
+  .prefix("/api/instance")
+  .annotateMerge(OpenApi.annotations({ title: "Instance" })) {}
+
 export class FlockApi extends HttpApi.make("flock")
   .add(HealthGroup)
   .add(IngestGroup)
@@ -121,5 +150,6 @@ export class FlockApi extends HttpApi.make("flock")
   .add(EnvironmentsGroup)
   .add(ReportsGroup)
   .add(MembersGroup)
+  .add(InstanceGroup)
   .middleware(HttpApiMiddleware.ProblemDetails) // malformed requests get an RFC 9457 400 explaining why
   .annotateMerge(OpenApi.annotations({ title: "Flock API" })) {}

@@ -1,10 +1,10 @@
 // HTTP: the FlockApi handlers, the dashboard and the script as static files.
 import { PgClient } from "@effect/sql-pg"
-import { CurrentMember, FlockApi } from "@flock/shared"
-import { Option } from "effect"
-import { Effect, Layer } from "effect"
+import { CurrentMember, FlockApi, Forbidden, InviteNotFound, MemberNotFound } from "@flock/shared"
+import { Effect, Layer, Option } from "effect"
 import { HttpRouter, HttpServerResponse, HttpStaticServer } from "effect/http"
 import { HttpApiBuilder, HttpApiMiddleware, HttpApiScalar } from "effect/http-api"
+import { Access } from "./access.ts"
 import { AuthRoutes, currentMember, MemberAuthLive } from "./auth.ts"
 import { Ingest } from "./ingest.ts"
 import { Projects } from "./projects.ts"
@@ -54,8 +54,40 @@ const ReportsHandlers = HttpApiBuilder.group(FlockApi, "reports", Effect.fn(func
 
 const MembersHandlers = HttpApiBuilder.group(FlockApi, "members", (handlers) => handlers.handle("me", () => currentMember))
 
+/** Runs `effect` only when the signed-in Member is an Instance admin. */
+const asAdmin = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  Effect.gen(function*() {
+    const member = yield* currentMember
+    if (!member.isAdmin) return yield* new Forbidden({ message: "Only the Instance admin can do this" })
+    return yield* effect
+  })
+
+const InstanceHandlers = HttpApiBuilder.group(FlockApi, "instance", Effect.fn(function*(handlers) {
+  const access = yield* Access
+  return handlers
+    .handle("settings", () => asAdmin(access.settings.pipe(Effect.orDie)))
+    .handle("updateSettings", ({ payload }) => asAdmin(access.updateSettings(payload).pipe(Effect.orDie)))
+    .handle("members", () => asAdmin(access.members.pipe(Effect.orDie)))
+    .handle("removeMember", ({ params: { memberId } }) =>
+      asAdmin(Effect.gen(function*() {
+        const { id } = yield* CurrentMember
+        if (id === memberId) return yield* new Forbidden({ message: "You can't remove yourself" })
+        if (!(yield* access.removeMember(memberId).pipe(Effect.orDie))) return yield* new MemberNotFound({ id: memberId })
+      })))
+    .handle("invites", () => asAdmin(access.invites.pipe(Effect.orDie)))
+    .handle("createInvite", ({ payload }) =>
+      asAdmin(Effect.gen(function*() {
+        const { id } = yield* CurrentMember
+        return yield* access.createInvite({ note: payload.note, createdBy: id }).pipe(Effect.orDie)
+      })))
+    .handle("revokeInvite", ({ params: { inviteId } }) =>
+      asAdmin(Effect.gen(function*() {
+        if (!(yield* access.revokeInvite(inviteId).pipe(Effect.orDie))) return yield* new InviteNotFound({ id: inviteId })
+      })))
+}))
+
 const ApiRoutes = HttpApiBuilder.layer(FlockApi, { openapiPath: "/api/openapi.json" }).pipe(
-  Layer.provide([HealthHandlers, IngestHandlers, ProjectsHandlers, EnvironmentsHandlers, ReportsHandlers, MembersHandlers]),
+  Layer.provide([HealthHandlers, IngestHandlers, ProjectsHandlers, EnvironmentsHandlers, ReportsHandlers, MembersHandlers, InstanceHandlers]),
   Layer.provide(MemberAuthLive),
   Layer.provide(HttpApiMiddleware.layerProblemDetails({ includeDetails: true }))
 )

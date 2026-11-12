@@ -25,7 +25,7 @@ make dev
 
 `make dev` starts the shared Postgres (docker compose, container `flock-postgres` on host port 2432) if it isn't already running, then starts the server (2100), the dashboard (2101, proxies `/api` to the server) and the playground (2102). It prints `http://hel:<port>` links. A port that's already taken is replaced by the next free one. For a second copy from another worktree, override the ports and the dev database: `SERVER_PORT=2200 DASHBOARD_PORT=2201 PLAYGROUND_PORT=2202 DEV_DB=flock_other make dev`.
 
-The dashboard needs a signed-in Member. `make dev` creates the dev Instance admin first (with the `admin` CLI command), so sign in at `http://hel:2101/sign-in` as `admin@flock.test` with the password `flock-dev-password` (override with `FLOCK_ADMIN_EMAIL` and `FLOCK_DEV_ADMIN_PASSWORD`).
+The dashboard needs a signed-in Member. `make dev` creates the dev Instance admin first (with the `admin` CLI command), so sign in at `http://hel:2101/sign-in` as `admin@flock.test` with the password `flock-dev-password` (override with `FLOCK_ADMIN_EMAIL` and `FLOCK_DEV_ADMIN_PASSWORD`). Other people join with an Invite link from the Instance page (`/instance`), or freely once Open sign-up is turned on there.
 
 The dashboard lists your Projects. Create one (its time zone defaults to your browser's) to get a `production` Environment and its `pk_production_…` key; add Environments such as `dev`, rotate keys, delete a non-production Environment's Events, and switch Environments on the Project page (default `production`). In development the server also creates a "Playground" Project, owned by the dev Instance admin, with the fixed keys `pk_production_playground` and `pk_dev_playground`.
 
