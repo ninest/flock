@@ -69,7 +69,7 @@ pnpm -r typecheck
 
 Tests only go through two seams and never look at tables or internals:
 
-1. **The server's HTTP API** (`packages/server/test`). `Harness.layer()` in `test/harness.ts` runs the whole server in-process against a throwaway Postgres database (`flock_test_<random>`, created per `layer(...)` block and dropped afterwards). It provides a typed client signed in as an Instance admin (`h.client`), raw `h.fetch` without cookies, `h.sdk` (a typed client without cookies or an `Origin`, like a server sending Events), `h.browser()` (a fresh cookie jar with `signUp`/`signIn` and its own typed client), `h.seedMember(...)`, `h.adminCommand([...])` (the admin CLI command, in-process), `Harness.layer({ adminEmail })` for `FLOCK_ADMIN_EMAIL`, `h.createProject(...)` (the Projects API) for fixtures, `TestClock` (from `@effect/vitest`) for time, `Harness.layer({ geoIp: { "203.0.113.7": "DE", "198.51.100.23": { country: "US", region: "California" } } })` for a fixed GeoIP table, `h.ingest(key, events, { ip, userAgent })` to send a batch with a client IP (as `X-Forwarded-For`, trusted for one hop unless `Harness.layer({ trustedProxies })` says otherwise) and User-Agent, and `h.breakdown(environmentId, "$country", range)` / `h.propertyKeys(...)` / `h.overview(...)` / `h.top(environmentId, "pages", { period: "7d" })` / `h.live(environmentId)` to read reports back. `TEST_DATABASE_ADMIN_URL` overrides the admin connection (default `postgres://postgres:postgres@127.0.0.1:2432/postgres`).
+1. **The server's HTTP API** (`packages/server/test`). `Harness.layer()` in `test/harness.ts` runs the whole server in-process against a throwaway Postgres database (`flock_test_<random>`, created per `layer(...)` block and dropped afterwards). It provides a typed client signed in as an Instance admin (`h.client`), raw `h.fetch` without cookies, `h.sdk` (a typed client without cookies or an `Origin`, like a server sending Events), `h.browser()` (a fresh cookie jar with `signUp`/`signIn` and its own typed client), `h.seedMember(...)`, `h.adminCommand([...])` (the admin CLI command, in-process), `Harness.layer({ adminEmail, adminPassword })` for `FLOCK_ADMIN_EMAIL` / `FLOCK_ADMIN_PASSWORD`, `h.createProject(...)` (the Projects API) for fixtures, `TestClock` (from `@effect/vitest`) for time, `Harness.layer({ geoIp: { "203.0.113.7": "DE", "198.51.100.23": { country: "US", region: "California" } } })` for a fixed GeoIP table, `h.ingest(key, events, { ip, userAgent })` to send a batch with a client IP (as `X-Forwarded-For`, trusted for one hop unless `Harness.layer({ trustedProxies })` says otherwise) and User-Agent, and `h.breakdown(environmentId, "$country", range)` / `h.propertyKeys(...)` / `h.overview(...)` / `h.top(environmentId, "pages", { period: "7d" })` / `h.live(environmentId)` to read reports back. `TEST_DATABASE_ADMIN_URL` overrides the admin connection (default `postgres://postgres:postgres@127.0.0.1:2432/postgres`).
 2. **The browser script's outgoing requests** (`packages/script/test`). `openPlayground(browser())` in `test/harness.ts` opens the playground pages in headless Chromium (Playwright), serving them and the freshly built script with request routing (no real servers), and captures every request to `/api/ingest`. Tests assert on those requests and the page only. One-time setup: `pnpm --filter @flock/script exec playwright install chromium --only-shell`. `test/size.test.ts` fails if the gzipped script exceeds 2 KB; `pnpm --filter @flock/script build` checks it too.
 
 The browser script:
@@ -99,7 +99,8 @@ It sends a `$pageview` on load and on `pushState`/`popstate`, gives each Event a
 ```sh
 curl -fsSLO https://raw.githubusercontent.com/ninest/flock/main/deploy/docker-compose.yml
 echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)" > .env
-echo "FLOCK_ADMIN_EMAIL=you@example.com" >> .env   # sign up with it to create the Instance admin
+echo "FLOCK_ADMIN_EMAIL=you@example.com" >> .env   # boot creates this Instance admin…
+echo "FLOCK_ADMIN_PASSWORD=$(openssl rand -base64 18)" >> .env   # …with this password
 docker compose up -d
 ```
 
@@ -109,11 +110,11 @@ The image is `ghcr.io/ninest/flock` (tags `X.Y.Z`, `X.Y`, `X`, `latest`); run it
 
 ```sh
 docker build -t flock .
-docker run -p 2100:2100 -e DATABASE_URL=postgres://user:pass@host:5432/flock -e FLOCK_ADMIN_EMAIL=you@example.com flock
+docker run -p 2100:2100 -e DATABASE_URL=postgres://user:pass@host:5432/flock -e FLOCK_ADMIN_EMAIL=you@example.com -e FLOCK_ADMIN_PASSWORD='a long password' flock
 scripts/smoke.sh http://localhost:2100   # health, dashboard, OpenAPI
 ```
 
-Sign-in settings (`FLOCK_ADMIN_EMAIL`, `FLOCK_PUBLIC_URL`, `BETTER_AUTH_SECRET`, …) are in [docs/self-hosting.md](docs/self-hosting.md#environment-variables).
+Sign-in settings (`FLOCK_ADMIN_EMAIL`, `FLOCK_ADMIN_PASSWORD`, `FLOCK_PUBLIC_URL`, `BETTER_AUTH_SECRET`, …) are in [docs/self-hosting.md](docs/self-hosting.md#environment-variables).
 
 ## Recovering admin access
 

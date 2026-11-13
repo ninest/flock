@@ -54,8 +54,10 @@ jobs:
       - name: Image boots, migrates and serves
         run: |
           psql -h localhost -U postgres -c "CREATE DATABASE smoke"
+          export SMOKE_ADMIN_EMAIL=admin@smoke.test SMOKE_ADMIN_PASSWORD="$(openssl rand -hex 16)"
           docker run -d --name flock-smoke --network host \
             -e PORT=2100 -e FLOCK_SEED_PLAYGROUND=true \
+            -e FLOCK_ADMIN_EMAIL="$SMOKE_ADMIN_EMAIL" -e FLOCK_ADMIN_PASSWORD="$SMOKE_ADMIN_PASSWORD" \
             -e DATABASE_URL=postgres://postgres:postgres@localhost:5432/smoke flock:ci
           scripts/smoke.sh http://localhost:2100 pk_dev_playground
           # The image's own HEALTHCHECK must turn healthy too.
@@ -77,8 +79,9 @@ jobs:
         run: |
           docker rm -f flock-smoke
           export FLOCK_IMAGE=flock:ci FLOCK_PORT=2200 POSTGRES_PASSWORD="$(openssl rand -hex 16)"
+          export FLOCK_ADMIN_EMAIL=admin@smoke.test FLOCK_ADMIN_PASSWORD="$(openssl rand -hex 16)"
           docker compose -f deploy/docker-compose.yml up -d --wait
-          scripts/smoke.sh http://localhost:2200
+          SMOKE_ADMIN_EMAIL="$FLOCK_ADMIN_EMAIL" SMOKE_ADMIN_PASSWORD="$FLOCK_ADMIN_PASSWORD" scripts/smoke.sh http://localhost:2200
           docker compose -f deploy/docker-compose.yml logs flock | tail -n 50
           docker compose -f deploy/docker-compose.yml down -v
 

@@ -28,8 +28,13 @@ export const ServerConfig = Config.all({
   ),
   /** Signs Member session cookies: at least 32 random characters. Generated and kept in Postgres when unset. */
   authSecret: Config.option(Config.Redacted("BETTER_AUTH_SECRET")),
-  /** Signing up or signing in with this email makes the Member an Instance admin. */
+  /**
+   * The Instance admin's email. With FLOCK_ADMIN_PASSWORD, boot creates (or promotes) that Member;
+   * otherwise an OIDC sign-in with this verified email makes the Member an Instance admin.
+   */
   adminEmail: Config.option(Config.String("FLOCK_ADMIN_EMAIL")),
+  /** With FLOCK_ADMIN_EMAIL: boot creates that Instance admin with this password if they don't exist. */
+  adminPassword: Config.option(Config.Redacted("FLOCK_ADMIN_PASSWORD")),
   /** Members may sign up and sign in with email + password. Turn off to allow OIDC only. */
   passwordSignIn: Config.Boolean("FLOCK_PASSWORD_SIGN_IN").pipe(Config.withDefault(true)),
   /** The OIDC issuer URL, e.g. https://auth.misc.page. Members may sign in with it when set. */
@@ -96,6 +101,7 @@ export const authSettings = (config: Config.Success<typeof ServerConfig>): Effec
       trustedOrigins: config.trustedOrigins,
       secret: Option.filter(config.authSecret, (secret) => Redacted.value(secret).trim() !== ""),
       adminEmail: nonEmpty(config.adminEmail),
+      adminPassword: Option.filter(config.adminPassword, (password) => Redacted.value(password) !== ""),
       passwordSignIn: config.passwordSignIn,
       oidc
     }

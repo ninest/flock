@@ -22,10 +22,11 @@ mkdir flock && cd flock
 curl -fsSLO https://raw.githubusercontent.com/ninest/flock/main/deploy/docker-compose.yml
 echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)" > .env
 echo "FLOCK_ADMIN_EMAIL=you@example.com" >> .env
+echo "FLOCK_ADMIN_PASSWORD=$(openssl rand -base64 18)" >> .env
 docker compose up -d
 ```
 
-Then open the dashboard and sign up with `FLOCK_ADMIN_EMAIL` to create the Instance admin.
+On boot, Flock creates the Instance admin with that email and password. Open the dashboard and sign in with them.
 
 Flock listens on port 2100 (`FLOCK_PORT=8080` in `.env` changes the host port). Put a reverse proxy with TLS (Caddy, Traefik, nginx, or `tailscale serve`) in front of it for anything public, and add `FLOCK_TRUSTED_PROXIES=1` to `.env` so Flock sees visitors' IPs (see [Client IP behind a proxy](#client-ip-behind-a-proxy)).
 
@@ -35,7 +36,7 @@ Deploy from the Flock template (image source `ghcr.io/ninest/flock:1` plus a Pos
 
 1. Create a Postgres service.
 2. Create a service from the Docker image `ghcr.io/ninest/flock:1`.
-3. Set its variables `DATABASE_URL=${{Postgres.DATABASE_URL}}`, `FLOCK_ADMIN_EMAIL` (your email), `FLOCK_PUBLIC_URL` (the generated domain, `https://…`) and `FLOCK_TRUSTED_PROXIES=1` (see [Client IP behind a proxy](#client-ip-behind-a-proxy)). Railway sets `PORT`, and Flock listens on it.
+3. Set its variables `DATABASE_URL=${{Postgres.DATABASE_URL}}`, `FLOCK_ADMIN_EMAIL` (your email), `FLOCK_ADMIN_PASSWORD` (a long random password), `FLOCK_PUBLIC_URL` (the generated domain, `https://…`) and `FLOCK_TRUSTED_PROXIES=1` (see [Client IP behind a proxy](#client-ip-behind-a-proxy)). Railway sets `PORT`, and Flock listens on it.
 4. Settings → Deploy → Healthcheck path: `/api/health`.
 5. Settings → Source → enable automatic image updates, so Railway redeploys when a new `1.x.y` is published.
 6. Settings → Networking → generate a domain.
@@ -46,7 +47,8 @@ Deploy from the Flock template (image source `ghcr.io/ninest/flock:1` plus a Pos
 |---|---|---|---|
 | `DATABASE_URL` | yes | | Postgres connection string, e.g. `postgres://flock:secret@db:5432/flock`. The database must exist; Flock creates its tables on boot. |
 | `PORT` | no | `2100` | Port the server listens on. |
-| `FLOCK_ADMIN_EMAIL` | no | | Signing up or signing in with this email makes that Member the Instance admin. This is how the first account is created: set it, open the dashboard and sign up with it. Everyone else needs an Invite link (created on the dashboard's Instance page) unless the Instance admin turns Open sign-up on there. Through OIDC, it only counts when the issuer says the email is verified (`email_verified`), unless `FLOCK_OIDC_TRUST_EMAILS=true`. |
+| `FLOCK_ADMIN_EMAIL` | no | | The Instance admin's email. This is how the first account is created, in one of two ways. With `FLOCK_ADMIN_PASSWORD`, boot creates that Member (or promotes an existing one). With OIDC, signing in with this email makes the Member the Instance admin, but only when the issuer says the email is verified (`email_verified`), unless `FLOCK_OIDC_TRUST_EMAILS=true`. A password sign-up with this email never makes an admin, because Flock can't check that you own the email. Everyone else needs an Invite link (created on the dashboard's Instance page) unless the Instance admin turns Open sign-up on there. |
+| `FLOCK_ADMIN_PASSWORD` | no | | With `FLOCK_ADMIN_EMAIL`: on every boot, Flock makes sure that Instance admin exists. It creates the Member with this password if they don't exist yet, and promotes them if they do. It never changes an existing Member's password, so you can change yours in Flock and leave this set (or remove it after the first boot). At least 8 characters. |
 | `FLOCK_PUBLIC_URL` | no | the origin of each request | The URL Members open Flock on, e.g. `https://flock.example.com`. Set it when Flock is public. |
 | `FLOCK_TRUSTED_ORIGINS` | no | | Comma-separated extra origins allowed to sign in, e.g. a second domain. |
 | `BETTER_AUTH_SECRET` | no | generated on first boot and kept in Postgres | Signs Member sessions; at least 32 random characters. Changing it signs every Member out. |
@@ -115,7 +117,7 @@ If auth-misc returns `email_verified: true` for your account, `FLOCK_ADMIN_EMAIL
 
 ## Recovering admin access
 
-If no one can sign in as an Instance admin, run the `admin` command inside the container. It promotes an existing Member, or creates one when given `--password`:
+If no one can sign in as an Instance admin, run the `admin` command inside the container (the other way in, besides `FLOCK_ADMIN_PASSWORD`). It promotes an existing Member, or creates one when given `--password`:
 
 ```sh
 docker compose exec flock node packages/server/src/cli.ts admin --email you@example.com

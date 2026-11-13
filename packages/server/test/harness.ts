@@ -63,6 +63,8 @@ export interface HarnessOptions {
   readonly geoIp?: Record<string, string | { readonly country: string; readonly region?: string }>
   /** FLOCK_ADMIN_EMAIL (default `owner@flock.test`). */
   readonly adminEmail?: string
+  /** FLOCK_ADMIN_PASSWORD: boot ensures the FLOCK_ADMIN_EMAIL Instance admin exists with it. */
+  readonly adminPassword?: string
   /** Leave FLOCK_PUBLIC_URL and BETTER_AUTH_SECRET unset, like a fresh self-hosted Instance. */
   readonly zeroConfig?: boolean
   /** Configure the stub OIDC issuer; `trustEmails` is FLOCK_OIDC_TRUST_EMAILS. */
@@ -242,6 +244,7 @@ export class Harness extends Context.Service<Harness, {
           trustedOrigins: [],
           secret: options.zeroConfig ? Option.none() : Option.some(Redacted.make("test-secret-test-secret-test-secret-0123")),
           adminEmail: Option.some(options.adminEmail ?? "owner@flock.test"),
+          adminPassword: Option.map(Option.fromNullishOr(options.adminPassword), Redacted.make),
           passwordSignIn: options.passwordSignIn ?? true,
           oidc: oidc === undefined ? Option.none() : Option.some({
             issuer: oidc.issuer,
