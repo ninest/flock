@@ -14,6 +14,14 @@ Three rounds so far, each narrowing the last:
 pnpm landing:prototype   # http://hel:2110/
 ```
 
+Live at https://flock.misc.page, a Cloudflare Worker (`flock-landing`). To deploy again:
+
+```sh
+pnpm landing:deploy      # copies site/ and public/ into dist/, then `cf deploy`
+```
+
+`cloudflare.config.ts` names the Worker and the domain; `wrangler.config.ts` points it at `dist/`. Most requests are plain static assets. `worker/index.ts` runs only for `/drive.mp4`: static assets ignore `Range`, and Safari won't play the video without 206 responses.
+
 `site/` is plain HTML, CSS and JS with no build. `site/content.js` holds the words; `hero.js` the hero and its report card; `sections.js` what is below it.
 
 ## The video

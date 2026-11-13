@@ -3,13 +3,16 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@12.18.0",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r --if-present test",
     "build": "pnpm --filter @flock/dashboard build && pnpm --filter @flock/script build",
     "dev": "make dev",
-    "landing:prototype": "node packages/landing-prototype/serve.mjs"
+    "landing:prototype": "pnpm --filter @flock/landing-prototype dev",
+    "landing:deploy": "pnpm --filter @flock/landing-prototype run deploy"
   },
   "devDependencies": {
     "typescript": "6.0.3"

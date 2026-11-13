@@ -12,3 +12,4 @@ minimumReleaseAgeExclude:
   - better-auth@1.7.22
 allowBuilds:
   esbuild: true
+  workerd: true
