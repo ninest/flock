@@ -207,6 +207,27 @@ describe("Persistent mode", () => {
   })
 })
 
+describe("Persistent snippet on a Project that is now cookieless", () => {
+  it("clears the stored Visitor IDs, stores nothing and sends no Visitor ID", async () => {
+    const site = await openPlayground(browser(), {
+      mode: "persistent",
+      projectMode: "cookieless",
+      localStorage: { flock_id: "11111111-1111-4111-8111-111111111111", flock_uid: "test-user" }
+    })
+    await site.goto("/")
+    await site.waitForEvents(1)
+    await site.page.evaluate(() => {
+      window.flock.identify("other-user")
+      window.flock.track("a")
+    })
+    const events = await site.settledEvents()
+    expect(events.map((e) => e.name)).toEqual(["$pageview", "a"])
+    for (const event of events) expect(event).not.toHaveProperty("distinct_id")
+    const storage = await site.page.evaluate(() => ({ cookie: document.cookie, localStorage: localStorage.length, sessionStorage: sessionStorage.length }))
+    expect(storage).toEqual({ cookie: "", localStorage: 0, sessionStorage: 0 })
+  })
+})
+
 describe("Cookieless mode: identify", () => {
   it("is a no-op that sends nothing, stores nothing and adds no Visitor ID", async () => {
     const site = await openPlayground(browser())
