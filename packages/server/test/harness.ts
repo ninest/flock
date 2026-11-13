@@ -32,6 +32,9 @@ import {
   type EventPropertyFilters,
   type Project,
   type ReportRangeQuery,
+  type SessionDetail,
+  type SessionList,
+  type SessionNotFound,
   type Top,
   type TopReport
 } from "@flock/shared"
@@ -227,6 +230,14 @@ export class Harness extends Context.Service<Harness, {
   readonly top: (environmentId: EnvironmentId, report: TopReport, range: ReportRangeQuery) => Effect.Effect<Top>
   /** Convenience: the live counter (unique Visitors in the last 30 minutes), as `h.client`. */
   readonly live: (environmentId: EnvironmentId, filters?: EventPropertyFilters) => Effect.Effect<number>
+  /** Convenience: Recent sessions for an Environment, as `h.client`. */
+  readonly sessions: (environmentId: EnvironmentId, range: ReportRangeQuery, cursor?: string) => Effect.Effect<SessionList>
+  /** Convenience: one Session with its Session timeline, as `h.client`. */
+  readonly session: (
+    environmentId: EnvironmentId,
+    sessionId: string,
+    filters?: EventPropertyFilters
+  ) => Effect.Effect<SessionDetail, SessionNotFound>
 }>()("test/Harness") {
   static readonly layer = (options: HarnessOptions = {}) =>
     Layer.effect(
@@ -358,8 +369,16 @@ export class Harness extends Context.Service<Harness, {
         const live: Harness["Service"]["live"] = (environmentId, filters) =>
           client.reports.live({ params: { environmentId }, query: { filters } }).pipe(Effect.map((r) => r.visitors), Effect.orDie)
 
+        const sessions: Harness["Service"]["sessions"] = (environmentId, range, cursor) =>
+          client.reports.sessions({ params: { environmentId }, query: { ...range, cursor } }).pipe(Effect.orDie)
+
+        const session: Harness["Service"]["session"] = (environmentId, sessionId, filters) =>
+          client.reports.session({ params: { environmentId, sessionId }, query: { filters } }).pipe(
+            Effect.catch((error) => error._tag === "SessionNotFound" ? Effect.fail(error) : Effect.die(error))
+          )
+
         return Harness.of({
-          ingest, breakdown, eventPropertyKeys, top, live,
+          ingest, breakdown, eventPropertyKeys, top, live, sessions, session,
           handler,
           oidc,
           fetch,
