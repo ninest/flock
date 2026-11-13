@@ -2,26 +2,26 @@
 // about each one.
 export const GITHUB = 'https://github.com/ninest/flock';
 export const SHOT = 3;
-export const VISITOR = 'John';
+export const VISITOR = 'Sam';
 
 export const BEATS = [
   { key: 'home', time: '8:02:14', event: 'left_home', props: { door_open_s: 14 },
-    line: 'John left his house.', aside: 'The front door was open for 14 seconds. He went back for something.',
+    line: 'Sam left his house.', aside: 'The front door was open for 14 seconds. He went back for something.',
     feature: 'Pageview', maps: 'The moment someone arrives. The script sends a Pageview by itself, with the page, the referrer and the screen it was on.' },
   { key: 'street', time: '8:03:40', event: '$pageview', props: { path: '/maple-street', mph: 31 },
-    line: 'John is on Maple Street.', aside: '31 in a 25. We are not the police. We just know.',
+    line: 'Sam is on Maple Street.', aside: '31 in a 25. We are not the police. We just know.',
     feature: 'Session', maps: 'Everything one Visitor does in a row is a Session. It ends after 30 minutes of quiet, the way a drive ends when the car stops.' },
   { key: 'stroad', time: '8:09:05', event: '$pageview', props: { path: '/route-9', lane: 2 },
-    line: 'John is on Route 9.', aside: 'So are five other cars. We have names for them too.',
+    line: 'Sam is on Route 9.', aside: 'So are five other cars. We have names for them too.',
     feature: 'Visitors', maps: 'Flock counts Visitors, not people. By default it is cookieless: an anonymous ID that resets every day, and no banner to click through.' },
   { key: 'shops', time: '8:14:52', event: 'passed_luigis', props: { stopped: false },
-    line: 'John passed Luigi’s.', aside: 'He did not stop. He stopped on Tuesday. And the Tuesday before.',
+    line: 'Sam passed Luigi’s.', aside: 'He did not stop. He stopped on Tuesday. And the Tuesday before.',
     feature: 'Custom events', maps: 'Not everything is a page. Send your own Events, like signup_clicked or game_completed, with any properties you want to count by.' },
   { key: 'highway', time: '8:19:30', event: '$pageview', props: { path: '/i-90-east', referrer: 'route-9' },
-    line: 'John merged onto the highway.', aside: 'He came from Route 9. They usually do.',
+    line: 'Sam merged onto the highway.', aside: 'He came from Route 9. They usually do.',
     feature: 'Sources', maps: 'Where Visitors come from: referrers and utm tags, and the pages they enter on, read most and leave from.' },
-  { key: 'work', time: '8:31:07', event: 'arrived_work', props: { late_by_min: 1 },
-    line: 'John has arrived at work.', aside: 'One minute later than yesterday. It is in the report.',
+  { key: 'work', time: '8:31:07', event: 'parked', props: { lane: 'bus' },
+    line: 'Sam parked in the bus lane.', aside: 'Outside his office, one minute later than yesterday.',
     feature: 'Session timeline', maps: 'Open any Session and read it in order, from the first Event to the last. This page is one.' },
 ];
 
