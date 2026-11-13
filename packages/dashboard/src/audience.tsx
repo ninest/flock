@@ -1,6 +1,6 @@
 // Audience reports for one Environment: Pageviews by country, browser, OS and device in the
 // shared date range, as ranked lists with proportional bars.
-import type { Environment, PropertyFilter, ReportRangeQuery } from "@flock/shared"
+import type { Environment, EventPropertyFilter, ReportRangeQuery } from "@flock/shared"
 import { muted, type TopTab, TopList } from "./top-list.tsx"
 
 const countryNames = new Intl.DisplayNames(undefined, { type: "region" })
@@ -22,7 +22,7 @@ const REPORTS: ReadonlyArray<TopTab> = [
 export const AudienceReports = ({ environment, range, onAddFilter }: {
   environment: Environment
   range: ReportRangeQuery
-  onAddFilter: (filter: PropertyFilter) => void
+  onAddFilter: (filter: EventPropertyFilter) => void
 }) => (
   <section style={{ margin: "12px 0" }}>
     <h3 style={{ marginBottom: 8 }}>Audience</h3>

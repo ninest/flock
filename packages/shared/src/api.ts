@@ -180,7 +180,7 @@ export class ReportsGroup extends HttpApiGroup.make("reports")
      */
     HttpApiEndpoint.get("breakdown", "/:environmentId/breakdown", {
       params: { environmentId: EnvironmentId },
-      query: { ...DateRange, property: Schema.String, event: Schema.optional(Schema.String), ...filtersField },
+      query: { ...DateRange, eventProperty: Schema.String, event: Schema.optional(Schema.String), ...filtersField },
       success: Schema.Array(BreakdownRow),
       error: EnvironmentNotFound
     }),
@@ -199,7 +199,7 @@ export class ReportsGroup extends HttpApiGroup.make("reports")
       error: EnvironmentNotFound
     }),
     /** Every Event property key seen on the Environment's Events in the range, sorted. */
-    HttpApiEndpoint.get("propertyKeys", "/:environmentId/property-keys", {
+    HttpApiEndpoint.get("eventPropertyKeys", "/:environmentId/event-property-keys", {
       params: { environmentId: EnvironmentId },
       query: DateRange,
       success: Schema.Struct({ keys: Schema.Array(Schema.String) }),

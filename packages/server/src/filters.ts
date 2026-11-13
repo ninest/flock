@@ -1,9 +1,9 @@
-// Property filters: turns the filters every report takes into one SQL condition on an
+// Event property filters: turns the filters every report takes into one SQL condition on an
 // Event row (`properties`). Filters combine with AND; each compares the property's value
 // as text. `$path` and `$referring_domain` are derived from `$url` and `$referrer` the
 // same way the pages and referrers reports derive them, so clicking a row filters by it.
 import type { PgClient } from "@effect/sql-pg"
-import type { PropertyFilter } from "@flock/shared"
+import type { EventPropertyFilter } from "@flock/shared"
 import type { Fragment } from "effect/sql/Statement"
 
 type Sql = PgClient.PgClient
@@ -17,8 +17,8 @@ export const pathOf = (sql: Sql) => {
 }
 
 /** The host of a URL Event property, lowercased, without port or `www.`; null when it isn't a URL. */
-export const hostOf = (sql: Sql, property: "$url" | "$referrer") =>
-  sql`regexp_replace(lower(substring(properties ->> ${property} FROM '(?i)^[a-z][a-z0-9+.-]*://(?:[^@/?#]*@)?([^/?#:]+)')), '^www[.]', '')`
+export const hostOf = (sql: Sql, eventProperty: "$url" | "$referrer") =>
+  sql`regexp_replace(lower(substring(properties ->> ${eventProperty} FROM '(?i)^[a-z][a-z0-9+.-]*://(?:[^@/?#]*@)?([^/?#:]+)')), '^www[.]', '')`
 
 /** The referring domain; null for direct traffic (no referrer, or one from the page's own host). */
 export const referringDomainOf = (sql: Sql) => {
@@ -26,13 +26,13 @@ export const referringDomainOf = (sql: Sql) => {
   return sql`CASE WHEN ${referrer} = ${hostOf(sql, "$url")} THEN NULL ELSE ${referrer} END`
 }
 
-const valueOf = (sql: Sql, property: string): Fragment =>
-  property === "$path" ? pathOf(sql) : property === "$referring_domain" ? referringDomainOf(sql) : sql`(properties ->> ${property})`
+const valueOf = (sql: Sql, eventProperty: string): Fragment =>
+  eventProperty === "$path" ? pathOf(sql) : eventProperty === "$referring_domain" ? referringDomainOf(sql) : sql`(properties ->> ${eventProperty})`
 
 /** One SQL condition that keeps the Events matching every filter (`TRUE` without filters). */
-export const matchesFilters = (sql: Sql, filters: ReadonlyArray<PropertyFilter> | undefined): Fragment =>
+export const matchesFilters = (sql: Sql, filters: ReadonlyArray<EventPropertyFilter> | undefined): Fragment =>
   (filters ?? []).reduce<Fragment>((condition, filter) => {
-    const value = valueOf(sql, filter.property)
+    const value = valueOf(sql, filter.eventProperty)
     const test = filter.op === "is"
       ? sql`${value} = ${filter.value}`
       : filter.op === "isNot"

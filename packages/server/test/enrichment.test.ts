@@ -57,13 +57,14 @@ layer(Harness.layer({ geoIp }))("Enrichment", (it) => {
       ])
     }))
 
-  it.effect("uses the first address in X-Forwarded-For and leaves unknown values empty", () =>
+  it.effect("behind one trusted proxy, uses the right-most X-Forwarded-For address and leaves unknown values empty", () =>
     Effect.gen(function*() {
       const h = yield* Harness
       const { environments: [production] } = yield* h.createProject({})
       yield* TestClock.setTime(Date.parse("2026-03-01T10:00:00Z"))
 
-      yield* h.ingest(production!.key, [pageview()], { ip: "203.0.113.7, 10.0.0.1" })
+      // The client put 198.51.100.23 (US) in the header itself; the proxy appended the real 203.0.113.7.
+      yield* h.ingest(production!.key, [pageview()], { ip: "198.51.100.23, 203.0.113.7" })
       yield* h.ingest(production!.key, [pageview()], { ip: "192.0.2.99" })
       yield* h.ingest(production!.key, [pageview()], {})
 
@@ -86,12 +87,12 @@ layer(Harness.layer({ geoIp }))("Enrichment", (it) => {
         { ip: "203.0.113.7", userAgent: CHROME_WINDOWS }
       )
 
-      for (const [property, value] of [["$country", "DE"], ["$region", "Berlin"], ["$browser", "Chrome"], ["$os", "Windows"], ["$device", "desktop"]]) {
-        assert.deepStrictEqual(yield* h.breakdown(production!.id, property!, day), [{ value: value!, count: 1 }])
+      for (const [eventProperty, value] of [["$country", "DE"], ["$region", "Berlin"], ["$browser", "Chrome"], ["$os", "Windows"], ["$device", "desktop"]]) {
+        assert.deepStrictEqual(yield* h.breakdown(production!.id, eventProperty!, day), [{ value: value!, count: 1 }])
       }
     }))
 
-  it.effect("strips query strings from URLs except utm_* parameters", () =>
+  it.effect("strips query strings except utm_* parameters, and fragments, from URLs", () =>
     Effect.gen(function*() {
       const h = yield* Harness
       const { environments: [production] } = yield* h.createProject({})
@@ -103,18 +104,22 @@ layer(Harness.layer({ geoIp }))("Enrichment", (it) => {
           $referrer: "https://mail.example.org/inbox?session=abc123&utm_medium=email"
         }),
         pageview({ $url: "https://example.com/pricing?plan=pro", $referrer: "" }),
-        pageview({ $url: "not a url?token=s3cret" })
+        pageview({ $url: "https://example.com/callback#access_token=s3cret&state=xyz" }),
+        pageview({ $url: "not a url?token=s3cret#access_token=s3cret" }),
+        pageview({ $url: "/relative#id_token=s3cret" })
       ], {})
 
       assert.deepStrictEqual(yield* h.breakdown(production!.id, "$url", day), [
+        { value: "/relative", count: 1 },
+        { value: "https://example.com/callback", count: 1 },
         { value: "https://example.com/pricing", count: 1 },
-        { value: "https://example.com/reset?utm_source=newsletter&utm_campaign=fall#step-2", count: 1 },
+        { value: "https://example.com/reset?utm_source=newsletter&utm_campaign=fall", count: 1 },
         { value: "not a url", count: 1 }
       ])
       assert.deepStrictEqual(yield* h.breakdown(production!.id, "$referrer", day), [
+        { value: null, count: 3 },
         { value: "", count: 1 },
-        { value: "https://mail.example.org/inbox?utm_medium=email", count: 1 },
-        { value: null, count: 1 }
+        { value: "https://mail.example.org/inbox?utm_medium=email", count: 1 }
       ])
     }))
 
@@ -132,16 +137,58 @@ layer(Harness.layer({ geoIp }))("Enrichment", (it) => {
         })
       }
 
-      const keys = yield* h.propertyKeys(production!.id, day)
+      const keys = yield* h.eventPropertyKeys(production!.id, day)
       assert.includeMembers([...keys], ["$url", "$country", "$browser", "$os", "$device", "plan", "step"])
-      for (const property of keys) {
+      for (const eventProperty of keys) {
         for (const event of ["$pageview", "signup"]) {
-          const rows = yield* h.breakdown(production!.id, property, day, event)
+          const rows = yield* h.breakdown(production!.id, eventProperty, day, event)
           for (const ip of ips) {
-            assert.notInclude(JSON.stringify(rows), ip, `${property} on ${event} holds ${ip}`)
+            assert.notInclude(JSON.stringify(rows), ip, `${eventProperty} on ${event} holds ${ip}`)
           }
         }
       }
       assert.notInclude(JSON.stringify(keys), "198.51.100.23")
+    }))
+})
+
+layer(Harness.layer({ geoIp, trustedProxies: "" }))("Client IP without trusted proxies", (it) => {
+  it.effect("ignores X-Forwarded-For, so a spoofed header changes neither country nor Visitor", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* h.createProject({})
+      yield* TestClock.setTime(Date.parse("2026-03-01T10:00:00Z"))
+
+      yield* h.ingest(production!.key, [pageview()], { ip: "203.0.113.7", userAgent: CHROME_WINDOWS })
+      yield* h.ingest(production!.key, [pageview()], { ip: "198.51.100.23", userAgent: CHROME_WINDOWS })
+
+      assert.deepStrictEqual(yield* h.breakdown(production!.id, "$country", day), [{ value: null, count: 2 }])
+      const overview = yield* h.overview(production!.id, { period: "custom", from: "2026-03-01", to: "2026-03-01" })
+      assert.strictEqual(overview.totals.visitors, 1)
+    }))
+})
+
+layer(Harness.layer({ geoIp, trustedProxies: "2" }))("Client IP behind two trusted proxies", (it) => {
+  it.effect("takes the second X-Forwarded-For address from the right", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* h.createProject({})
+      yield* TestClock.setTime(Date.parse("2026-03-01T10:00:00Z"))
+
+      yield* h.ingest(production!.key, [pageview()], { ip: "198.51.100.23, 203.0.113.7, 10.0.0.1" })
+
+      assert.deepStrictEqual(yield* h.breakdown(production!.id, "$country", day), [{ value: "DE", count: 1 }])
+    }))
+})
+
+layer(Harness.layer({ geoIp, trustedProxies: "10.0.0.0/8, fd00::/8" }))("Client IP behind trusted proxy ranges", (it) => {
+  it.effect("takes the right-most X-Forwarded-For address outside the trusted ranges", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* h.createProject({})
+      yield* TestClock.setTime(Date.parse("2026-03-01T10:00:00Z"))
+
+      yield* h.ingest(production!.key, [pageview()], { ip: "198.51.100.23, 203.0.113.7, 10.1.2.3, fd00::5" })
+
+      assert.deepStrictEqual(yield* h.breakdown(production!.id, "$country", day), [{ value: "DE", count: 1 }])
     }))
 })

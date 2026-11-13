@@ -1,7 +1,7 @@
 // Property filters: every report narrowed to the Events that match, observed through the
 // reports and Custom events APIs.
 import { assert, layer } from "@effect/vitest"
-import type { PropertyFilter } from "@flock/shared"
+import type { EventPropertyFilter } from "@flock/shared"
 import { Effect } from "effect"
 import { TestClock } from "effect/testing"
 import { customEvent, Harness, pageview } from "./harness.ts"
@@ -10,8 +10,8 @@ const at = (iso: string) => TestClock.setTime(Date.parse(iso))
 const DE = "203.0.113.7"
 const US = "198.51.100.23"
 const geoIp = { [DE]: "DE", [US]: "US" }
-const day = (filters: ReadonlyArray<PropertyFilter>) => ({ period: "custom" as const, from: "2026-03-01", to: "2026-03-01", filters })
-const is = (property: string, value: string): PropertyFilter => ({ property, op: "is", value })
+const day = (filters: ReadonlyArray<EventPropertyFilter>) => ({ period: "custom" as const, from: "2026-03-01", to: "2026-03-01", filters })
+const is = (eventProperty: string, value: string): EventPropertyFilter => ({ eventProperty, op: "is", value })
 const url = (path: string) => `https://example.com${path}`
 
 layer(Harness.layer({ geoIp }))("Overview with filters", (it) => {
@@ -42,15 +42,15 @@ layer(Harness.layer({ geoIp }))("Filter operators", (it) => {
         pageview({ $url: url("/blog") })
       ], { ip: DE })
       yield* h.ingest(production!.key, [pageview({ $url: url("/pricing"), plan: "pro" })], { ip: US })
-      const pageviews = (filters: ReadonlyArray<PropertyFilter>) =>
+      const pageviews = (filters: ReadonlyArray<EventPropertyFilter>) =>
         h.overview(production!.id, day(filters)).pipe(Effect.map((o) => o.totals.pageviews))
 
       assert.strictEqual(yield* pageviews([is("$country", "DE"), is("$path", "/pricing")]), 1)
       // isNot keeps Events without the property.
-      assert.strictEqual(yield* pageviews([{ property: "plan", op: "isNot", value: "team" }]), 3)
+      assert.strictEqual(yield* pageviews([{ eventProperty: "plan", op: "isNot", value: "team" }]), 3)
       // contains ignores case and skips Events without the property.
-      assert.strictEqual(yield* pageviews([{ property: "plan", op: "contains", value: "PR" }]), 2)
-      assert.strictEqual(yield* pageviews([{ property: "$url", op: "contains", value: "/pricing" }, is("$country", "US")]), 1)
+      assert.strictEqual(yield* pageviews([{ eventProperty: "plan", op: "contains", value: "PR" }]), 2)
+      assert.strictEqual(yield* pageviews([{ eventProperty: "$url", op: "contains", value: "/pricing" }, is("$country", "US")]), 1)
       assert.strictEqual(yield* pageviews([is("$country", "FR")]), 0)
     }))
 
@@ -63,7 +63,7 @@ layer(Harness.layer({ geoIp }))("Filter operators", (it) => {
         customEvent("game_completed", { score: 34, won: true }),
         customEvent("game_completed", { score: 12, won: false })
       ])
-      const list = (filters: ReadonlyArray<PropertyFilter>) =>
+      const list = (filters: ReadonlyArray<EventPropertyFilter>) =>
         h.client.customEvents.list({ params: { environmentId: production!.id }, query: day(filters) }).pipe(Effect.orDie)
       assert.deepStrictEqual((yield* list([is("score", "34")])).events, [{ name: "game_completed", count: 1, visitors: 1 }])
       assert.deepStrictEqual((yield* list([is("won", "false")])).events, [{ name: "game_completed", count: 1, visitors: 1 }])
@@ -84,7 +84,7 @@ layer(Harness.layer({ geoIp }))("Filter operators", (it) => {
       assert.strictEqual(ok.status, 200)
       const body = (yield* Effect.promise(() => ok.json())) as { totals: { pageviews: number } }
       assert.strictEqual(body.totals.pageviews, 1)
-      assert.strictEqual((yield* get(JSON.stringify([{ property: "$country", op: "like", value: "US" }]))).status, 400)
+      assert.strictEqual((yield* get(JSON.stringify([{ eventProperty: "$country", op: "like", value: "US" }]))).status, 400)
       assert.strictEqual((yield* get("not json")).status, 400)
     }))
 })
@@ -186,13 +186,13 @@ layer(Harness.layer({ geoIp }))("Custom events with filters", (it) => {
       const detail = yield* api.detail({ params: { environmentId }, query: { ...de, name: "game_completed" } }).pipe(Effect.orDie)
       assert.deepStrictEqual(detail.totals, { count: 2, visitors: 1 })
 
-      const breakdown = yield* api.breakdown({ params: { environmentId }, query: { ...de, name: "game_completed", property: "level" } })
+      const breakdown = yield* api.breakdown({ params: { environmentId }, query: { ...de, name: "game_completed", eventProperty: "level" } })
         .pipe(Effect.orDie)
       assert.deepStrictEqual(breakdown.rows, [{ value: "easy", count: 1 }, { value: "hard", count: 1 }])
 
       const stats = yield* api.stats({
         params: { environmentId },
-        query: { ...day([is("level", "hard")]), name: "game_completed", property: "score" }
+        query: { ...day([is("level", "hard")]), name: "game_completed", eventProperty: "score" }
       }).pipe(Effect.orDie)
       assert.deepStrictEqual(stats.totals, { count: 2, average: 65, sum: 130, min: 30, max: 100, median: 65 })
     }))

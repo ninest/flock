@@ -1,7 +1,7 @@
 # Self-hosted Flock: the published image plus Postgres.
 #   curl -fsSLO https://raw.githubusercontent.com/ninest/flock/main/deploy/docker-compose.yml
 #   POSTGRES_PASSWORD=$(openssl rand -hex 24) docker compose up -d
-#   (add FLOCK_ADMIN_EMAIL=you@example.com to .env, then sign up with it)
+#   (add FLOCK_ADMIN_EMAIL=you@example.com and FLOCK_ADMIN_PASSWORD=… to .env: boot creates that Instance admin)
 # Then open http://<host>:2100. Upgrade with `docker compose pull && docker compose up -d`.
 # See docs/self-hosting.md for every environment variable, upgrades and backups.
 name: flock
@@ -17,8 +17,10 @@ services:
     environment:
       DATABASE_URL: postgres://flock:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/flock
       PORT: "2100"
-      # Sign up with this email to create the Instance admin (see docs/self-hosting.md).
+      # Boot creates this Instance admin with this password if they don't exist yet
+      # (an existing password is never changed; see docs/self-hosting.md).
       FLOCK_ADMIN_EMAIL: ${FLOCK_ADMIN_EMAIL:-}
+      FLOCK_ADMIN_PASSWORD: ${FLOCK_ADMIN_PASSWORD:-}
       FLOCK_PUBLIC_URL: ${FLOCK_PUBLIC_URL:-}
       # Optional OIDC sign-in (see docs/self-hosting.md#oidc-sign-in).
       FLOCK_OIDC_ISSUER: ${FLOCK_OIDC_ISSUER:-}
@@ -27,6 +29,9 @@ services:
       FLOCK_OIDC_NAME: ${FLOCK_OIDC_NAME:-}
       FLOCK_OIDC_TRUST_EMAILS: ${FLOCK_OIDC_TRUST_EMAILS:-false}
       FLOCK_PASSWORD_SIGN_IN: ${FLOCK_PASSWORD_SIGN_IN:-true}
+      # Behind a reverse proxy, how many proxies append to X-Forwarded-For (usually 1).
+      # Unset, X-Forwarded-For is ignored (see docs/self-hosting.md#client-ip-behind-a-proxy).
+      FLOCK_TRUSTED_PROXIES: ${FLOCK_TRUSTED_PROXIES:-}
     ports:
       - "${FLOCK_PORT:-2100}:2100"
     labels:

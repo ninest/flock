@@ -15,7 +15,7 @@ Run `make dev`, then:
 | Playground Project keys | `pk_dev_playground` (used by the playground), `pk_production_playground` |
 | Tracking mode and Identify | Playground Project → Project settings → Tracking mode → persistent, reload http://hel:2102 (mode shown on `/`), click **Identify as test-user**; on a second device do the same and the dashboard counts one Visitor |
 | Instance admin page (Invites, Open sign-up, Members) | http://hel:2101/instance |
-| Filtered view (property filters live in the URL; click any report row or **Add filter**) | `http://hel:2101/projects/<id>?filters=[{"property":"$country","op":"is","value":"DE"}]` |
+| Filtered view (Event property filters live in the URL; click any report row or **Add filter**) | `http://hel:2101/projects/<id>?filters=[{"eventProperty":"$country","op":"is","value":"DE"}]` |
 | OIDC sign-in ("Sign in with …" on `/sign-in`) | Off by default. Export `FLOCK_OIDC_ISSUER`, `FLOCK_OIDC_CLIENT_ID`, `FLOCK_OIDC_CLIENT_SECRET` (and optionally `FLOCK_OIDC_NAME`, `FLOCK_PASSWORD_SIGN_IN=false`) before `make dev`, with `FLOCK_PUBLIC_URL` set to the origin registered at the issuer (`http://localhost:2101` or a `tailscale serve` https URL). See [docs/self-hosting.md](docs/self-hosting.md#oidc-sign-in) |
 
 Playground pages: `/` (Pageview, **Log in**, **Complete game** and **Identify as test-user** buttons, Tracking mode indicator; **Complete game** sends `game_completed` with a random `{ score, level }`, shown under Custom events on the dashboard), `/blog` (linked pages, for top/entry/exit pages), `/sources` (links with `utm_*` tags and simulated referrers), `/spa` (SPA navigation), `/ingest` (raw ingest form). Open the Playground Project in the dashboard and switch to the `dev` Environment to see the Events arrive.
@@ -69,7 +69,7 @@ pnpm -r typecheck
 
 Tests only go through two seams and never look at tables or internals:
 
-1. **The server's HTTP API** (`packages/server/test`). `Harness.layer()` in `test/harness.ts` runs the whole server in-process against a throwaway Postgres database (`flock_test_<random>`, created per `layer(...)` block and dropped afterwards). It provides a typed client signed in as an Instance admin (`h.client`), raw `h.fetch` without cookies, `h.sdk` (a typed client without cookies or an `Origin`, like a server sending Events), `h.browser()` (a fresh cookie jar with `signUp`/`signIn` and its own typed client), `h.seedMember(...)`, `h.adminCommand([...])` (the admin CLI command, in-process), `Harness.layer({ adminEmail })` for `FLOCK_ADMIN_EMAIL`, `h.createProject(...)` (the Projects API) for fixtures, `TestClock` (from `@effect/vitest`) for time, `Harness.layer({ geoIp: { "203.0.113.7": "DE", "198.51.100.23": { country: "US", region: "California" } } })` for a fixed GeoIP table, `h.ingest(key, events, { ip, userAgent })` to send a batch with a client IP (as `X-Forwarded-For`) and User-Agent, and `h.breakdown(environmentId, "$country", range)` / `h.propertyKeys(...)` / `h.overview(...)` / `h.top(environmentId, "pages", { period: "7d" })` / `h.live(environmentId)` to read reports back. `TEST_DATABASE_ADMIN_URL` overrides the admin connection (default `postgres://postgres:postgres@127.0.0.1:2432/postgres`).
+1. **The server's HTTP API** (`packages/server/test`). `Harness.layer()` in `test/harness.ts` runs the whole server in-process against a throwaway Postgres database (`flock_test_<random>`, created per `layer(...)` block and dropped afterwards). It provides a typed client signed in as an Instance admin (`h.client`), raw `h.fetch` without cookies, `h.sdk` (a typed client without cookies or an `Origin`, like a server sending Events), `h.browser()` (a fresh cookie jar with `signUp`/`signIn` and its own typed client), `h.seedMember(...)`, `h.adminCommand([...])` (the admin CLI command, in-process), `Harness.layer({ adminEmail, adminPassword })` for `FLOCK_ADMIN_EMAIL` / `FLOCK_ADMIN_PASSWORD`, `h.createProject(...)` (the Projects API) for fixtures, `TestClock` (from `@effect/vitest`) for time, `Harness.layer({ geoIp: { "203.0.113.7": "DE", "198.51.100.23": { country: "US", region: "California" } } })` for a fixed GeoIP table, `h.ingest(key, events, { ip, userAgent })` to send a batch with a client IP (as `X-Forwarded-For`, trusted for one hop unless `Harness.layer({ trustedProxies })` says otherwise) and User-Agent, and `h.breakdown(environmentId, "$country", range)` / `h.eventPropertyKeys(...)` / `h.overview(...)` / `h.top(environmentId, "pages", { period: "7d" })` / `h.live(environmentId)` to read reports back. `TEST_DATABASE_ADMIN_URL` overrides the admin connection (default `postgres://postgres:postgres@127.0.0.1:2432/postgres`).
 2. **The browser script's outgoing requests** (`packages/script/test`). `openPlayground(browser())` in `test/harness.ts` opens the playground pages in headless Chromium (Playwright), serving them and the freshly built script with request routing (no real servers), and captures every request to `/api/ingest`. Tests assert on those requests and the page only. One-time setup: `pnpm --filter @flock/script exec playwright install chromium --only-shell`. `test/size.test.ts` fails if the gzipped script exceeds 2 KB; `pnpm --filter @flock/script build` checks it too.
 
 The browser script:
@@ -81,7 +81,7 @@ The browser script:
 
 It sends a `$pageview` on load and on `pushState`/`popstate`, gives each Event a UUID, and sends with `sendBeacon` (falling back to `fetch` with `keepalive`) as a `text/plain` JSON body, which needs no CORS preflight. Events go to the origin the script came from, or to `data-api` if set.
 
-`data-mode` is the Project's Tracking mode (ADR 0002), which the dashboard's snippet fills in. In `cookieless` mode (the default) the script writes no cookies or storage, and `identify` does nothing. In `persistent` mode it stores a random Visitor ID in `localStorage` and sends it as each Event's `distinct_id`. `flock.identify("user-42")` sends a `$identify` Event that links the device to `user-42`, and from then on the device sends Events as `user-42`. The server only trusts `distinct_id` when the Project is persistent, so switching the mode in the dashboard takes effect at once, and Visitor counts start afresh. `GET /api/ingest/config?key=…` returns a key's Tracking mode.
+`data-mode` is the Project's Tracking mode (ADR 0002), which the dashboard's snippet fills in. In `cookieless` mode (the default) the script writes no cookies or storage, and `identify` does nothing. In `persistent` mode it first asks `GET /api/ingest/config?key=…` for the Project's current Tracking mode, then stores a random Visitor ID in `localStorage` and sends it as each Event's `distinct_id`. `flock.identify("user-42")` sends a `$identify` Event that links the device to `user-42`, and from then on the device sends Events as `user-42`. The server only trusts `distinct_id` when the Project is persistent, so switching the mode in the dashboard takes effect at once for counting, and Visitor counts start afresh. If the Project is switched back to cookieless while sites still carry a `persistent` snippet, the script sees that on the next page load, deletes its stored IDs and stores nothing more. Update the snippet anyway: a stale persistent snippet waits for that check before sending.
 
 ### Ingest rules
 
@@ -99,7 +99,8 @@ It sends a `$pageview` on load and on `pushState`/`popstate`, gives each Event a
 ```sh
 curl -fsSLO https://raw.githubusercontent.com/ninest/flock/main/deploy/docker-compose.yml
 echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)" > .env
-echo "FLOCK_ADMIN_EMAIL=you@example.com" >> .env   # sign up with it to create the Instance admin
+echo "FLOCK_ADMIN_EMAIL=you@example.com" >> .env   # boot creates this Instance admin…
+echo "FLOCK_ADMIN_PASSWORD=$(openssl rand -base64 18)" >> .env   # …with this password
 docker compose up -d
 ```
 
@@ -109,11 +110,11 @@ The image is `ghcr.io/ninest/flock` (tags `X.Y.Z`, `X.Y`, `X`, `latest`); run it
 
 ```sh
 docker build -t flock .
-docker run -p 2100:2100 -e DATABASE_URL=postgres://user:pass@host:5432/flock -e FLOCK_ADMIN_EMAIL=you@example.com flock
+docker run -p 2100:2100 -e DATABASE_URL=postgres://user:pass@host:5432/flock -e FLOCK_ADMIN_EMAIL=you@example.com -e FLOCK_ADMIN_PASSWORD='a long password' flock
 scripts/smoke.sh http://localhost:2100   # health, dashboard, OpenAPI
 ```
 
-Sign-in settings (`FLOCK_ADMIN_EMAIL`, `FLOCK_PUBLIC_URL`, `BETTER_AUTH_SECRET`, …) are in [docs/self-hosting.md](docs/self-hosting.md#environment-variables).
+Sign-in settings (`FLOCK_ADMIN_EMAIL`, `FLOCK_ADMIN_PASSWORD`, `FLOCK_PUBLIC_URL`, `BETTER_AUTH_SECRET`, …) are in [docs/self-hosting.md](docs/self-hosting.md#environment-variables).
 
 ## Recovering admin access
 

@@ -1,6 +1,6 @@
 // Content and acquisition reports for one Environment: top, entry and exit pages; referrers
 // and UTM tags (shared date range), plus the live count of Visitors in the last 30 minutes.
-import type { Environment, PropertyFilters, PropertyFilter, ReportRangeQuery } from "@flock/shared"
+import type { Environment, EventPropertyFilters, EventPropertyFilter, ReportRangeQuery } from "@flock/shared"
 import { request } from "./api.ts"
 import { muted, type TopTab, TopList } from "./top-list.tsx"
 import { usePoll } from "./use-poll.ts"
@@ -21,7 +21,7 @@ const SOURCES: ReadonlyArray<TopTab> = [
 export const PagesAndSources = ({ environment, range, onAddFilter }: {
   environment: Environment
   range: ReportRangeQuery
-  onAddFilter: (filter: PropertyFilter) => void
+  onAddFilter: (filter: EventPropertyFilter) => void
 }) => (
   <section style={{ margin: "12px 0" }}>
     <h3 style={{ marginBottom: 8 }}>Pages and sources</h3>
@@ -33,7 +33,7 @@ export const PagesAndSources = ({ environment, range, onAddFilter }: {
 )
 
 /** Unique Visitors with a matching Event in the last 30 minutes, refreshed every 10 seconds. */
-export const LiveVisitors = ({ environment, filters }: { environment: Environment; filters: PropertyFilters | undefined }) => {
+export const LiveVisitors = ({ environment, filters }: { environment: Environment; filters: EventPropertyFilters | undefined }) => {
   const { data } = usePoll(
     () => request((api) => api.reports.live({ params: { environmentId: environment.id }, query: { filters } })),
     [environment.id, JSON.stringify(filters ?? [])],

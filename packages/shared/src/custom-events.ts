@@ -85,8 +85,8 @@ const withRange = <F extends Schema.Struct.Fields>(fields: F) =>
   ReportRangeQuery.mapFields((range) => ({ ...range, ...fields }), { unsafePreserveChecks: true })
 /** `name`: the Custom event. */
 const eventQuery = withRange({ name: Schema.String })
-/** `property`: the Event property key. */
-const propertyQuery = withRange({ name: Schema.String, property: Schema.String })
+/** `eventProperty`: the Event property key. */
+const eventPropertyQuery = withRange({ name: Schema.String, eventProperty: Schema.String })
 
 export class CustomEventsGroup extends HttpApiGroup.make("customEvents")
   .add(
@@ -106,7 +106,7 @@ export class CustomEventsGroup extends HttpApiGroup.make("customEvents")
     /** Counts the Custom event by the value of one string or boolean Event property. */
     HttpApiEndpoint.get("breakdown", "/:environmentId/custom-event/breakdown", {
       params,
-      query: propertyQuery,
+      query: eventPropertyQuery,
       success: CustomEventBreakdown,
       error: EnvironmentNotFound
     }),
@@ -116,7 +116,7 @@ export class CustomEventsGroup extends HttpApiGroup.make("customEvents")
      */
     HttpApiEndpoint.get("stats", "/:environmentId/custom-event/stats", {
       params,
-      query: propertyQuery,
+      query: eventPropertyQuery,
       success: CustomEventStats,
       error: EnvironmentNotFound
     })

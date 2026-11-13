@@ -18,10 +18,13 @@ export interface AuthSettings {
   /** Signs session cookies; at least 32 random characters. Generated and kept in Postgres when unset. */
   readonly secret: Option.Option<Redacted.Redacted<string>>
   /**
-   * Signing up or signing in with this email makes the Member an Instance admin. Through
-   * OIDC, only when the issuer says the email is verified (or `oidc.trustEmails` is on).
+   * The Instance admin's email. With `adminPassword`, boot ensures this Instance admin exists.
+   * An OIDC sign-in with this email makes the Member an Instance admin when the issuer says the
+   * email is verified (or `oidc.trustEmails` is on). A password sign-up never does.
    */
   readonly adminEmail: Option.Option<string>
+  /** With `adminEmail`, boot ensures that Instance admin exists, created with this password if missing. */
+  readonly adminPassword: Option.Option<Redacted.Redacted<string>>
   /** Whether Members may sign up and sign in with email + password. */
   readonly passwordSignIn: boolean
   /** The OIDC issuer Members may sign in with. */
@@ -40,9 +43,9 @@ export interface OidcSettings {
 }
 
 /**
- * How a Member proves who they are. A password sign-up is trusted with its email (Flock
- * can't verify emails, and FLOCK_ADMIN_EMAIL with a password is how a fresh Instance gets
- * its admin); an OIDC sign-in is trusted only when its email is verified.
+ * How a Member proves who they are. Flock can't verify the email of a password sign-up, so it
+ * never counts for the FLOCK_ADMIN_EMAIL bootstrap (FLOCK_ADMIN_PASSWORD or the `admin` CLI
+ * create a password admin instead); an OIDC sign-in counts when its email is verified.
  */
 export type SignInMethod = "password" | "oidc"
 
@@ -84,8 +87,8 @@ const toInvite = (row: InviteRow) =>
 
 export class Access extends Context.Service<Access, {
   /**
-   * Whether a new login may be created for this email: always for FLOCK_ADMIN_EMAIL,
-   * for anyone while Open sign-up is on, and otherwise only with an unused Invite
+   * Whether a new login may be created for this email: for FLOCK_ADMIN_EMAIL through an OIDC
+   * sign-in with a verified email, for anyone while Open sign-up is on, and otherwise only with an unused Invite
    * token, which this uses up.
    */
   readonly admitSignUp: (input: {
@@ -123,7 +126,7 @@ export class Access extends Context.Service<Access, {
       const isAdminEmail = (email: string) => Option.exists(adminEmail, (admin) => sameEmail(admin, email))
       /** Whether this sign-in proves the email well enough for the admin bootstrap. */
       const emailProven = (method: SignInMethod, emailVerified: boolean) =>
-        method === "password" || emailVerified || Option.exists(oidc, (o) => o.trustEmails)
+        method === "oidc" && (emailVerified || Option.exists(oidc, (o) => o.trustEmails))
 
       const selectMembers = (where: ReturnType<typeof sql.and>) =>
         sql<{ id: string; email: string; name: string; isAdmin: boolean }>`

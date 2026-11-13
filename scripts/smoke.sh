@@ -2,7 +2,9 @@
 # Smoke test a running Instance from the outside, over HTTP only.
 #   scripts/smoke.sh http://localhost:2100 [ingest key]
 # Waits up to 60 s for /api/health, then checks the dashboard and, given an
-# Environment key, that a Pageview is accepted. Used by CI against the Docker
+# Environment key, that a Pageview is accepted. With SMOKE_ADMIN_EMAIL and
+# SMOKE_ADMIN_PASSWORD (the Instance's FLOCK_ADMIN_EMAIL / FLOCK_ADMIN_PASSWORD),
+# it also signs in and checks that Member is the Instance admin. Used by CI against the Docker
 # image, the compose file and the previous release's image.
 set -euo pipefail
 base="${1:?usage: smoke.sh BASE_URL [KEY]}"
@@ -28,4 +30,15 @@ if [[ -n "$key" ]]; then
   result="$(curl -fsS -X POST -H 'content-type: application/json' --data "$body" "$base/api/ingest")"
   echo "$result" | grep -q '"accepted":1' || { echo "ingest: unexpected result: $result"; exit 1; }
   echo "ok: ingest"
+fi
+
+if [[ -n "${SMOKE_ADMIN_EMAIL:-}" ]]; then
+  jar="$(mktemp)"
+  trap 'rm -f "$jar"' EXIT
+  body="{\"email\":\"$SMOKE_ADMIN_EMAIL\",\"password\":\"${SMOKE_ADMIN_PASSWORD:?SMOKE_ADMIN_PASSWORD}\"}"
+  curl -fsS -c "$jar" -X POST -H 'content-type: application/json' -H "origin: $base" --data "$body" "$base/api/auth/sign-in/email" >/dev/null \
+    || { echo "admin: sign-in with FLOCK_ADMIN_PASSWORD failed"; exit 1; }
+  me="$(curl -fsS -b "$jar" "$base/api/me")"
+  echo "$me" | grep -q '"isAdmin":true' || { echo "admin: not an Instance admin: $me"; exit 1; }
+  echo "ok: Instance admin signs in"
 fi

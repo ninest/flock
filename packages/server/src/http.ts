@@ -5,37 +5,35 @@ import { Effect, Layer, Option } from "effect"
 import { HttpRouter, type HttpServerRequest, HttpServerResponse, HttpStaticServer } from "effect/http"
 import { HttpApiBuilder, HttpApiMiddleware, HttpApiScalar } from "effect/http-api"
 import { Access, AuthConfig } from "./access.ts"
-import { CustomEventsHandlers } from "./custom-events.ts"
+import { clientIp, type TrustedProxies } from "./client-ip.ts"
 import { AuthRoutes, currentMember, MemberAuthLive } from "./auth.ts"
 import type { RequestContext } from "./enrichment.ts"
 import { Ingest } from "./ingest.ts"
 import { Projects } from "./projects.ts"
-import { Reports } from "./reports.ts"
+import { Queries } from "./queries.ts"
 
 const HealthHandlers = HttpApiBuilder.group(FlockApi, "health", Effect.fn(function*(handlers) {
   const sql = yield* PgClient.PgClient
   return handlers.handle("check", () => sql`SELECT 1`.pipe(Effect.as({ status: "ok" as const }), Effect.orDie))
 }))
 
-const IngestHandlers = HttpApiBuilder.group(FlockApi, "ingest", Effect.fn(function*(handlers) {
-  const ingest = yield* Ingest
-  return handlers
-    .handle("send", ({ payload, request }) => ingest.send(payload, requestContext(request)))
-    .handle("config", ({ query }) => ingest.config(query.key))
-}))
+const IngestHandlers = (trusted: TrustedProxies) =>
+  HttpApiBuilder.group(FlockApi, "ingest", Effect.fn(function*(handlers) {
+    const ingest = yield* Ingest
+    return handlers
+      .handle("send", ({ payload, request }) => ingest.send(payload, requestContext(request, trusted)))
+      .handle("config", ({ query }) => ingest.config(query.key))
+  }))
 
 /**
- * The client IP, User-Agent and Origin of an ingest request. Flock runs behind a proxy (Railway,
- * Docker, `tailscale serve`), so the first X-Forwarded-For address wins over the socket.
+ * The client IP, User-Agent and Origin of an ingest request. X-Forwarded-For counts only as far
+ * as FLOCK_TRUSTED_PROXIES vouches for it; otherwise the socket address is the client.
  */
-const requestContext = (request: HttpServerRequest.HttpServerRequest): RequestContext => {
-  const forwarded = request.headers["x-forwarded-for"]?.split(",")[0]?.trim()
-  return {
-    ip: forwarded || Option.getOrNull(request.remoteAddress),
-    userAgent: request.headers["user-agent"] ?? null,
-    origin: request.headers["origin"] ?? null
-  }
-}
+const requestContext = (request: HttpServerRequest.HttpServerRequest, trusted: TrustedProxies): RequestContext => ({
+  ip: clientIp({ forwardedFor: request.headers["x-forwarded-for"], socket: Option.getOrNull(request.remoteAddress), trusted }),
+  userAgent: request.headers["user-agent"] ?? null,
+  origin: request.headers["origin"] ?? null
+})
 
 const ProjectsHandlers = HttpApiBuilder.group(FlockApi, "projects", Effect.fn(function*(handlers) {
   const projects = yield* Projects
@@ -71,19 +69,40 @@ const EnvironmentsHandlers = HttpApiBuilder.group(FlockApi, "environments", Effe
 }))
 
 const ReportsHandlers = HttpApiBuilder.group(FlockApi, "reports", Effect.fn(function*(handlers) {
-  const reports = yield* Reports
+  const queries = yield* Queries
   return handlers
-    .handle("pageviewCount", ({ params, query }) =>
-      CurrentMember.use(({ id }) => reports.pageviewCount(id, params.environmentId, query)).pipe(Effect.map((pageviews) => ({ pageviews }))))
-    .handle("overview", ({ params, query }) => CurrentMember.use(({ id }) => reports.overview(id, params.environmentId, query)))
-    .handle("live", ({ params, query }) =>
-      CurrentMember.use(({ id }) => reports.liveVisitors(id, params.environmentId, query.filters)).pipe(Effect.map((visitors) => ({ visitors }))))
-    .handle("top", ({ params, query }) => CurrentMember.use(({ id }) => reports.top(id, params.environmentId, query)))
-    .handle("breakdown", ({ params, query }) =>
-      CurrentMember.use(({ id }) =>
-        reports.breakdown(id, params.environmentId, query, { property: query.property, event: query.event ?? "$pageview", filters: query.filters })))
-    .handle("propertyKeys", ({ params, query }) =>
-      CurrentMember.use(({ id }) => reports.propertyKeys(id, params.environmentId, query)).pipe(Effect.map((keys) => ({ keys }))))
+    .handle("pageviewCount", ({ params: { environmentId }, query }) =>
+      CurrentMember.use(({ id: member }) => queries.pageviewCount({ member, environmentId, query })).pipe(
+        Effect.map((pageviews) => ({ pageviews }))
+      ))
+    .handle("overview", ({ params: { environmentId }, query }) =>
+      CurrentMember.use(({ id: member }) => queries.overview({ member, environmentId, query })))
+    .handle("live", ({ params: { environmentId }, query }) =>
+      CurrentMember.use(({ id: member }) => queries.liveVisitors({ member, environmentId, query })).pipe(
+        Effect.map((visitors) => ({ visitors }))
+      ))
+    .handle("top", ({ params: { environmentId }, query }) => CurrentMember.use(({ id: member }) => queries.top({ member, environmentId, query })))
+    .handle("breakdown", ({ params: { environmentId }, query }) =>
+      CurrentMember.use(({ id: member }) =>
+        queries.breakdown({ member, environmentId, query: { ...query, event: query.event ?? "$pageview" } })
+      ))
+    .handle("eventPropertyKeys", ({ params: { environmentId }, query }) =>
+      CurrentMember.use(({ id: member }) => queries.eventPropertyKeys({ member, environmentId, query })).pipe(
+        Effect.map((keys) => ({ keys }))
+      ))
+}))
+
+const CustomEventsHandlers = HttpApiBuilder.group(FlockApi, "customEvents", Effect.fn(function*(handlers) {
+  const queries = yield* Queries
+  return handlers
+    .handle("list", ({ params: { environmentId }, query }) =>
+      CurrentMember.use(({ id: member }) => queries.customEvents({ member, environmentId, query })))
+    .handle("detail", ({ params: { environmentId }, query }) =>
+      CurrentMember.use(({ id: member }) => queries.customEvent({ member, environmentId, query })))
+    .handle("breakdown", ({ params: { environmentId }, query }) =>
+      CurrentMember.use(({ id: member }) => queries.customEventBreakdown({ member, environmentId, query })))
+    .handle("stats", ({ params: { environmentId }, query }) =>
+      CurrentMember.use(({ id: member }) => queries.customEventStats({ member, environmentId, query })))
 }))
 
 const SignInHandlers = HttpApiBuilder.group(FlockApi, "signIn", Effect.fn(function*(handlers) {
@@ -126,8 +145,8 @@ const InstanceHandlers = HttpApiBuilder.group(FlockApi, "instance", Effect.fn(fu
       })))
 }))
 
-const ApiRoutes = HttpApiBuilder.layer(FlockApi, { openapiPath: "/api/openapi.json" }).pipe(
-  Layer.provide([HealthHandlers, IngestHandlers, ProjectsHandlers, EnvironmentsHandlers, ReportsHandlers, CustomEventsHandlers, SignInHandlers, MembersHandlers, InstanceHandlers]),
+const ApiRoutes = (trusted: TrustedProxies) => HttpApiBuilder.layer(FlockApi, { openapiPath: "/api/openapi.json" }).pipe(
+  Layer.provide([HealthHandlers, IngestHandlers(trusted), ProjectsHandlers, EnvironmentsHandlers, ReportsHandlers, CustomEventsHandlers, SignInHandlers, MembersHandlers, InstanceHandlers]),
   Layer.provide(MemberAuthLive),
   Layer.provide(HttpApiMiddleware.layerProblemDetails({ includeDetails: true }))
 )
@@ -159,7 +178,9 @@ export interface AppRoutesOptions {
   readonly publicDir: string
   /** The built browser script, served at /flock.js. */
   readonly scriptFile: string
+  /** Which proxies may set the client IP through X-Forwarded-For. */
+  readonly trustedProxies: TrustedProxies
 }
 
 export const AppRoutes = (options: AppRoutesOptions) =>
-  Layer.mergeAll(ApiRoutes, AuthRoutes, DocsRoute, ScriptRoute(options.scriptFile), StaticRoutes(options.publicDir), Cors)
+  Layer.mergeAll(ApiRoutes(options.trustedProxies), AuthRoutes, DocsRoute, ScriptRoute(options.scriptFile), StaticRoutes(options.publicDir), Cors)

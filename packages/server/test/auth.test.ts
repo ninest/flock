@@ -24,33 +24,31 @@ layer(Harness.layer())("Query API auth", (it) => {
 })
 
 layer(Harness.layer({ adminEmail: "owner@example.com" }))("Admin bootstrap and sign-up", (it) => {
-  it.effect("signing up with FLOCK_ADMIN_EMAIL creates the Instance admin", () =>
+  it.effect("signing up with FLOCK_ADMIN_EMAIL and a password is refused while sign-up is closed", () =>
     Effect.gen(function*() {
       const h = yield* Harness
       const browser = yield* h.browser()
       const response = yield* browser.signUp({ email: "Owner@Example.com", password: "correct horse battery", name: "Owner" })
-      assert.strictEqual(response.status, 200)
-
-      const me = yield* browser.client.members.me()
-      assert.strictEqual(me.email, "owner@example.com")
-      assert.strictEqual(me.name, "Owner")
-      assert.isTrue(me.isAdmin)
-      assert.isArray(yield* browser.client.projects.list())
+      assert.strictEqual(response.status, 403)
+      const body = (yield* Effect.promise(() => response.json())) as { code: string }
+      assert.strictEqual(body.code, "SIGN_UP_CLOSED")
+      const me = yield* Effect.promise(() => browser.fetch("/api/me"))
+      assert.strictEqual(me.status, 401)
     }))
 
-  it.effect("the Instance admin signs in again with their password", () =>
+  it.effect("a password sign-up with FLOCK_ADMIN_EMAIL during Open sign-up is an ordinary Member", () =>
     Effect.gen(function*() {
       const h = yield* Harness
+      yield* h.client.instance.updateSettings({ payload: { openSignUp: true } })
       const browser = yield* h.browser()
-      const wrong = yield* browser.signIn({ email: "owner@example.com", password: "wrong password" })
-      assert.strictEqual(wrong.status, 401)
-      const response = yield* browser.signIn({ email: "owner@example.com", password: "correct horse battery" })
+      const response = yield* browser.signUp({ email: "owner@example.com", password: "correct horse battery", name: "Owner" })
+      yield* h.client.instance.updateSettings({ payload: { openSignUp: false } })
       assert.strictEqual(response.status, 200)
-      assert.isTrue((yield* browser.client.members.me()).isAdmin)
+      assert.isFalse((yield* browser.client.members.me()).isAdmin)
 
       yield* browser.auth("/sign-out")
-      const after = yield* Effect.promise(() => browser.fetch("/api/me"))
-      assert.strictEqual(after.status, 401)
+      yield* browser.signIn({ email: "owner@example.com", password: "correct horse battery" })
+      assert.isFalse((yield* browser.client.members.me()).isAdmin)
     }))
 
   it.effect("signing up with any other email is rejected", () =>
@@ -86,19 +84,35 @@ layer(Harness.layer({ adminEmail: "owner@example.com" }))("Admin bootstrap and s
 })
 
 layer(Harness.layer({ adminEmail: "member@example.com" }))("Admin bootstrap on sign-in", (it) => {
-  it.effect("an existing Member signing in with FLOCK_ADMIN_EMAIL becomes the Instance admin", () =>
+  it.effect("an existing Member signing in with FLOCK_ADMIN_EMAIL and a password is not promoted", () =>
     Effect.gen(function*() {
       const h = yield* Harness
       yield* h.seedMember({ email: "member@example.com", password: "correct horse battery" })
-      yield* h.seedMember({ email: "other@example.com", password: "correct horse battery" })
 
       const member = yield* h.browser()
-      yield* member.signIn({ email: "member@example.com", password: "correct horse battery" })
-      assert.isTrue((yield* member.client.members.me()).isAdmin)
+      const response = yield* member.signIn({ email: "member@example.com", password: "correct horse battery" })
+      assert.strictEqual(response.status, 200)
+      assert.isFalse((yield* member.client.members.me()).isAdmin)
+    }))
+})
 
-      const other = yield* h.browser()
-      yield* other.signIn({ email: "other@example.com", password: "correct horse battery" })
-      assert.isFalse((yield* other.client.members.me()).isAdmin)
+layer(Harness.layer({ adminEmail: "owner@example.com", adminPassword: "correct horse battery" }))("Admin bootstrap with FLOCK_ADMIN_PASSWORD", (it) => {
+  it.effect("boot creates the Instance admin, who signs in with that password", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const browser = yield* h.browser()
+      const wrong = yield* browser.signIn({ email: "owner@example.com", password: "wrong password" })
+      assert.strictEqual(wrong.status, 401)
+      const response = yield* browser.signIn({ email: "Owner@Example.com", password: "correct horse battery" })
+      assert.strictEqual(response.status, 200)
+      const me = yield* browser.client.members.me()
+      assert.strictEqual(me.email, "owner@example.com")
+      assert.isTrue(me.isAdmin)
+      assert.isArray(yield* browser.client.projects.list())
+
+      yield* browser.auth("/sign-out")
+      const after = yield* Effect.promise(() => browser.fetch("/api/me"))
+      assert.strictEqual(after.status, 401)
     }))
 })
 
@@ -115,6 +129,7 @@ layer(Harness.layer({ adminEmail: "owner@example.com", zeroConfig: true }))("Sig
   it.effect("accepts sign-up from the Instance's own origin and refuses other origins", () =>
     Effect.gen(function*() {
       const h = yield* Harness
+      yield* h.client.instance.updateSettings({ payload: { openSignUp: true } })
       const attacker = yield* h.browser()
       const refused = yield* signUp(attacker, "https://evil.example")
       assert.strictEqual(refused.status, 403)
@@ -122,6 +137,6 @@ layer(Harness.layer({ adminEmail: "owner@example.com", zeroConfig: true }))("Sig
       const browser = yield* h.browser()
       const response = yield* signUp(browser, BASE_URL)
       assert.strictEqual(response.status, 200)
-      assert.isTrue((yield* browser.client.members.me()).isAdmin)
+      assert.strictEqual((yield* browser.client.members.me()).email, "owner@example.com")
     }))
 })

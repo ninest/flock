@@ -1,12 +1,12 @@
-// Property filters for the Project page: the URL search params that hold the shared date range
+// Event property filters for the Project page: the URL search params that hold the shared date range
 // and filters, the chips that show and remove filters, and the form that adds one. Every
 // report sends the same range and filters, so a filtered view can be shared or bookmarked.
 import {
   type Environment,
   type FilterOperator,
   LocalDate,
-  type PropertyFilter,
-  PropertyFilters,
+  type EventPropertyFilter,
+  EventPropertyFilters,
   ReportPeriod,
   type ReportRangeQuery
 } from "@flock/shared"
@@ -21,7 +21,7 @@ export interface ProjectSearch {
   readonly period?: ReportRangeQuery["period"]
   readonly from?: string | undefined
   readonly to?: string | undefined
-  readonly filters?: PropertyFilters
+  readonly filters?: EventPropertyFilters
 }
 
 const decode = <S extends Schema.Top & { readonly DecodingServices: never }>(schema: S, value: unknown) =>
@@ -30,7 +30,7 @@ const decode = <S extends Schema.Top & { readonly DecodingServices: never }>(sch
 /** Keeps only valid search params, so a hand-edited URL can't break the reports. */
 export const validateProjectSearch = (search: Record<string, unknown>): ProjectSearch => {
   // TanStack Router parses JSON search values, so `filters` arrives as an array.
-  const filters = decode(PropertyFilters, search.filters)
+  const filters = decode(EventPropertyFilters, search.filters)
   const result: { -readonly [K in keyof ProjectSearch]: ProjectSearch[K] } = {}
   if (typeof search.env === "string" && search.env !== "") result.env = search.env
   const period = decode(ReportPeriod, search.period)
@@ -60,10 +60,10 @@ export const searchFor = (query: ReportRangeQuery): Omit<ProjectSearch, "env"> =
 /** usePoll dependencies for a report query: reload when the range or filters change. */
 export const queryDeps = (query: ReportRangeQuery) => [query.period, query.from, query.to, JSON.stringify(query.filters ?? [])]
 
-const sameFilter = (a: PropertyFilter, b: PropertyFilter) => a.property === b.property && a.op === b.op && a.value === b.value
+const sameFilter = (a: EventPropertyFilter, b: EventPropertyFilter) => a.eventProperty === b.eventProperty && a.op === b.op && a.value === b.value
 
 /** Adds a filter (once) to a report query. */
-export const withFilter = (query: ReportRangeQuery, filter: PropertyFilter): ReportRangeQuery => {
+export const withFilter = (query: ReportRangeQuery, filter: EventPropertyFilter): ReportRangeQuery => {
   const filters = query.filters ?? []
   return filters.some((f) => sameFilter(f, filter)) ? query : { ...query, filters: [...filters, filter] }
 }
@@ -101,11 +101,11 @@ export const FilterBar = ({ environment, query, onChange }: {
       <strong style={{ fontSize: 14 }}>Filters</strong>
       {filters.length === 0 && !adding ? <span style={{ fontSize: 14, color: "#666" }}>None. Click a row in a report to add one.</span> : null}
       {filters.map((filter, i) => (
-        <span key={`${filter.property}-${filter.op}-${filter.value}`} style={chip} data-testid="filter-chip">
-          <code>{filter.property}</code> {OPERATORS.find((o) => o.value === filter.op)?.label} <strong>{filter.value}</strong>
+        <span key={`${filter.eventProperty}-${filter.op}-${filter.value}`} style={chip} data-testid="filter-chip">
+          <code>{filter.eventProperty}</code> {OPERATORS.find((o) => o.value === filter.op)?.label} <strong>{filter.value}</strong>
           <button
             type="button"
-            aria-label={`Remove filter ${filter.property}`}
+            aria-label={`Remove filter ${filter.eventProperty}`}
             onClick={() => remove(i)}
             style={{ all: "unset", cursor: "pointer", padding: "0 6px", color: "#666" }}
           >
@@ -126,27 +126,27 @@ export const FilterBar = ({ environment, query, onChange }: {
 
 const AddFilter = ({ environment, onAdd, onCancel }: {
   environment: Environment
-  onAdd: (filter: PropertyFilter) => void
+  onAdd: (filter: EventPropertyFilter) => void
   onCancel: () => void
 }) => {
   // Suggest the Event property keys seen in the last 30 days.
   const { data } = usePoll(() => {
     const to = DateTime.makeUnsafe(Date.now())
     return request((api) =>
-      api.reports.propertyKeys({ params: { environmentId: environment.id }, query: { from: DateTime.subtract(to, { days: 30 }), to } })
+      api.reports.eventPropertyKeys({ params: { environmentId: environment.id }, query: { from: DateTime.subtract(to, { days: 30 }), to } })
     )
   }, [environment.id], 60_000)
   const keys = [...new Set([...SUGGESTED_KEYS, ...(data?.keys ?? [])])]
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
-    const property = String(form.get("property")).trim()
-    if (property === "") return
-    onAdd({ property, op: String(form.get("op")) as FilterOperator, value: String(form.get("value")) })
+    const eventProperty = String(form.get("eventProperty")).trim()
+    if (eventProperty === "") return
+    onAdd({ eventProperty, op: String(form.get("op")) as FilterOperator, value: String(form.get("value")) })
   }
   return (
     <form onSubmit={submit} style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-      <input name="property" list="filter-keys" placeholder="Event property" required maxLength={200} aria-label="Event property" autoFocus />
+      <input name="eventProperty" list="filter-keys" placeholder="Event property" required maxLength={200} aria-label="Event property" autoFocus />
       <datalist id="filter-keys">{keys.map((key) => <option key={key} value={key} />)}</datalist>
       <select name="op" aria-label="Operator" defaultValue="is">
         {OPERATORS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}

@@ -34,19 +34,19 @@ export type FilterOperator = typeof FilterOperator.Type
  * `$path` is the path of `$url` and `$referring_domain` the referrer's domain, the values the
  * pages and referrers reports show.
  */
-export const PropertyFilter = Schema.Struct({
-  property: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(200)),
+export const EventPropertyFilter = Schema.Struct({
+  eventProperty: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(200)),
   op: FilterOperator,
   value: Schema.String.check(Schema.isMaxLength(1000))
 })
-export type PropertyFilter = typeof PropertyFilter.Type
+export type EventPropertyFilter = typeof EventPropertyFilter.Type
 
 /** Filters combine with AND. */
-export const PropertyFilters = Schema.Array(PropertyFilter).check(Schema.isMaxLength(20))
-export type PropertyFilters = typeof PropertyFilters.Type
+export const EventPropertyFilters = Schema.Array(EventPropertyFilter).check(Schema.isMaxLength(20))
+export type EventPropertyFilters = typeof EventPropertyFilters.Type
 
 /** In a query string, filters travel as one JSON-encoded `filters` parameter. */
-export const filtersField = { filters: Schema.optional(Schema.fromJsonString(PropertyFilters)) }
+export const filtersField = { filters: Schema.optional(Schema.fromJsonString(EventPropertyFilters)) }
 
 const rangeFields = {
   period: ReportPeriod,

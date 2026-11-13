@@ -1,5 +1,6 @@
 import { Config, Effect, Option, Redacted, Schema } from "effect"
 import type { AuthSettings } from "./access.ts"
+import { parseTrustedProxies, type TrustedProxies } from "./client-ip.ts"
 import { fileURLToPath } from "node:url"
 
 const defaultPublicDir = fileURLToPath(new URL("../../dashboard/dist", import.meta.url))
@@ -27,8 +28,13 @@ export const ServerConfig = Config.all({
   ),
   /** Signs Member session cookies: at least 32 random characters. Generated and kept in Postgres when unset. */
   authSecret: Config.option(Config.Redacted("BETTER_AUTH_SECRET")),
-  /** Signing up or signing in with this email makes the Member an Instance admin. */
+  /**
+   * The Instance admin's email. With FLOCK_ADMIN_PASSWORD, boot creates (or promotes) that Member;
+   * otherwise an OIDC sign-in with this verified email makes the Member an Instance admin.
+   */
   adminEmail: Config.option(Config.String("FLOCK_ADMIN_EMAIL")),
+  /** With FLOCK_ADMIN_EMAIL: boot creates that Instance admin with this password if they don't exist. */
+  adminPassword: Config.option(Config.Redacted("FLOCK_ADMIN_PASSWORD")),
   /** Members may sign up and sign in with email + password. Turn off to allow OIDC only. */
   passwordSignIn: Config.Boolean("FLOCK_PASSWORD_SIGN_IN").pipe(Config.withDefault(true)),
   /** The OIDC issuer URL, e.g. https://auth.misc.page. Members may sign in with it when set. */
@@ -39,6 +45,11 @@ export const ServerConfig = Config.all({
   oidcName: Config.option(Config.String("FLOCK_OIDC_NAME")),
   /** Treat the issuer's emails as verified for the FLOCK_ADMIN_EMAIL bootstrap. */
   oidcTrustEmails: Config.Boolean("FLOCK_OIDC_TRUST_EMAILS").pipe(Config.withDefault(false)),
+  /**
+   * Proxies in front of Flock that append the client IP to X-Forwarded-For: a hop count (`1`
+   * behind Railway or one reverse proxy) or comma-separated CIDRs. Unset: X-Forwarded-For is ignored.
+   */
+  trustedProxies: Config.String("FLOCK_TRUSTED_PROXIES").pipe(Config.withDefault("")),
   /** Seed the playground Project with fixed keys (development only). */
   seedPlayground: Config.Boolean("FLOCK_SEED_PLAYGROUND").pipe(Config.withDefault(false))
 })
@@ -46,6 +57,16 @@ export const ServerConfig = Config.all({
 export class AuthConfigError extends Schema.TaggedError<AuthConfigError>()("AuthConfigError", {
   message: Schema.String
 }) {}
+
+export class TrustedProxiesError extends Schema.TaggedError<TrustedProxiesError>()("TrustedProxiesError", {
+  message: Schema.String
+}) {}
+
+/** FLOCK_TRUSTED_PROXIES, parsed. */
+export const trustedProxies = (config: Config.Success<typeof ServerConfig>): Effect.Effect<TrustedProxies, TrustedProxiesError> => {
+  const parsed = parseTrustedProxies(config.trustedProxies)
+  return typeof parsed === "string" ? Effect.fail(new TrustedProxiesError({ message: parsed })) : Effect.succeed(parsed)
+}
 
 /** The sign-in settings, or an error explaining which variables are missing. */
 export const authSettings = (config: Config.Success<typeof ServerConfig>): Effect.Effect<AuthSettings, AuthConfigError> =>
@@ -80,6 +101,7 @@ export const authSettings = (config: Config.Success<typeof ServerConfig>): Effec
       trustedOrigins: config.trustedOrigins,
       secret: Option.filter(config.authSecret, (secret) => Redacted.value(secret).trim() !== ""),
       adminEmail: nonEmpty(config.adminEmail),
+      adminPassword: Option.filter(config.adminPassword, (password) => Redacted.value(password) !== ""),
       passwordSignIn: config.passwordSignIn,
       oidc
     }

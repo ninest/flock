@@ -29,7 +29,7 @@ import {
   type MemberId,
   type Overview,
   type OverviewQuery,
-  type PropertyFilters,
+  type EventPropertyFilters,
   type Project,
   type ReportRangeQuery,
   type Top,
@@ -44,6 +44,7 @@ import { fileURLToPath } from "node:url"
 import { Access, AuthConfig } from "../src/access.ts"
 import { type AdminCommandError, adminCommand } from "../src/admin-command.ts"
 import { AppLive } from "../src/app.ts"
+import { parseTrustedProxies } from "../src/client-ip.ts"
 import { PgLive } from "../src/db.ts"
 import { GeoIp } from "../src/geoip.ts"
 import { AppRoutes } from "../src/http.ts"
@@ -62,10 +63,14 @@ export interface HarnessOptions {
   readonly geoIp?: Record<string, string | { readonly country: string; readonly region?: string }>
   /** FLOCK_ADMIN_EMAIL (default `owner@flock.test`). */
   readonly adminEmail?: string
+  /** FLOCK_ADMIN_PASSWORD: boot ensures the FLOCK_ADMIN_EMAIL Instance admin exists with it. */
+  readonly adminPassword?: string
   /** Leave FLOCK_PUBLIC_URL and BETTER_AUTH_SECRET unset, like a fresh self-hosted Instance. */
   readonly zeroConfig?: boolean
   /** Configure the stub OIDC issuer; `trustEmails` is FLOCK_OIDC_TRUST_EMAILS. */
   readonly oidc?: { readonly trustEmails?: boolean }
+  /** FLOCK_TRUSTED_PROXIES (default `1`, so `ingest`'s `ip` is the client IP). */
+  readonly trustedProxies?: string
   /** FLOCK_PASSWORD_SIGN_IN (default true). */
   readonly passwordSignIn?: boolean
 }
@@ -206,13 +211,13 @@ export class Harness extends Context.Service<Harness, {
   /** Convenience: a breakdown report (Pageviews unless `event`) by one Event property. */
   readonly breakdown: (
     environmentId: EnvironmentId,
-    property: string,
+    eventProperty: string,
     range: { readonly from: string; readonly to: string },
     event?: string,
-    filters?: PropertyFilters
+    filters?: EventPropertyFilters
   ) => Effect.Effect<ReadonlyArray<BreakdownRow>>
   /** Convenience: the Event property keys seen in `[from, to)`. */
-  readonly propertyKeys: (
+  readonly eventPropertyKeys: (
     environmentId: EnvironmentId,
     range: { readonly from: string; readonly to: string }
   ) => Effect.Effect<ReadonlyArray<string>>
@@ -221,7 +226,7 @@ export class Harness extends Context.Service<Harness, {
   /** Convenience: a ranked-list report for an Environment, as `h.client`. */
   readonly top: (environmentId: EnvironmentId, report: TopReport, range: ReportRangeQuery) => Effect.Effect<Top>
   /** Convenience: the live counter (unique Visitors in the last 30 minutes), as `h.client`. */
-  readonly live: (environmentId: EnvironmentId, filters?: PropertyFilters) => Effect.Effect<number>
+  readonly live: (environmentId: EnvironmentId, filters?: EventPropertyFilters) => Effect.Effect<number>
 }>()("test/Harness") {
   static readonly layer = (options: HarnessOptions = {}) =>
     Layer.effect(
@@ -239,6 +244,7 @@ export class Harness extends Context.Service<Harness, {
           trustedOrigins: [],
           secret: options.zeroConfig ? Option.none() : Option.some(Redacted.make("test-secret-test-secret-test-secret-0123")),
           adminEmail: Option.some(options.adminEmail ?? "owner@flock.test"),
+          adminPassword: Option.map(Option.fromNullishOr(options.adminPassword), Redacted.make),
           passwordSignIn: options.passwordSignIn ?? true,
           oidc: oidc === undefined ? Option.none() : Option.some({
             issuer: oidc.issuer,
@@ -260,7 +266,9 @@ export class Harness extends Context.Service<Harness, {
         const deps = yield* TestClock.withLive(Layer.build(Deps))
         yield* TestClock.setTime(Date.now())
 
-        const app = yield* HttpRouter.toHttpEffect(AppRoutes({ publicDir, scriptFile })).pipe(Effect.provide(deps))
+        const trustedProxies = parseTrustedProxies(options.trustedProxies ?? "1")
+        if (typeof trustedProxies === "string") return yield* Effect.die(trustedProxies)
+        const app = yield* HttpRouter.toHttpEffect(AppRoutes({ publicDir, scriptFile, trustedProxies })).pipe(Effect.provide(deps))
         const context = yield* Effect.context<never>() // includes the TestClock
         const handler: (request: Request) => Promise<Response> = HttpEffect.toWebHandlerWith<
           never,
@@ -273,26 +281,24 @@ export class Harness extends Context.Service<Harness, {
           )) as typeof globalThis.fetch
 
         const sdk = yield* makeClient(fetch)
-        const seed = Context.get(deps, Seed)
         const browser = () => makeBrowser(handler)
-        const seedMember: Harness["Service"]["seedMember"] = (input) => seed.member(input)
+        const runAdminCommand = (args: ReadonlyArray<string>) => adminCommand(args).pipe(Effect.provide(deps))
 
-        // The default client: a Member made Instance admin, signed in. With password sign-in
-        // off, they join through the OIDC issuer during a moment of Open sign-up.
-        const access = Context.get(deps, Access)
+        // The default client: a Member made Instance admin through the admin CLI, signed in. With
+        // password sign-in off, they join through the OIDC issuer during a moment of Open sign-up.
         const admin = { email: "harness-admin@flock.test", password: "harness-password" }
         const adminBrowser = yield* browser()
         if (settings.passwordSignIn || oidc === undefined) {
-          const adminId = yield* seedMember(admin)
-          yield* access.grantAdmin(adminId).pipe(Effect.orDie)
+          yield* runAdminCommand(["--email", admin.email, "--password", admin.password]).pipe(Effect.orDie)
           yield* adminBrowser.signIn(admin)
         } else {
           oidc.setNextUser({ sub: "harness-admin", email: admin.email, email_verified: true })
+          // No external seam: turning Open sign-up on through the API needs the admin we are creating.
+          const access = Context.get(deps, Access)
           yield* access.updateSettings({ openSignUp: true }).pipe(Effect.orDie)
           yield* adminBrowser.oidcSignIn()
           yield* access.updateSettings({ openSignUp: false }).pipe(Effect.orDie)
-          const adminMember = yield* access.memberByEmail(admin.email).pipe(Effect.orDie)
-          yield* access.grantAdmin(Option.getOrThrow(adminMember).id).pipe(Effect.orDie)
+          yield* runAdminCommand(["--email", admin.email]).pipe(Effect.orDie)
         }
         const client = adminBrowser.client
 
@@ -308,6 +314,10 @@ export class Harness extends Context.Service<Harness, {
             }
             return yield* api.projects.get({ params: { projectId: project.id } })
           }).pipe(Effect.orDie)
+
+        // Directly through the Seed service: the external way (an Invite plus sign-up) would leave a
+        // used Invite behind in every test's Instance, and fails with password sign-up off.
+        const seedMember: Harness["Service"]["seedMember"] = (input) => Context.get(deps, Seed).member(input)
 
         const pageviewCount: Harness["Service"]["pageviewCount"] = (environmentId, range) =>
           client.reports.pageviewCount({
@@ -333,11 +343,11 @@ export class Harness extends Context.Service<Harness, {
         const overview: Harness["Service"]["overview"] = (environmentId, query) =>
           client.reports.overview({ params: { environmentId }, query })
 
-        const breakdown: Harness["Service"]["breakdown"] = (environmentId, property, range, event, filters) =>
-          client.reports.breakdown({ params: { environmentId }, query: { ...toRange(range), property, event, filters } }).pipe(Effect.orDie)
+        const breakdown: Harness["Service"]["breakdown"] = (environmentId, eventProperty, range, event, filters) =>
+          client.reports.breakdown({ params: { environmentId }, query: { ...toRange(range), eventProperty, event, filters } }).pipe(Effect.orDie)
 
-        const propertyKeys: Harness["Service"]["propertyKeys"] = (environmentId, range) =>
-          client.reports.propertyKeys({ params: { environmentId }, query: toRange(range) }).pipe(
+        const eventPropertyKeys: Harness["Service"]["eventPropertyKeys"] = (environmentId, range) =>
+          client.reports.eventPropertyKeys({ params: { environmentId }, query: toRange(range) }).pipe(
             Effect.map((r) => r.keys),
             Effect.orDie
           )
@@ -349,14 +359,14 @@ export class Harness extends Context.Service<Harness, {
           client.reports.live({ params: { environmentId }, query: { filters } }).pipe(Effect.map((r) => r.visitors), Effect.orDie)
 
         return Harness.of({
-          ingest, breakdown, propertyKeys, top, live,
+          ingest, breakdown, eventPropertyKeys, top, live,
           handler,
           oidc,
           fetch,
           sdk,
           admin: adminBrowser,
           client,
-          adminCommand: (args) => adminCommand(args).pipe(Effect.provide(deps)),
+          adminCommand: runAdminCommand,
           browser, seedMember, createProject, pageviewCount, overview })
       })
     ).pipe(Layer.provide(TestDatabase.layer))

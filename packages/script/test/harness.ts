@@ -72,8 +72,12 @@ export const openPlayground = async (
   browser: Browser,
   options: {
     readonly sendBeacon?: boolean
-    /** The Project's Tracking mode, which the page tells the script. Default: cookieless. */
+    /** The Tracking mode in the page's snippet (`data-mode`). Default: cookieless. */
     readonly mode?: TrackingMode
+    /** The Project's Tracking mode, as `/api/ingest/config` answers it. Default: `mode`. */
+    readonly projectMode?: TrackingMode
+    /** localStorage entries the page starts with, e.g. a Visitor ID from an earlier visit. */
+    readonly localStorage?: Record<string, string>
   } = {}
 ): Promise<Playground> => {
   const code = await builtScript()
@@ -82,6 +86,11 @@ export const openPlayground = async (
     await context.addInitScript(() => {
       Object.defineProperty(Navigator.prototype, "sendBeacon", { value: undefined })
     })
+  }
+  if (options.localStorage !== undefined) {
+    await context.addInitScript((entries) => {
+      for (const [name, value] of Object.entries(entries)) localStorage.setItem(name, value)
+    }, options.localStorage)
   }
   const requests: Array<IngestRequest> = []
   await context.route(`${PLAYGROUND}/**`, async (route) => {
@@ -93,6 +102,12 @@ export const openPlayground = async (
     await route.fulfill({ status: page.status, contentType: page.contentType, body: page.body })
   })
   await context.route(`${FLOCK}/flock.js`, (route) => route.fulfill({ contentType: "text/javascript", body: code }))
+  await context.route(`${FLOCK}/api/ingest/config?**`, (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      headers: { "access-control-allow-origin": "*" },
+      body: JSON.stringify({ trackingMode: options.projectMode ?? options.mode ?? "cookieless" })
+    }))
   await context.route(`${FLOCK}/api/ingest`, async (route) => {
     const request = route.request()
     const batch = JSON.parse(request.postData() ?? "null") as { key: string; events: Array<SentEvent> }

@@ -22,12 +22,13 @@ mkdir flock && cd flock
 curl -fsSLO https://raw.githubusercontent.com/ninest/flock/main/deploy/docker-compose.yml
 echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)" > .env
 echo "FLOCK_ADMIN_EMAIL=you@example.com" >> .env
+echo "FLOCK_ADMIN_PASSWORD=$(openssl rand -base64 18)" >> .env
 docker compose up -d
 ```
 
-Then open the dashboard and sign up with `FLOCK_ADMIN_EMAIL` to create the Instance admin.
+On boot, Flock creates the Instance admin with that email and password. Open the dashboard and sign in with them.
 
-Flock listens on port 2100 (`FLOCK_PORT=8080` in `.env` changes the host port). Put a reverse proxy with TLS (Caddy, Traefik, nginx, or `tailscale serve`) in front of it for anything public.
+Flock listens on port 2100 (`FLOCK_PORT=8080` in `.env` changes the host port). Put a reverse proxy with TLS (Caddy, Traefik, nginx, or `tailscale serve`) in front of it for anything public, and add `FLOCK_TRUSTED_PROXIES=1` to `.env` so Flock sees visitors' IPs (see [Client IP behind a proxy](#client-ip-behind-a-proxy)).
 
 ## Railway
 
@@ -35,7 +36,7 @@ Deploy from the Flock template (image source `ghcr.io/ninest/flock:1` plus a Pos
 
 1. Create a Postgres service.
 2. Create a service from the Docker image `ghcr.io/ninest/flock:1`.
-3. Set its variables `DATABASE_URL=${{Postgres.DATABASE_URL}}`, `FLOCK_ADMIN_EMAIL` (your email) and `FLOCK_PUBLIC_URL` (the generated domain, `https://…`). Railway sets `PORT`, and Flock listens on it.
+3. Set its variables `DATABASE_URL=${{Postgres.DATABASE_URL}}`, `FLOCK_ADMIN_EMAIL` (your email), `FLOCK_ADMIN_PASSWORD` (a long random password), `FLOCK_PUBLIC_URL` (the generated domain, `https://…`) and `FLOCK_TRUSTED_PROXIES=1` (see [Client IP behind a proxy](#client-ip-behind-a-proxy)). Railway sets `PORT`, and Flock listens on it.
 4. Settings → Deploy → Healthcheck path: `/api/health`.
 5. Settings → Source → enable automatic image updates, so Railway redeploys when a new `1.x.y` is published.
 6. Settings → Networking → generate a domain.
@@ -46,11 +47,13 @@ Deploy from the Flock template (image source `ghcr.io/ninest/flock:1` plus a Pos
 |---|---|---|---|
 | `DATABASE_URL` | yes | | Postgres connection string, e.g. `postgres://flock:secret@db:5432/flock`. The database must exist; Flock creates its tables on boot. |
 | `PORT` | no | `2100` | Port the server listens on. |
-| `FLOCK_ADMIN_EMAIL` | no | | Signing up or signing in with this email makes that Member the Instance admin. This is how the first account is created: set it, open the dashboard and sign up with it. Everyone else needs an Invite link (created on the dashboard's Instance page) unless the Instance admin turns Open sign-up on there. Through OIDC, it only counts when the issuer says the email is verified (`email_verified`), unless `FLOCK_OIDC_TRUST_EMAILS=true`. |
+| `FLOCK_ADMIN_EMAIL` | no | | The Instance admin's email. This is how the first account is created, in one of two ways. With `FLOCK_ADMIN_PASSWORD`, boot creates that Member (or promotes an existing one). With OIDC, signing in with this email makes the Member the Instance admin, but only when the issuer says the email is verified (`email_verified`), unless `FLOCK_OIDC_TRUST_EMAILS=true`. A password sign-up with this email never makes an admin, because Flock can't check that you own the email. Everyone else needs an Invite link (created on the dashboard's Instance page) unless the Instance admin turns Open sign-up on there. |
+| `FLOCK_ADMIN_PASSWORD` | no | | With `FLOCK_ADMIN_EMAIL`: on every boot, Flock makes sure that Instance admin exists. It creates the Member with this password if they don't exist yet, and promotes them if they do. It never changes an existing Member's password, so you can change yours in Flock and leave this set (or remove it after the first boot). At least 8 characters. |
 | `FLOCK_PUBLIC_URL` | no | the origin of each request | The URL Members open Flock on, e.g. `https://flock.example.com`. Set it when Flock is public. |
 | `FLOCK_TRUSTED_ORIGINS` | no | | Comma-separated extra origins allowed to sign in, e.g. a second domain. |
 | `BETTER_AUTH_SECRET` | no | generated on first boot and kept in Postgres | Signs Member sessions; at least 32 random characters. Changing it signs every Member out. |
 | `FLOCK_GEOIP_DB` | no | the bundled DB-IP IP to Country Lite | A MaxMind-format (`.mmdb`) GeoIP database used to derive each Event's `$country` from the request IP (the IP itself is never stored). Point it at a City database, such as DB-IP IP to City Lite, to get `$region` too. Without a readable file, countries are unknown and ingest carries on. |
+| `FLOCK_TRUSTED_PROXIES` | no | | How many proxies in front of Flock append to `X-Forwarded-For` (e.g. `1`), or their comma-separated CIDR ranges. Unset, the header is ignored. Set it behind a reverse proxy or on Railway; see [Client IP behind a proxy](#client-ip-behind-a-proxy). |
 | `FLOCK_PASSWORD_SIGN_IN` | no | `true` | Set to `false` to turn email + password sign-up and sign-in off, leaving OIDC as the only way in. Needs `FLOCK_OIDC_ISSUER`. |
 | `FLOCK_OIDC_ISSUER` | no | | An OIDC issuer URL, e.g. `https://auth.misc.page`. When set, the sign-in page offers it. Needs the two variables below and `FLOCK_PUBLIC_URL`. See [OIDC sign-in](#oidc-sign-in). |
 | `FLOCK_OIDC_CLIENT_ID` | with an issuer | | The client ID Flock is registered under at the issuer. |
@@ -64,7 +67,20 @@ Contributors: every new environment variable gets a row here.
 
 ## Client IP behind a proxy
 
-Flock reads the visitor's IP from the first `X-Forwarded-For` address, falling back to the connection's address, and uses it only to look up the country. Make sure your reverse proxy sets `X-Forwarded-For` (Railway, Caddy, Traefik and `tailscale serve` do by default); otherwise every Event gets your proxy's country.
+Flock uses the visitor's IP for two things: looking up `$country` (and `$region`), and, in cookieless Tracking mode, hashing it with the User-Agent and a daily salt into the Visitor ID. The IP itself is never stored.
+
+Behind a reverse proxy, the connection comes from the proxy, and the visitor's IP is in `X-Forwarded-For`. Any client can put whatever it likes in that header, so Flock only reads it as far as `FLOCK_TRUSTED_PROXIES` says your proxies vouch for it:
+
+| `FLOCK_TRUSTED_PROXIES` | Client IP |
+|---|---|
+| unset (default) | The connection's address. `X-Forwarded-For` is ignored. Right when Flock is reachable directly. |
+| a hop count, e.g. `1` | The address that many entries from the right of `X-Forwarded-For`. Use the number of proxies in front of Flock that each append the address they saw: `1` behind a single Caddy, Traefik, nginx or `tailscale serve`. |
+| CIDRs, e.g. `10.0.0.0/8, fd00::/8` | The right-most address in `X-Forwarded-For` (after the connection's address) that isn't in these ranges. Use it when you know your proxies' addresses rather than how many there are. |
+
+Without it, every Event behind a proxy gets the proxy's country, and in cookieless mode all visitors with the same browser look like one Visitor. With a hop count that's too high, a client can choose its own IP; too low, and you get your proxy's IP.
+
+- **Docker Compose** with a reverse proxy on the host: `FLOCK_TRUSTED_PROXIES=1` in `.env`.
+- **Railway:** set `FLOCK_TRUSTED_PROXIES=1`. Railway's edge proxy appends the address it sees to `X-Forwarded-For`, so the right-most entry is the client. Railway doesn't document this contract firmly, so check it after deploying: send an Event with a made-up `X-Forwarded-For: 1.2.3.4` and confirm its country is yours, not 1.2.3.4's.
 
 IP geolocation by [DB-IP](https://db-ip.com), licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
@@ -101,7 +117,7 @@ If auth-misc returns `email_verified: true` for your account, `FLOCK_ADMIN_EMAIL
 
 ## Recovering admin access
 
-If no one can sign in as an Instance admin, run the `admin` command inside the container. It promotes an existing Member, or creates one when given `--password`:
+If no one can sign in as an Instance admin, run the `admin` command inside the container (the other way in, besides `FLOCK_ADMIN_PASSWORD`). It promotes an existing Member, or creates one when given `--password`:
 
 ```sh
 docker compose exec flock node packages/server/src/cli.ts admin --email you@example.com
