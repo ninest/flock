@@ -23,7 +23,8 @@ import type {
   SessionsQuery,
   SessionSummary,
   Top,
-  TopQuery
+  TopQuery,
+  TopRow
 } from "@flock/shared"
 import { SESSION_EVENT_LIMIT, SessionNotFound, SESSIONS_PAGE_SIZE, TOP_LIMIT } from "@flock/shared"
 import { Context, DateTime, Effect, Layer } from "effect"
@@ -175,38 +176,43 @@ export class Queries extends Context.Service<Queries, {
         }
       }))
 
-    /** The first (or last) Pageview of each Session in the range, as `properties`. */
+    /** The first (or last) Pageview of each Session in the range, as `properties` and `visitor_id`. */
     const sessionPageview = (which: "first" | "last") => sql`
-      SELECT DISTINCT ON (session_id) properties FROM scoped
+      SELECT DISTINCT ON (session_id) properties, visitor_id FROM scoped
       WHERE name = '$pageview' AND session_id IS NOT NULL
       ORDER BY session_id, ${which === "first" ? sql`ts ASC, received_at ASC` : sql`ts DESC, received_at DESC`}`
 
-    /** One SELECT per ranked-list report, over the `scoped` CTE, yielding `value` and `count` rows. */
+    const visitors = sql`count(DISTINCT visitor_id)::int AS visitors`
+
+    /**
+     * One SELECT per ranked-list report, over the `scoped` CTE, yielding `value` and `visitors` rows,
+     * plus the optional columns that report fills in (`NULL` elsewhere).
+     */
     const topRows = (kind: TopQuery["report"]) => {
       switch (kind) {
         case "pages":
-          return sql`SELECT ${pathOf(sql)} AS value, count(*)::int AS count
+          return sql`SELECT ${pathOf(sql)} AS value, ${visitors}, count(*)::int AS pageviews
             FROM scoped WHERE name = '$pageview' GROUP BY 1`
         case "entryPages":
         case "exitPages":
-          return sql`SELECT ${pathOf(sql)} AS value, count(*)::int AS count
+          return sql`SELECT ${pathOf(sql)} AS value, ${visitors}, NULL::int AS pageviews
             FROM (${sessionPageview(kind === "entryPages" ? "first" : "last")}) s GROUP BY 1`
         case "referrers":
-          return sql`SELECT ${referringDomainOf(sql)} AS value, count(*)::int AS count
+          return sql`SELECT ${referringDomainOf(sql)} AS value, ${visitors}, NULL::int AS pageviews
             FROM (${sessionPageview("first")}) s GROUP BY 1`
         case "utmSources":
         case "utmMediums":
         case "utmCampaigns": {
           const tag = UTM_TAGS[kind]
           const value = sql`coalesce(properties ->> ${"$" + tag}, properties ->> ${tag})`
-          return sql`SELECT ${value} AS value, count(*)::int AS count
+          return sql`SELECT ${value} AS value, ${visitors}, NULL::int AS pageviews
             FROM (${sessionPageview("first")}) s WHERE ${value} IS NOT NULL AND ${value} <> '' GROUP BY 1`
         }
         case "countries":
         case "browsers":
         case "oses":
         case "devices":
-          return sql`SELECT properties ->> ${AUDIENCE[kind]} AS value, count(*)::int AS count
+          return sql`SELECT properties ->> ${AUDIENCE[kind]} AS value, ${visitors}, NULL::int AS pageviews
             FROM scoped WHERE name = '$pageview' GROUP BY 1`
       }
     }
@@ -215,12 +221,12 @@ export class Queries extends Context.Service<Queries, {
       Effect.gen(function*() {
         const scope = yield* checkAccessAndResolveRange(request)
         const { range } = scope
-        const rows = yield* sql<{ readonly value: string | null; readonly count: number }>`
+        const rows = yield* sql<TopRowRow>`
           WITH ${scopedEvents(scope)}, ${scopedSessions}
-          SELECT value, count FROM (${topRows(request.query.report)}) t
-          ORDER BY count DESC, value ASC NULLS LAST
+          SELECT value, visitors, pageviews FROM (${topRows(request.query.report)}) t
+          ORDER BY visitors DESC, value ASC NULLS LAST
           LIMIT ${TOP_LIMIT}`
-        return { from: range.from, to: range.to, timeZone: range.timeZone, report: request.query.report, rows }
+        return { from: range.from, to: range.to, timeZone: range.timeZone, report: request.query.report, rows: rows.map(toTopRow) }
       }))
 
     const liveVisitors = report("liveVisitors", (request: ReportRequest<{}>) =>
@@ -535,6 +541,16 @@ const toNumbers = (row: NumbersRow | undefined): OverviewNumbers => ({
 })
 
 const emptyStats: NumericStats = { count: 0, average: null, sum: null, min: null, max: null, median: null }
+
+/** A ranked-list row, as `top` selects it. */
+interface TopRowRow {
+  readonly value: string | null
+  readonly visitors: number
+  readonly pageviews: number | null
+}
+
+/** A ranked-list row, with only the optional columns its report fills in. */
+const toTopRow = ({ pageviews, ...row }: TopRowRow): TopRow => pageviews === null ? row : { ...row, pageviews }
 
 /** A Session's summary row, as `sessionSummary` selects it. */
 interface SessionRow {
