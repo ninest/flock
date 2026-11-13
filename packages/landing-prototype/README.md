@@ -2,19 +2,18 @@
 
 **Question:** what should the `flock.misc.page` landing page look like, and how should the hero tell the "John is being tracked" joke?
 
-Three variants on one route, switched with `?variant=` or the pill at the bottom (← → keys work too):
+Round one compared three pages (surveillance feed, John's session, scroll to follow John; see commit `f4e7186`). **The surveillance feed won.** Round two is all that page, with two things to choose, each on its own URL parameter and its own half of the pill at the bottom:
 
 ```sh
-pnpm landing:prototype   # http://hel:2110/?variant=A
+pnpm landing:prototype   # http://hel:2110/?variant=bento&caption=toast
 ```
 
-| | Variant | Idea |
+| Parameter | Values | What changes |
 |---|---|---|
-| A | Surveillance feed | The video fills the screen as a camera feed; the car sits in a reticle and each beat is stamped into an event log |
-| B | John's session | A light product page; the video sits beside a Flock Session timeline that fills in as he drives |
-| C | Scroll to follow John | A long read; the video is pinned, each scroll step loops one shot and names the feature it parodies |
+| `variant` (← → keys) | `bento`, `grid`, `plain` | How Capabilities and Use cases are laid out below the hero: tiles of mixed sizes, even cards, or no boxes |
+| `caption` (Shift + ↑ ↓) | `toast`, `callout`, `report` | How the hero says what John is doing: stacked notifications, a callout hanging off the car, or a field report |
 
-`site/` is plain HTML, CSS and JS with no build. `site/content.js` holds the words all three share.
+`site/` is plain HTML, CSS and JS with no build. `site/content.js` holds the words; `hero.js` the hero and caption styles; `sections.js` the layouts.
 
 ## The video
 

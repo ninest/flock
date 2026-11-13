@@ -25,15 +25,20 @@ export const BEATS = [
     feature: 'Session timeline', maps: 'Open any Session and read it in order, from the first Event to the last. This page is one.' },
 ];
 
+export const HEADLINE = 'Flock cameras, but for your website.';
+export const SUB = 'Self-hosted analytics for the sites and apps you run. It sees every visit, and it only reports to you.';
+export const STATEMENT = 'Flock counts the pageviews, events and sessions on your websites and apps, and keeps them on a server you run.';
+
+// [title, text, extra]: `extra` is what a bento tile shows besides the words (ignored by the other layouts).
 export const FEATURES = [
-  ['Yours to run', 'One Docker image and a Postgres database. Put it on Railway or any box you own. The data never leaves it.'],
-  ['A script under 2 KB', 'One tag on your site. Pageviews arrive on their own, single-page apps included.'],
-  ['Custom events', 'Name anything that happens and attach properties to it. Break any Event down by its properties.'],
-  ['Sessions and timelines', 'Bounce rate, visit duration, and every Session readable Event by Event.'],
-  ['Sources, pages, countries', 'Referrers and utm tags, top, entry and exit pages, and where in the world Visitors are.'],
-  ['Filters', 'Click any row to narrow every report to it. Filters live in the URL, so a view is a link.'],
-  ['Cookieless by default', 'An anonymous ID that resets daily. Turn on persistent tracking and Identify per Project, if you need them.'],
-  ['Projects and people', 'A Project per site, a dev Environment beside production, read-only sharing, invites, and sign-in through your own OIDC provider.'],
+  ['Yours to run', 'One Docker image and a Postgres database. Put it on Railway or any box you own. The data never leaves it.', { size: 'wide', code: 'docker compose up -d' }],
+  ['A tiny script', 'One tag on your site. Pageviews arrive on their own, single-page apps included.', { stat: '< 2 KB' }],
+  ['Custom events', 'Name anything that happens and attach properties to it. Break any Event down by its properties.', { code: 'flock.track("login_clicked")' }],
+  ['Sessions and timelines', 'Bounce rate, visit duration, and every Session readable Event by Event.', { size: 'tall', timeline: true }],
+  ['Sources, pages, countries', 'Referrers and utm tags, top, entry and exit pages, and where in the world Visitors are.', { code: 'utm_source=newsletter' }],
+  ['Filters', 'Click any row to narrow every report to it. Filters live in the URL, so a view is a link.', { code: '$country is DE' }],
+  ['Cookieless by default', 'An anonymous ID that resets daily. Turn on persistent tracking and Identify per Project, if you need them.', { stat: '0 cookies' }],
+  ['Projects and people', 'A Project per site, a dev Environment beside production, read-only sharing, invites, and sign-in through your own OIDC provider.', { size: 'wide3' }],
 ];
 
 export const EXAMPLES = [
@@ -43,5 +48,3 @@ export const EXAMPLES = [
   ['Is my own testing in these numbers?', 'Give local builds the dev Environment’s key. Production stays clean.'],
   ['Which of my side projects is anyone using?', 'One Instance, a Project each, all on one page.'],
 ];
-
-export const DISCLAIMER = 'Flock does not track cars, or John. It counts what happens on websites you own, on a server you run.';

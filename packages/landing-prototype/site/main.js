@@ -1,24 +1,32 @@
-// PROTOTYPE. Picks the variant from ?variant= and mounts the floating switcher. Variants share words (content.js),
-// the video (drive.js) and nothing else: each brings its own layout and its own stylesheet.
-import * as A from './variant-a.js';
-import * as B from './variant-b.js';
-import * as C from './variant-c.js';
+// PROTOTYPE. Round two: everything is the "surveillance feed" page; what varies is
+//   ?variant=bento|grid|plain        how the capabilities and use cases are laid out below the hero
+//   ?caption=toast|callout|report    how the hero says what John is doing
+// The two are independent, so any layout can be seen with any caption. Round one's other two pages (John's
+// session, Scroll to follow John) are at commit f4e7186.
+import { renderHero, CAPTIONS } from './hero.js';
+import { renderSections, LAYOUTS } from './sections.js';
 
-const VARIANTS = { A, B, C }, keys = Object.keys(VARIANTS);
-const current = (new URLSearchParams(location.search).get('variant') || 'A').toUpperCase();
-const key = VARIANTS[current] ? current : 'A', v = VARIANTS[key];
+const q = new URLSearchParams(location.search);
+const pick = (table, v) => (table[v] ? v : Object.keys(table)[0]);
+const layout = pick(LAYOUTS, q.get('variant')), caption = pick(CAPTIONS, q.get('caption'));
+document.documentElement.dataset.variant = layout; document.documentElement.dataset.caption = caption;
+const root = document.getElementById('root');
+renderHero(root, caption); renderSections(root, layout);
 
-const style = document.createElement('style'); style.textContent = v.css; document.head.append(style);
-document.documentElement.dataset.variant = key;
-v.render(document.getElementById('root'));
-
-// ---- the switcher: not part of any design, and the whole folder is a prototype, so it is always shown
-const go = d => { const u = new URL(location.href); u.searchParams.set('variant', keys[(keys.indexOf(key) + d + keys.length) % keys.length]); location.replace(u); };
+// ---- the switcher: not part of the design, and the whole folder is a prototype, so it is always shown
+const go = (param, table, cur, d) => { const k = Object.keys(table), u = new URL(location.href); u.searchParams.set(param, k[(k.indexOf(cur) + d + k.length) % k.length]); location.replace(u); };
 const bar = document.createElement('div'); bar.className = 'proto-switch';
-bar.innerHTML = `<button aria-label="Previous variant">←</button><span><b>${key}</b> ${v.name}</span><button aria-label="Next variant">→</button>`;
-const [prev, next] = bar.querySelectorAll('button'); prev.onclick = () => go(-1); next.onclick = () => go(1);
+const group = (label, param, table, cur) => {
+  const g = document.createElement('div');
+  g.innerHTML = `<button aria-label="Previous ${label}">←</button><span><b>${label}</b> ${table[cur]}</span><button aria-label="Next ${label}">→</button>`;
+  const [p, n] = g.querySelectorAll('button'); p.onclick = () => go(param, table, cur, -1); n.onclick = () => go(param, table, cur, 1);
+  return g;
+};
+bar.append(group('Layout', 'variant', LAYOUTS, layout), group('Caption', 'caption', CAPTIONS, caption));
 document.body.append(bar);
+// ← → change the layout, ↑ ↓ with Shift the caption
 addEventListener('keydown', e => {
   if (e.target.closest && e.target.closest('input,textarea,[contenteditable]')) return;
-  if (e.key === 'ArrowLeft') go(-1); else if (e.key === 'ArrowRight') go(1);
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') go('variant', LAYOUTS, layout, e.key === 'ArrowLeft' ? -1 : 1);
+  if (e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) go('caption', CAPTIONS, caption, e.key === 'ArrowUp' ? -1 : 1);
 });
