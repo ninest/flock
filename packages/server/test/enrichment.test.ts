@@ -92,7 +92,7 @@ layer(Harness.layer({ geoIp }))("Enrichment", (it) => {
       }
     }))
 
-  it.effect("strips query strings from URLs except utm_* parameters", () =>
+  it.effect("strips query strings except utm_* parameters, and fragments, from URLs", () =>
     Effect.gen(function*() {
       const h = yield* Harness
       const { environments: [production] } = yield* h.createProject({})
@@ -104,18 +104,22 @@ layer(Harness.layer({ geoIp }))("Enrichment", (it) => {
           $referrer: "https://mail.example.org/inbox?session=abc123&utm_medium=email"
         }),
         pageview({ $url: "https://example.com/pricing?plan=pro", $referrer: "" }),
-        pageview({ $url: "not a url?token=s3cret" })
+        pageview({ $url: "https://example.com/callback#access_token=s3cret&state=xyz" }),
+        pageview({ $url: "not a url?token=s3cret#access_token=s3cret" }),
+        pageview({ $url: "/relative#id_token=s3cret" })
       ], {})
 
       assert.deepStrictEqual(yield* h.breakdown(production!.id, "$url", day), [
+        { value: "/relative", count: 1 },
+        { value: "https://example.com/callback", count: 1 },
         { value: "https://example.com/pricing", count: 1 },
-        { value: "https://example.com/reset?utm_source=newsletter&utm_campaign=fall#step-2", count: 1 },
+        { value: "https://example.com/reset?utm_source=newsletter&utm_campaign=fall", count: 1 },
         { value: "not a url", count: 1 }
       ])
       assert.deepStrictEqual(yield* h.breakdown(production!.id, "$referrer", day), [
+        { value: null, count: 3 },
         { value: "", count: 1 },
-        { value: "https://mail.example.org/inbox?utm_medium=email", count: 1 },
-        { value: null, count: 1 }
+        { value: "https://mail.example.org/inbox?utm_medium=email", count: 1 }
       ])
     }))
 

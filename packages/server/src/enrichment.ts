@@ -1,6 +1,7 @@
 // Enrichment: one Event's properties + the request it came in -> the properties Flock stores.
-// Adds $country, $region, $browser, $os and $device, strips query strings from URLs
-// except utm_* parameters, and copies those from $url into $utm_source and friends. The request IP is only used for the GeoIP lookup, never returned.
+// Adds $country, $region, $browser, $os and $device, strips fragments and every query parameter
+// but utm_* from URLs, and copies the utm_* ones from $url into $utm_source and friends. The request
+// IP is only used for the GeoIP lookup (and, in ingest, the cookieless Visitor ID), never returned.
 import Bowser from "bowser"
 import { Context, Effect, Layer } from "effect"
 import { GeoIp } from "./geoip.ts"
@@ -93,21 +94,21 @@ const utmTags = (url: unknown): Record<string, string> => {
 }
 
 /**
- * Drops every query parameter except `utm_*`, so tokens or emails in URLs are never stored.
- * The fragment is kept (hash-routed SPAs use it for pages). Strings that aren't absolute
- * URLs lose everything from `?` up to the fragment.
+ * Drops every query parameter except `utm_*`, and the fragment, so tokens or emails in URLs
+ * (`?token=`, `#access_token=`) are never stored. The script doesn't track hash changes, so a
+ * fragment never names a page. Strings that aren't absolute URLs lose everything from the first
+ * `?` or `#`.
  */
 export const cleanUrl = (value: string): string => {
   let url: URL
   try {
     url = new URL(value)
   } catch {
-    const query = value.indexOf("?")
-    if (query === -1) return value
-    const hash = value.indexOf("#", query)
-    return value.slice(0, query) + (hash === -1 ? "" : value.slice(hash))
+    const cut = value.search(/[?#]/)
+    return cut === -1 ? value : value.slice(0, cut)
   }
   const kept = [...url.searchParams].filter(([name]) => name.toLowerCase().startsWith("utm_"))
   url.search = new URLSearchParams(kept).toString()
+  url.hash = ""
   return url.toString()
 }
