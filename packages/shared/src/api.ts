@@ -25,6 +25,7 @@ import {
 import { IngestBatch, IngestResult, OriginNotAllowed, UnknownKey } from "./ingest.ts"
 import { filtersField, LiveVisitors, Overview, OverviewQuery, Top, TopQuery } from "./reports.ts"
 import { CustomEventsGroup } from "./custom-events.ts"
+import { SessionDetail, SessionList, SessionNotFound, SessionQuery, SessionsQuery } from "./sessions.ts"
 import { CreatedInvite, Forbidden, Invite, InviteId, InviteNotFound, InstanceSettings, Member, MemberAuth, MemberId, MemberNotFound, SignInOptions } from "./members.ts"
 
 export class IngestGroup extends HttpApiGroup.make("ingest")
@@ -197,6 +198,20 @@ export class ReportsGroup extends HttpApiGroup.make("reports")
       query: filtersField,
       success: LiveVisitors,
       error: EnvironmentNotFound
+    }),
+    /** Recent sessions: Sessions with an Event in the range that matches every Filter, most recent activity first. */
+    HttpApiEndpoint.get("sessions", "/:environmentId/sessions", {
+      params: { environmentId: EnvironmentId },
+      query: SessionsQuery,
+      success: SessionList,
+      error: EnvironmentNotFound
+    }),
+    /** One Session: its summary, where it came from, and its Session timeline. `filters` mark the matching Events. */
+    HttpApiEndpoint.get("session", "/:environmentId/sessions/:sessionId", {
+      params: { environmentId: EnvironmentId, sessionId: Schema.String },
+      query: SessionQuery,
+      success: SessionDetail,
+      error: [EnvironmentNotFound, SessionNotFound]
     }),
     /** Every Event property key seen on the Environment's Events in the range, sorted. */
     HttpApiEndpoint.get("eventPropertyKeys", "/:environmentId/event-property-keys", {

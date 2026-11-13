@@ -17,15 +17,22 @@ import type {
   OverviewNumbers,
   EventPropertyFilters,
   ReportRangeQuery,
+  SessionDetail,
+  SessionList,
+  SessionStatus,
+  SessionsQuery,
+  SessionSummary,
   Top,
   TopQuery
 } from "@flock/shared"
-import { TOP_LIMIT } from "@flock/shared"
+import { SESSION_EVENT_LIMIT, SessionNotFound, SESSIONS_PAGE_SIZE, TOP_LIMIT } from "@flock/shared"
 import { Context, DateTime, Effect, Layer } from "effect"
 import type { SqlError } from "effect/sql/SqlError"
+import type { Fragment } from "effect/sql/Statement"
 import { matchesFilters, pathOf, referringDomainOf } from "./filters.ts"
 import { Projects } from "./projects.ts"
 import { type ReportRange, resolveRange } from "./report-range.ts"
+import { SESSION_TIMEOUT_MINUTES } from "./sessions.ts"
 
 /** An exact `[from, to)` time range, for the reports that don't work on local days. */
 export interface DateRange {
@@ -64,6 +71,12 @@ export class Queries extends Context.Service<Queries, {
   readonly customEventBreakdown: Report<ReportRangeQuery & { readonly name: string; readonly eventProperty: string }, CustomEventBreakdown>
   /** Numeric stats of one Event property; only JSON numbers count. */
   readonly customEventStats: Report<ReportRangeQuery & { readonly name: string; readonly eventProperty: string }, CustomEventStats>
+  /** Recent sessions: Sessions with an Event in the range that matches every filter, most recent activity first. */
+  readonly sessions: Report<SessionsQuery, SessionList>
+  /** One Session's summary, origin and Session timeline; `filters` mark the matching Events. */
+  readonly session: (
+    request: ReportRequest<{ readonly sessionId: string }>
+  ) => Effect.Effect<SessionDetail, EnvironmentNotFound | SessionNotFound>
 }>()("flock/Queries") {
   static readonly layer = Layer.effect(Queries, Effect.gen(function*() {
     const sql = yield* PgClient.PgClient
@@ -123,7 +136,10 @@ export class Queries extends Context.Service<Queries, {
     const inDateRange = ({ from, to }: DateRange) => sql`ts >= ${DateTime.toDateUtc(from)} AND ts < ${DateTime.toDateUtc(to)}`
 
     /** A report's SqlError is a defect, and its span is named after it. */
-    const report = <Q, A>(name: string, run: (request: ReportRequest<Q>) => Effect.Effect<A, EnvironmentNotFound | SqlError>): Report<Q, A> =>
+    const report = <Q, A, E = never>(
+      name: string,
+      run: (request: ReportRequest<Q>) => Effect.Effect<A, EnvironmentNotFound | NoInfer<E> | SqlError>
+    ): (request: ReportRequest<Q>) => Effect.Effect<A, EnvironmentNotFound | E> =>
       (request) => run(request).pipe(Effect.catchTag("SqlError", Effect.die), Effect.withSpan(`Queries.${name}`))
 
     // Traffic reports.
@@ -351,6 +367,116 @@ export class Queries extends Context.Service<Queries, {
         })
     )
 
+    // Sessions.
+
+    /**
+     * SELECT list summarising the Sessions in `from` (rows of `sessionBounds`), aliased `s`, from all their Events: the first Event (audience) and the first Pageview
+     * (entry page, referrer, UTM tags) as `first_event` and `first_pageview` laterals.
+     */
+    const sessionSummary = (environmentId: EnvironmentId, from: Fragment) => sql`
+      s.session_id AS id, s.started_at, s.last_seen_at, s.events,
+      round(extract(epoch FROM s.last_seen_at - s.started_at))::int AS duration,
+      fe.properties ->> '$country' AS country, fe.properties ->> '$device' AS device,
+      fe.properties ->> '$browser' AS browser, fe.properties ->> '$os' AS os,
+      fe.visitor_id,
+      CASE WHEN fp.properties IS NULL THEN NULL ELSE ${pathOf(sql, "fp.properties")} END AS entry_page,
+      ${referringDomainOf(sql, "fp.properties")} AS referring_domain,
+      nullif(fp.properties ->> '$referrer', '') AS referrer,
+      coalesce(fp.properties ->> '$utm_source', fp.properties ->> 'utm_source') AS utm_source,
+      coalesce(fp.properties ->> '$utm_medium', fp.properties ->> 'utm_medium') AS utm_medium,
+      coalesce(fp.properties ->> '$utm_campaign', fp.properties ->> 'utm_campaign') AS utm_campaign
+      FROM ${from} s
+      CROSS JOIN LATERAL (
+        SELECT properties, visitor_id FROM event
+        WHERE environment_id = ${environmentId} AND session_id = s.session_id
+        ORDER BY ts, received_at LIMIT 1
+      ) fe
+      LEFT JOIN LATERAL (
+        SELECT properties FROM event
+        WHERE environment_id = ${environmentId} AND session_id = s.session_id AND name = '$pageview'
+        ORDER BY ts, received_at LIMIT 1
+      ) fp ON TRUE`
+
+    /** CTE `s`: the given Sessions' first and last Event and Event count, over all their Events. */
+    const sessionBounds = (environmentId: EnvironmentId, ids: Fragment) => sql`
+      s AS (
+        SELECT session_id, min(ts) AS started_at, max(ts) AS last_seen_at, count(*)::int AS events
+        FROM event
+        WHERE environment_id = ${environmentId} AND session_id IN (${ids})
+        GROUP BY session_id
+      )`
+
+    const sessions = report("sessions", (request: ReportRequest<SessionsQuery>) =>
+      Effect.gen(function*() {
+        const scope = yield* checkAccessAndResolveRange(request)
+        const now = yield* DateTime.now
+        const cursor = request.query.cursor === undefined ? undefined : parseCursor(request.query.cursor)
+        const rows = yield* sql<SessionRow>`
+          WITH ${scopedEvents(scope)},
+          ${sessionBounds(scope.environmentId, sql`SELECT DISTINCT session_id FROM scoped WHERE session_id IS NOT NULL`)},
+          page AS (
+            SELECT * FROM s
+            ${cursor === undefined ? sql`` : sql`WHERE (last_seen_at, session_id) < (${cursor.lastSeenAt}, ${cursor.id})`}
+            ORDER BY last_seen_at DESC, session_id DESC
+            LIMIT ${SESSIONS_PAGE_SIZE + 1}
+          )
+          SELECT ${sessionSummary(scope.environmentId, sql`page`)}
+          ORDER BY s.last_seen_at DESC, s.session_id DESC`
+        const page = rows.slice(0, SESSIONS_PAGE_SIZE)
+        const last = page.at(-1)
+        return {
+          sessions: page.map((row) => toSummary(row, now)),
+          nextCursor: rows.length > SESSIONS_PAGE_SIZE && last ? formatCursor(last) : null
+        }
+      }))
+
+    const session = report<{ readonly sessionId: string }, SessionDetail, SessionNotFound>("session", (request: ReportRequest<{ readonly sessionId: string }>) =>
+      Effect.gen(function*() {
+        const environment = yield* checkAccess(request)
+        const { filters, sessionId } = request.query
+        const now = yield* DateTime.now
+        const [row] = yield* sql<SessionRow>`
+          WITH ${sessionBounds(environment.id, sql`${sessionId}`)}
+          SELECT ${sessionSummary(environment.id, sql`s`)}`
+        if (!row) return yield* Effect.fail(new SessionNotFound({ id: sessionId }))
+        // Identified: the Visitor ID is one a device was linked to by Identify, while the Project is in
+        // persistent Tracking mode (switching back to cookieless hides it, as Visitors start afresh).
+        const [identified] = row.visitorId === null ? [] : yield* sql`
+          SELECT 1 FROM visitor_alias a JOIN project p ON p.id = a.project_id
+          WHERE a.project_id = ${environment.projectId} AND a.visitor_id = ${row.visitorId}
+            AND p.tracking_mode = 'persistent'
+          LIMIT 1`
+        const events = yield* sql<{
+          readonly uuid: string
+          readonly name: string
+          readonly ts: Date
+          readonly properties: Record<string, unknown>
+          readonly matchesFilters: boolean
+        }>`
+          SELECT uuid, name, ts, properties, ${matchesFilters(sql, filters)} AS matches_filters FROM event
+          WHERE environment_id = ${environment.id} AND session_id = ${sessionId}
+          ORDER BY ts, received_at
+          LIMIT ${SESSION_EVENT_LIMIT}`
+        return {
+          ...toSummary(row, now),
+          referrer: row.referringDomain === null ? null : row.referrer,
+          utmSource: row.utmSource,
+          utmMedium: row.utmMedium,
+          utmCampaign: row.utmCampaign,
+          browser: row.browser,
+          os: row.os,
+          visitorId: identified ? row.visitorId : null,
+          timeline: events.map((e) => ({
+            id: e.uuid,
+            name: e.name,
+            timestamp: DateTime.fromDateUnsafe(e.ts),
+            properties: e.properties,
+            matchesFilters: e.matchesFilters
+          })),
+          truncated: row.events > events.length
+        }
+      }))
+
     return Queries.of({
       overview,
       top,
@@ -361,7 +487,9 @@ export class Queries extends Context.Service<Queries, {
       customEvents,
       customEvent,
       customEventBreakdown,
-      customEventStats
+      customEventStats,
+      sessions,
+      session
     })
   }))
 }
@@ -401,3 +529,54 @@ const toNumbers = (row: NumbersRow | undefined): OverviewNumbers => ({
 })
 
 const emptyStats: NumericStats = { count: 0, average: null, sum: null, min: null, max: null, median: null }
+
+/** A Session's summary row, as `sessionSummary` selects it. */
+interface SessionRow {
+  readonly id: string
+  readonly startedAt: Date
+  readonly lastSeenAt: Date
+  readonly events: number
+  readonly duration: number
+  readonly country: string | null
+  readonly device: string | null
+  readonly browser: string | null
+  readonly os: string | null
+  readonly visitorId: string | null
+  readonly entryPage: string | null
+  readonly referringDomain: string | null
+  readonly referrer: string | null
+  readonly utmSource: string | null
+  readonly utmMedium: string | null
+  readonly utmCampaign: string | null
+}
+
+/** Under this many minutes since the last Event, the Visitor counts as active. */
+const ACTIVE_MINUTES = 5
+
+const sessionStatus = (lastSeenAt: Date, now: DateTime.Utc): SessionStatus => {
+  const minutes = (DateTime.toEpochMillis(now) - lastSeenAt.getTime()) / 60_000
+  return minutes < ACTIVE_MINUTES ? "active" : minutes <= SESSION_TIMEOUT_MINUTES ? "idle" : "ended"
+}
+
+const toSummary = (row: SessionRow, now: DateTime.Utc): SessionSummary => ({
+  id: row.id,
+  startedAt: DateTime.fromDateUnsafe(row.startedAt),
+  lastSeenAt: DateTime.fromDateUnsafe(row.lastSeenAt),
+  duration: row.duration,
+  events: row.events,
+  bounce: row.events === 1,
+  entryPage: row.entryPage,
+  referringDomain: row.referringDomain,
+  country: row.country,
+  device: row.device,
+  status: sessionStatus(row.lastSeenAt, now)
+})
+
+/** A Recent sessions cursor (`SESSIONS_CURSOR`): the last row's activity time and ID, so the next page starts after it. */
+const formatCursor = (row: SessionRow) => `${row.lastSeenAt.toISOString()}_${row.id}`
+
+/** The schema has checked the cursor's shape. */
+const parseCursor = (cursor: string) => {
+  const i = cursor.indexOf("_")
+  return { lastSeenAt: new Date(cursor.slice(0, i)), id: cursor.slice(i + 1) }
+}

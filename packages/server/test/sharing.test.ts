@@ -106,6 +106,8 @@ layer(Harness.layer())("Project sharing", (it) => {
       yield* TestClock.setTime(Date.parse("2026-03-01T10:00:00Z"))
       yield* h.ingest(project.environments[0]!.key, [pageview(), pageview(), customEvent("game_completed", { score: 42, level: "hard" })], { ip: "198.51.100.7" })
 
+      const sessionId = (yield* owner.browser.client.reports.sessions({ params: { environmentId }, query: day })).sessions[0]!.id
+
       const reports = (api: Browser["client"]) => [
         api.reports.pageviewCount({ params: { environmentId }, query: allTime }),
         api.reports.overview({ params: { environmentId }, query: { period: "custom", from: "2026-03-01", to: "2026-03-01" } }),
@@ -114,10 +116,14 @@ layer(Harness.layer())("Project sharing", (it) => {
         api.customEvents.list({ params: { environmentId }, query: day }),
         api.customEvents.detail({ params: { environmentId }, query: { ...day, name: "game_completed" } }),
         api.customEvents.breakdown({ params: { environmentId }, query: { ...day, name: "game_completed", eventProperty: "level" } }),
-        api.customEvents.stats({ params: { environmentId }, query: { ...day, name: "game_completed", eventProperty: "score" } })
+        api.customEvents.stats({ params: { environmentId }, query: { ...day, name: "game_completed", eventProperty: "score" } }),
+        api.reports.sessions({ params: { environmentId }, query: day }),
+        api.reports.session({ params: { environmentId, sessionId }, query: {} })
       ] as const
 
-      const [count, overview, breakdown, keys, customEvents, detail, byLevel, score] = yield* Effect.all(reports(viewer.browser.client))
+      const [count, overview, breakdown, keys, customEvents, detail, byLevel, score, sessions, session] = yield* Effect.all(
+        reports(viewer.browser.client)
+      )
       assert.strictEqual(count.pageviews, 2)
       assert.strictEqual(overview.totals.pageviews, 2)
       assert.strictEqual(overview.totals.visitors, 1)
@@ -127,8 +133,10 @@ layer(Harness.layer())("Project sharing", (it) => {
       assert.strictEqual(detail.totals.count, 1)
       assert.deepStrictEqual(byLevel.rows, [{ value: "hard", count: 1 }])
       assert.strictEqual(score.totals.sum, 42)
+      assert.deepStrictEqual(sessions.sessions.map((s) => s.id), [sessionId])
+      assert.strictEqual(session.timeline.length, 3)
 
-      assert.deepStrictEqual(yield* tags(reports(stranger.browser.client)), Array(8).fill("EnvironmentNotFound"))
+      assert.deepStrictEqual(yield* tags(reports(stranger.browser.client)), Array(10).fill("EnvironmentNotFound"))
     }))
 
   it.effect("owners change roles and remove people; the last owner can't be removed or demoted", () =>

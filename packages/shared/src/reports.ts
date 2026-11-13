@@ -48,14 +48,14 @@ export type EventPropertyFilters = typeof EventPropertyFilters.Type
 /** In a query string, filters travel as one JSON-encoded `filters` parameter. */
 export const filtersField = { filters: Schema.optional(Schema.fromJsonString(EventPropertyFilters)) }
 
-const rangeFields = {
+export const rangeFields = {
   period: ReportPeriod,
   from: Schema.optional(LocalDate),
   to: Schema.optional(LocalDate),
   ...filtersField
 }
 
-const validRange = Schema.makeFilter((q: { readonly period: ReportPeriod; readonly from?: string | undefined; readonly to?: string | undefined }) =>
+export const validRange = Schema.makeFilter((q: { readonly period: ReportPeriod; readonly from?: string | undefined; readonly to?: string | undefined }) =>
   q.period !== "custom"
     ? true
     : q.from === undefined || q.to === undefined

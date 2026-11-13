@@ -14,6 +14,7 @@ import projectMembers from "./0004_project_members.ts"
 import visitorsSessions from "./0005_visitors_sessions.ts"
 import ingestRules from "./0006_ingest_rules.ts"
 import trackingMode from "./0007_tracking_mode.ts"
+import eventSessionIndex from "./0008_event_session_index.ts"
 
 export const migrations = PgMigrator.fromRecord({
   "0001_init": init,
@@ -22,7 +23,8 @@ export const migrations = PgMigrator.fromRecord({
   "0004_project_members": projectMembers,
   "0005_visitors_sessions": visitorsSessions,
   "0006_ingest_rules": ingestRules,
-  "0007_tracking_mode": trackingMode
+  "0007_tracking_mode": trackingMode,
+  "0008_event_session_index": eventSessionIndex
 })
 
 export const MigratorLive = PgMigrator.layer({ loader: migrations, table: "flock_migrations" }).pipe(

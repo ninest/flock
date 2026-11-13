@@ -45,7 +45,7 @@ export class Seed extends Context.Service<Seed, {
       } else {
         yield* projects.create({
           name: "Playground",
-          timeZone: "UTC",
+          timeZone: "America/New_York",
           owner: admin,
           environments: [
             { name: "production", key: PLAYGROUND_KEYS.production },
