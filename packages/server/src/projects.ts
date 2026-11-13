@@ -25,6 +25,7 @@ import {
 } from "@flock/shared"
 import { Context, Effect, Layer, Option } from "effect"
 import { isSqlError, type SqlError } from "effect/sql/SqlError"
+import { Ingest } from "./ingest.ts"
 import { makeEnvironmentKey, makeId } from "./keys.ts"
 
 interface Row {
@@ -149,6 +150,7 @@ export class Projects extends Context.Service<Projects, {
     Projects,
     Effect.gen(function*() {
       const sql = yield* PgClient.PgClient
+      const ingest = yield* Ingest
       /** Database failures are defects (500), not errors callers handle. */
       const orDie = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
         Effect.catchIf(effect, isSqlError, Effect.die) as Effect.Effect<A, Exclude<E, SqlError>, R>
@@ -216,14 +218,6 @@ export class Projects extends Context.Service<Projects, {
           Effect.as(new Environment({ id, name, key, allowedOrigins }))
         )
       }
-
-      /** Deletes Events and their UUIDs, so the same Events can be sent again. */
-      const deleteEventsOf = (environmentIds: ReadonlyArray<string>) =>
-        environmentIds.length === 0 ? Effect.void : Effect.all([
-          sql`DELETE FROM event WHERE environment_id IN ${sql.in(environmentIds)}`,
-          sql`DELETE FROM event_uuid WHERE environment_id IN ${sql.in(environmentIds)}`,
-          sql`DELETE FROM session WHERE environment_id IN ${sql.in(environmentIds)}`
-        ], { discard: true })
 
       const ensureOwner = (id: ProjectId, member: MemberId) =>
         sql`INSERT INTO project_member ${sql.insert({ projectId: id, memberId: member, role: "owner" })} ON CONFLICT DO NOTHING`.pipe(
@@ -302,7 +296,7 @@ export class Projects extends Context.Service<Projects, {
             const project = yield* ownProject(member, id)
             // Events have no foreign key (the table is partitioned), so delete them first.
             yield* sql.withTransaction(Effect.gen(function*() {
-              yield* deleteEventsOf(project.environments.map((e) => e.id))
+              yield* ingest.deleteEvents(project.environments.map((e) => e.id))
               yield* sql`DELETE FROM project WHERE id = ${id}`
             })).pipe(orDie)
           }),
@@ -329,7 +323,7 @@ export class Projects extends Context.Service<Projects, {
             const env = yield* ownEnvironment(member, id)
             yield* notProduction(env, "The production Environment can't be deleted")
             yield* sql.withTransaction(Effect.gen(function*() {
-              yield* deleteEventsOf([id])
+              yield* ingest.deleteEvents([id])
               yield* sql`DELETE FROM environment WHERE id = ${id}`
             })).pipe(orDie)
           }),
@@ -346,7 +340,7 @@ export class Projects extends Context.Service<Projects, {
           Effect.gen(function*() {
             const env = yield* ownEnvironment(member, id)
             yield* notProduction(env, "Events in the production Environment can't be deleted")
-            yield* deleteEventsOf([id]).pipe(orDie)
+            yield* ingest.deleteEvents([id]).pipe(orDie)
           }),
 
         environment,

@@ -21,6 +21,8 @@ export class Sessions extends Context.Service<Sessions, {
    * 30 minutes of `at` (either side, so a late Event still joins it), or a new one.
    */
   readonly assign: (input: SessionInput) => Effect.Effect<string, SqlError>
+  /** Deletes every Session in these Environments (with their Events, by Ingest). */
+  readonly deleteAll: (environmentIds: ReadonlyArray<string>) => Effect.Effect<void, SqlError>
 }>()("flock/Sessions") {
   static readonly layer = Layer.effect(
     Sessions,
@@ -49,7 +51,12 @@ export class Sessions extends Context.Service<Sessions, {
         return id
       }, (effect) => sql.withTransaction(effect))
 
-      return Sessions.of({ assign })
+      const deleteAll = (environmentIds: ReadonlyArray<string>) =>
+        environmentIds.length === 0
+          ? Effect.void
+          : sql`DELETE FROM session WHERE environment_id IN ${sql.in(environmentIds)}`.pipe(Effect.asVoid)
+
+      return Sessions.of({ assign, deleteAll })
     })
   )
 }

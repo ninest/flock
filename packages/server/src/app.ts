@@ -15,8 +15,11 @@ import { Sessions } from "./sessions.ts"
 import { Visitors } from "./visitors.ts"
 
 export const AppLive = (databaseUrl: Redacted.Redacted<string>) =>
-  Layer.mergeAll(Ingest.layer, Queries.layer, Seed.layer, EventPartitions.maintenance, AdminBootstrap).pipe(
-    Layer.provideMerge(Layer.mergeAll(Projects.layer, Visitors.layer, Sessions.layer)),
+  Layer.mergeAll(Queries.layer, Seed.layer, EventPartitions.maintenance, AdminBootstrap).pipe(
+    Layer.provideMerge(Projects.layer),
+    // Ingest owns Events (and, through Sessions, their Sessions); Projects deletes them through it.
+    Layer.provideMerge(Ingest.layer),
+    Layer.provideMerge(Layer.mergeAll(Visitors.layer, Sessions.layer)),
     Layer.provideMerge(Enrichment.layer),
     Layer.provideMerge(EventPartitions.layer),
     Layer.provideMerge(BetterAuth.layer(databaseUrl)),

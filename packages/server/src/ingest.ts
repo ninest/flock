@@ -7,6 +7,7 @@
 import { PgClient } from "@effect/sql-pg"
 import { type IngestBatch, type IngestEvent, type IngestRejection, type IngestResult, OriginNotAllowed, type TrackingMode, UnknownKey } from "@flock/shared"
 import { Array as Arr, Context, DateTime, Effect, Layer, Result } from "effect"
+import type { SqlError } from "effect/sql/SqlError"
 import { Enrichment, type RequestContext } from "./enrichment.ts"
 import { EventPartitions } from "./event-partitions.ts"
 import { ANON_DISTINCT_ID, eventTime, IDENTIFY, isBot, originAllowed, rawUuid, validateEvent } from "./ingest-rules.ts"
@@ -21,6 +22,11 @@ interface ValidEvent {
 
 export class Ingest extends Context.Service<Ingest, {
   readonly send: (batch: IngestBatch, request: RequestContext) => Effect.Effect<IngestResult, UnknownKey | OriginNotAllowed>
+  /**
+   * Deletes every Event in these Environments, with their UUIDs (so the same Events can be sent
+   * again) and Sessions. Joins the caller's transaction, if any.
+   */
+  readonly deleteEvents: (environmentIds: ReadonlyArray<string>) => Effect.Effect<void, SqlError>
   /** What the browser script needs to know about an Environment key's Project. */
   readonly config: (key: string) => Effect.Effect<{ readonly trackingMode: TrackingMode }, UnknownKey>
 }>()("flock/Ingest") {
@@ -161,7 +167,14 @@ export class Ingest extends Context.Service<Ingest, {
         return { accepted, rejected }
       }, (effect) => Effect.catchTag(effect, "SqlError", Effect.die))
 
-      return Ingest.of({ send, config })
+      const deleteEvents = (environmentIds: ReadonlyArray<string>) =>
+        environmentIds.length === 0 ? Effect.void : Effect.all([
+          sql`DELETE FROM event WHERE environment_id IN ${sql.in(environmentIds)}`,
+          sql`DELETE FROM event_uuid WHERE environment_id IN ${sql.in(environmentIds)}`,
+          sessions.deleteAll(environmentIds)
+        ], { discard: true })
+
+      return Ingest.of({ send, config, deleteEvents })
     })
   )
 }
