@@ -3,6 +3,7 @@ import type { Invite, Member } from "@flock/shared"
 import { DateTime } from "effect"
 import { type FormEvent, useState } from "react"
 import { request } from "./api.ts"
+import { Shell } from "./shell.tsx"
 import { usePoll } from "./use-poll.ts"
 
 /** The link an invited person opens; the sign-in page passes the token on sign-up. */
@@ -18,13 +19,15 @@ export const InstancePage = ({ me }: { me: Member }) => {
     f().then(reload, (e: unknown) => setError(String((e as { message?: string }).message ?? e)))
   }
   return (
-    <>
-      <h2>Instance</h2>
-      {error && <p role="alert" style={{ color: "#b00020" }}>{error}</p>}
-      <OpenSignUp version={version} act={act} />
-      <Invites version={version} act={act} />
-      <Members me={me} version={version} act={act} />
-    </>
+    <Shell section="instance">
+      <div className="page narrow">
+        <h1>Instance</h1>
+        {error && <p role="alert" className="alert">{error}</p>}
+        <OpenSignUp version={version} act={act} />
+        <Invites version={version} act={act} />
+        <Members me={me} version={version} act={act} />
+      </div>
+    </Shell>
   )
 }
 
@@ -36,8 +39,8 @@ interface SectionProps {
 const OpenSignUp = ({ act, version }: SectionProps) => {
   const { data } = usePoll(() => request((api) => api.instance.settings()), [version])
   return (
-    <section>
-      <h3>Sign-up</h3>
+    <section className="settings-section">
+      <h2>Sign-up</h2>
       <label>
         <input
           type="checkbox"
@@ -70,33 +73,34 @@ const Invites = ({ act, version }: SectionProps) => {
   }
 
   return (
-    <section>
-      <h3>Invites</h3>
-      <form onSubmit={create} style={{ display: "flex", gap: 8 }}>
+    <section className="settings-section">
+      <h2>Invites</h2>
+      <form onSubmit={create} className="inline-form">
         <input name="note" required placeholder="Who is it for?" aria-label="Who is the Invite for?" />
-        <button type="submit">Create Invite</button>
+        <button type="submit" className="btn">Create Invite</button>
       </form>
       {created && (
-        <p>
-          Send this link to {created.note}. It works once, and is only shown now:
-          <br />
-          <code style={{ wordBreak: "break-all" }}>{created.link}</code>
-        </p>
+        <div>
+          <p className="dim">Send this link to {created.note}. It works once, and is only shown now:</p>
+          <div className="key">{created.link}</div>
+        </div>
       )}
-      <ul>
-        {data?.map((invite) => <InviteRow key={invite.id} invite={invite} act={act} />)}
-      </ul>
+      {data && data.length > 0 && (
+        <ul className="people">
+          {data.map((invite) => <InviteRow key={invite.id} invite={invite} act={act} />)}
+        </ul>
+      )}
     </section>
   )
 }
 
 const InviteRow = ({ act, invite }: { invite: Invite; act: SectionProps["act"] }) => (
   <li>
-    {invite.note} · created {DateTime.formatIsoDate(invite.createdAt)} ·{" "}
+    <span>{invite.note}<br /><span className="dim">Created {DateTime.formatIsoDate(invite.createdAt)}</span></span>
     {invite.usedAt
-      ? `used by ${invite.usedBy}`
+      ? <span className="dim">Used by {invite.usedBy}</span>
       : (
-        <button type="button" onClick={() => act(() => request((api) => api.instance.revokeInvite({ params: { inviteId: invite.id } })))}>
+        <button type="button" className="btn" onClick={() => act(() => request((api) => api.instance.revokeInvite({ params: { inviteId: invite.id } })))}>
           Revoke
         </button>
       )}
@@ -106,25 +110,27 @@ const InviteRow = ({ act, invite }: { invite: Invite; act: SectionProps["act"] }
 const Members = ({ act, me, version }: SectionProps & { me: Member }) => {
   const { data } = usePoll(() => request((api) => api.instance.members()), [version])
   return (
-    <section>
-      <h3>Members</h3>
-      <ul>
+    <section className="settings-section">
+      <h2>Members</h2>
+      <ul className="people">
         {data?.map((member) => (
           <li key={member.id}>
-            {member.name} &lt;{member.email}&gt;{member.isAdmin ? " (Instance admin)" : ""}
+            <span>
+              {member.name}
+              <br />
+              <span className="dim">{member.email}{member.isAdmin ? ", Instance admin" : ""}</span>
+            </span>
             {member.id !== me.id && (
-              <>
-                {" "}
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!confirm(`Remove ${member.email}? They will be signed out and can't sign in again.`)) return
-                    act(() => request((api) => api.instance.removeMember({ params: { memberId: member.id } })))
-                  }}
-                >
-                  Remove
-                </button>
-              </>
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={() => {
+                  if (!confirm(`Remove ${member.email}? They will be signed out and can't sign in again.`)) return
+                  act(() => request((api) => api.instance.removeMember({ params: { memberId: member.id } })))
+                }}
+              >
+                Remove
+              </button>
             )}
           </li>
         ))}
