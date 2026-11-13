@@ -1,13 +1,14 @@
-// PROTOTYPE. The landing hero's drive: John's car through air-city's City, in short shots with the car always in the
+// PROTOTYPE. The landing hero's drive: Sam's car through air-city's City, in short shots with the car always in the
 // middle of the frame. Renders one frame per call (window.renderAt(seconds)) so capture.mjs can step it.
 //   ?w=1280&h=720   canvas size          ?ps=3      pixel size of the low-res render
 //   ?t=4.5          show that moment     ?play=1    play in real time
 //   ?over=x,z,height  look straight down at a tile (for laying out routes)
+//   ?blur=9&band=0.16&low=0.07&lowEnd=0.27&lowR=1.7   the tilt-shift (see the blur shader); window.tune({ low: 0.1 }) changes it live
 import { THREE } from '/air/src/engine/three-setup.js';
 import { GB } from '/air/src/engine/geometry.js';
 import { cityMap } from '/air/src/story/maps.js';
 import { defaultStyle } from '/air/src/world/tilemap.js';
-import { car } from '/air/src/assets/props.js';
+import { car, train } from '/air/src/assets/props.js';
 import { SCENES, SHOT, TRAFFIC, CAR_SCALE } from './route.js';
 
 const q = new URLSearchParams(location.search), num = (k, d) => (q.has(k) ? +q.get(k) : d);
@@ -70,14 +71,46 @@ const heightAt = (x, z) => { const f = map.heightAt(Math.floor(x), Math.floor(z)
 
 // ---- cars: each its own mesh, built pointing along +x at the origin
 function carMesh(look) {
-  const g = new GB(); car(g, 0, 0, 1, 0, look, 0);
-  const me = new THREE.Mesh(g.geo(), mat); me.castShadow = true; me.receiveShadow = true; me.scale.setScalar(CAR_SCALE); scene.add(me); return me;
+  const g = new GB(), tram = look.kind === 'tram';
+  if (tram) train(g, 0, 0, 'x', 1, 'tram', map.trains?.tram, 0.012); else car(g, 0, 0, 1, 0, look, 0);   // a tram in the city's livery, true to size for its track and wire
+  const me = new THREE.Mesh(g.geo(), mat); me.castShadow = true; me.receiveShadow = true; me.scale.setScalar(tram ? 1 : CAR_SCALE); scene.add(me); return me;
 }
-function put(me, p) {
-  me.visible = true; me.position.set(p.x, heightAt(p.x, p.z) + 0.012, p.z); me.rotation.set(0, Math.atan2(-p.uz, p.ux), 0);
-  // nose up or down a ramp
-  const d = 0.08, dy = heightAt(p.x + p.ux * d, p.z + p.uz * d) - heightAt(p.x - p.ux * d, p.z - p.uz * d);
-  me.rotateZ(Math.atan2(dy, 2 * d));
+// Wheels ride RIDE above the road's base height: clear of the asphalt and its paint. `floor` (Sam only) is what else is
+// underfoot, for a car that leaves the road: a driveway apron and the sidewalk stand higher than the asphalt.
+const RIDE = 0.012, AXLE = 0.075;
+function put(me, p, floor) {
+  // the height under each axle, taken over a wheel's length so a curb is climbed rather than jumped
+  const under = (x, z) => Math.max(heightAt(x, z) + RIDE, floor ? floor(x, z) + 0.001 : -1e9);
+  const axle = a => { let y = 0; for (let k = -2; k <= 2; k++) { const o = a + k * 0.015; y += under(p.x + p.ux * o, p.z + p.uz * o); } return y / 5; };
+  const f = axle(AXLE), r = axle(-AXLE);
+  me.visible = true; me.position.set(p.x, (f + r) / 2, p.z); me.rotation.set(0, Math.atan2(-p.uz, p.ux), 0);
+  // nose up or down a ramp or a curb
+  me.userData.tilt = Math.atan2(f - r, 2 * AXLE); me.rotateZ(me.userData.tilt);
+}
+// The top of whatever lies flat under (x, z) within `box` of a path: the highest face of the city no more than a curb
+// above the road there (so not a roof, a tree or a bridge overhead). Triangles are gathered once per shot.
+function floorOf(P, margin = 0.3) {
+  let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
+  for (const [x, z] of P.pts) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+  x0 -= margin; x1 += margin; z0 -= margin; z1 += margin;
+  const T = [];
+  for (const { p } of Object.values(SRC)) for (let i = 0; i < p.length; i += 9) {
+    const ax = p[i], az = p[i + 2], bx = p[i + 3], bz = p[i + 5], cx = p[i + 6], cz = p[i + 8];
+    if (Math.max(ax, bx, cx) < x0 || Math.min(ax, bx, cx) > x1 || Math.max(az, bz, cz) < z0 || Math.min(az, bz, cz) > z1) continue;
+    if (Math.abs((bx - ax) * (cz - az) - (cx - ax) * (bz - az)) < 1e-9) continue;   // a wall: no area seen from above
+    T.push(ax, p[i + 1], az, bx, p[i + 4], bz, cx, p[i + 7], cz);
+  }
+  return (x, z) => {
+    const top = heightAt(x, z) + 0.06; let y = -1e9;
+    for (let i = 0; i < T.length; i += 9) {
+      const ax = T[i], az = T[i + 2], bx = T[i + 3], bz = T[i + 5], cx = T[i + 6], cz = T[i + 8];
+      const den = (bz - cz) * (ax - cx) + (cx - bx) * (az - cz), u = ((bz - cz) * (x - cx) + (cx - bx) * (z - cz)) / den, v = ((cz - az) * (x - cx) + (ax - cx) * (z - cz)) / den, w = 1 - u - v;
+      if (u < 0 || v < 0 || w < 0) continue;
+      const h = u * T[i + 1] + v * T[i + 4] + w * T[i + 7];
+      if (h <= top && h > y) y = h;
+    }
+    return y;
+  };
 }
 
 // ---- paths: waypoints joined by straight runs with rounded corners, walked by distance
@@ -103,19 +136,19 @@ function at(P, s) {
 // distance along a path at time u in [0, 1]: 'go' sets off from rest, 'stop' comes to rest, otherwise steady
 const EASE = { steady: u => u, go: u => u * u * (2 - u), stop: u => 1 - (1 - u) * (1 - u) * (1 + u) };
 
-const john = carMesh({ kind: 'hatch', paint: '#d06a25' });
-const scenes = SCENES.map(s => { const P = path(s.path, s.radius), mid = at(P, P.total / 2); return { ...s, P, mid }; });
+const sam = carMesh({ kind: 'hatch', paint: '#d06a25' });
+const scenes = SCENES.map(s => { const P = path(s.path, s.radius), mid = at(P, P.total / 2); return { ...s, P, mid, floor: floorOf(P) }; });
 const others = TRAFFIC.map(t => ({ from: 0, to: 1, ...t, P: path(t.path), me: carMesh(t.look) }));
 const DUR = scenes.length * SHOT;
 
 const mix = (a, b, t) => a + (b - a) * t, sm = t => t * t * (3 - 2 * t);
-function frame(T) {
+function frame(T, render = true) {
   T = ((T % DUR) + DUR) % DUR;
   const i = Math.min(scenes.length - 1, Math.floor(T / SHOT)), s = scenes[i], u = (T - i * SHOT) / SHOT;
   const p = at(s.P, s.P.total * (EASE[s.ease] || EASE.steady)(u));
   const far = s.far || FAR;
   cityAround(s.mid.x, s.mid.z, far); scene.fog.near = Math.max(far * 0.45, s.cam.dist * 1.6); scene.fog.far = far - 1;
-  put(john, p);
+  put(sam, p, s.floor);
   for (const o of others) {
     if (o.scene !== i) { o.me.visible = false; continue; }
     const d = o.from + (o.to - o.from) * u;   // fractions of its path at the shot's start and end
@@ -133,7 +166,7 @@ function frame(T) {
   const mid = s.mid, m = 7;
   sun.position.set(mid.x + 34, 58, mid.z + 14); sun.target.position.set(mid.x, 0, mid.z); sun.target.updateMatrixWorld();
   Object.assign(sun.shadow.camera, { left: -m, right: m, top: m, bottom: -m, near: 1, far: 200 }); sun.shadow.camera.updateProjectionMatrix();
-  draw();
+  if (render) draw();
 }
 let focusDist = 5;
 
@@ -161,21 +194,24 @@ const outline = new THREE.ShaderMaterial({
       gl_FragColor=vec4(mix(c,c*0.42,step(3.2*lin*pxk,m*dl)*step(d,0.99999)),1.0);
     }`,
 });
-const BLUR = num('blur', 9), BAND = num('band', 0.16);
+// Sharp within `band` of the middle row, fully blurred at the top edge. Below the middle the blur starts sooner (`low`)
+// and is whole by `lowEnd`, with `lowR` times the radius: the page sets its headline and report card on the bottom third.
+const BLUR = num('blur', 9), BAND = num('band', 0.16), LOW = num('low', 0.07), LOW_END = num('lowEnd', 0.27), LOW_R = num('lowR', 1.7);
 const blur = new THREE.ShaderMaterial({
-  uniforms: { tColor: { value: null }, tDepth: { value: rt.depthTexture }, size: { value: new THREE.Vector2(W, H) }, dir: { value: new THREE.Vector2(1, 0) }, cn: { value: cam.near }, cf: { value: cam.far }, focus: { value: 5 }, maxR: { value: BLUR }, band: { value: BAND }, grade: { value: 0 } },
+  uniforms: { tColor: { value: null }, tDepth: { value: rt.depthTexture }, size: { value: new THREE.Vector2(W, H) }, dir: { value: new THREE.Vector2(1, 0) }, cn: { value: cam.near }, cf: { value: cam.far }, focus: { value: 5 }, maxR: { value: BLUR }, band: { value: BAND }, low: { value: LOW }, lowEnd: { value: LOW_END }, lowR: { value: LOW_R }, grade: { value: 0 } },
   vertexShader: VS, depthTest: false, depthWrite: false,
   fragmentShader: `
-    uniform sampler2D tColor; uniform sampler2D tDepth; uniform vec2 size; uniform vec2 dir; uniform float cn; uniform float cf; uniform float focus; uniform float maxR; uniform float band; uniform float grade;
+    uniform sampler2D tColor; uniform sampler2D tDepth; uniform vec2 size; uniform vec2 dir; uniform float cn; uniform float cf; uniform float focus; uniform float maxR; uniform float band; uniform float low; uniform float lowEnd; uniform float lowR; uniform float grade;
     void main(){
       vec2 uv=gl_FragCoord.xy/size;
       // blur by screen height (the classic tilt-shift band) and by how far the depth is from the car's
       float d=texture2D(tDepth,uv).r, lin=cn*cf/(cf-d*(cf-cn));
-      float byY=smoothstep(band,0.5,abs(uv.y-0.5));
+      float below=0.5-uv.y;   // uv.y = 0 is the bottom of the frame
+      float byY=below>0.0 ? lowR*smoothstep(low,lowEnd,below) : smoothstep(band,0.5,-below);
       float byZ=smoothstep(0.12,0.9,abs(lin-focus)/focus);
       float r=maxR*max(byY,byZ*0.8);
       vec3 c=vec3(0.0); float w=0.0;
-      for(int i=-6;i<=6;i++){ float f=float(i)/6.0, g=exp(-2.5*f*f); c+=texture2D(tColor,uv+dir*f*r/size).rgb*g; w+=g; }
+      for(int i=-10;i<=10;i++){ float f=float(i)/10.0, g=exp(-2.5*f*f); c+=texture2D(tColor,uv+dir*f*r/size).rgb*g; w+=g; }
       c/=w;
       if(grade>0.5){
         float l=dot(c,vec3(0.299,0.587,0.114));
@@ -200,8 +236,11 @@ function draw() {
 // ---- driving it
 window.META = { duration: DUR, shot: SHOT, scenes: scenes.map(s => s.name) };
 window.renderAt = T => { frame(T); return true; };
+window.tune = o => { for (const k of ['band', 'low', 'lowEnd', 'lowR']) if (o[k] != null) blur.uniforms[k].value = +o[k]; if (o.blur != null) blur.uniforms.maxR.value = +o.blur; };
+// where Sam's car stands at T, without drawing: [height above the road's base, nose-up angle]
+window.poseAt = T => { frame(T, false); return [sam.position.y - heightAt(sam.position.x, sam.position.z), sam.userData.tilt]; };
 window.overAt = (x, z, h = 14) => {
-  john.visible = false; scene.fog.far = 1e4; scene.fog.near = 1e3;
+  sam.visible = false; scene.fog.far = 1e4; scene.fog.near = 1e3;
   for (const o of others) o.me.visible = false;
   cityAround(x, z, Math.max(20, h * 1.2));
   cam.position.set(x, h, z + 0.001); cam.lookAt(x, 0, z); cam.updateMatrixWorld(); focusDist = h;

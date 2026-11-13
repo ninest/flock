@@ -11,6 +11,8 @@ const PATCHES = {
   '/air/src/assets/stroads.js': ['const carAt = (a, c, dir, k) => {', 'const carAt = (a, c, dir, k) => { return;'],
   '/air/src/assets/bridges.js': ['function cars(g, x, z, axis) {', 'function cars(g, x, z, axis) { return;'],
   '/air/src/assets/trenches.js': ['if (r > 0.45) continue;', 'continue;'],
+  // the trams standing on the retail arterial by the shops shot (x 66 to 80): one drives through it instead
+  '/air/src/assets/trams.js': ['if (flat && hash(t.x, t.z, 31) < 0.28) {', 'if (flat && hash(t.x, t.z, 31) < 0.28 && !(t.road && t.z === 10 && t.x >= 66 && t.x <= 80)) {'],
 };
 
 export function serve(port = +(process.env.PORT || 2190)) {
@@ -22,7 +24,7 @@ export function serve(port = +(process.env.PORT || 2190)) {
       if (!file.startsWith(root)) { res.writeHead(403).end(); return; }
       try {
         let body = await readFile(file);
-        // air-city stands cars in the lanes of stroads and highways; here traffic moves, so those go (route.js TRAFFIC)
+        // air-city stands cars in the lanes of stroads and highways, and trams on their track; here traffic moves, so those go (route.js TRAFFIC)
         const patch = PATCHES[p];
         if (patch) { const src = String(body); body = src.replace(patch[0], patch[1]); if (body === src) throw new Error('patch no longer applies: ' + p); }
         res.writeHead(200, { 'content-type': types[extname(file)] || 'application/octet-stream', 'cache-control': 'no-store' }).end(body);

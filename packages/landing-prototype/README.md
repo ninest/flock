@@ -1,6 +1,6 @@
 # Landing page prototype (throwaway)
 
-**Question:** what should the `flock.misc.page` landing page look like, and how should the hero tell the "John is being tracked" joke?
+**Question:** what should the `flock.misc.page` landing page look like, and how should the hero tell the "Sam is being tracked" joke? (Sam was John until round three.)
 
 Three rounds so far, each narrowing the last:
 
@@ -29,4 +29,4 @@ node shot.mjs "t=4.5" /tmp/frame.png  # one still, for tuning a shot
 node server.mjs                       # the scene in a browser: http://hel:2190/?play=1
 ```
 
-`capture/route.js` is the whole edit: each shot's path, camera and the traffic round John. `capture/scene.js` draws it with air-city's renderer plus a tilt-shift pass. `capture/server.mjs` removes air-city's parked-in-lane cars so the traffic can move.
+`capture/route.js` is the whole edit: each shot's path, camera and the traffic round Sam. `capture/scene.js` draws it with air-city's renderer plus a tilt-shift pass, which blurs the bottom of the frame sooner and harder than the top (`low`, `lowEnd`, `lowR`) because the page sets its headline and report card there. Sam's car rides on whatever is under it (a driveway apron, the sidewalk), not only the road. `capture/server.mjs` removes air-city's parked-in-lane cars, and the trams standing by the shops, so the traffic (a tram included) can move.

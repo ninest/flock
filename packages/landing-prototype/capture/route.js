@@ -1,9 +1,9 @@
-// PROTOTYPE. John's morning, one shot per beat. Map coordinates are air-city City tiles: +x east, +z south; driving
+// PROTOTYPE. Sam's morning, one shot per beat. Map coordinates are air-city City tiles: +x east, +z south; driving
 // on the right, so heading east the car keeps south of the centre line and heading north it keeps east of it.
 // far: how many tiles of city round the shot are drawn (fog hides the edge).
 // cam: looked at from `yaw` degrees round the car (0 from the south, 90 from the east), `pitch` down, `dist` tiles away.
 export const SHOT = 3;   // seconds per shot
-export const CAR_SCALE = 1.3;   // cars a little bigger than true, so John reads at this distance
+export const CAR_SCALE = 1.3;   // cars a little bigger than true, so Sam reads at this distance
 
 // The camera changes with the beat: close and low while he leaves the house, straight down on the roads where the
 // traffic round him is the picture, back down to street level for the shop and the office.
@@ -37,8 +37,8 @@ export const TRAFFIC = [
   c(2, [[53.85, 16.2], [53.85, 22]], 'sedan', 2), c(2, [[53.7, 17.4], [53.7, 23]], 'minivan', 4), c(2, [[53.55, 15.5], [53.55, 21]], 'sedan', 1, 0, 0.9),
   // street: a neighbour heading the other way
   c(1, [[45.2, 7.4], [41.2, 7.4]], 'pickup', 4, 0.1, 0.9),
-  // shops: one coming the other way in the westbound curb lane
-  c(3, [[75.6, 10.275], [71.9, 10.275]], 'suv', 3),
+  // shops: one coming the other way in the westbound curb lane, and a tram on the westbound track (z 10.42; eastbound 10.58)
+  c(3, [[75.6, 10.275], [71.9, 10.275]], 'suv', 3), c(3, [[74.0, 10.42], [72.9, 10.42]], 'tram', 0),
   // highway: eastbound lanes z 4.63 / 4.74 / 4.85, westbound 4.37 / 4.26 / 4.15
   c(4, [[72.9, 4.63], [78.2, 4.63]], 'sedan', 1), c(4, [[71.4, 4.85], [75.2, 4.85]], 'van', 0), c(4, [[73.6, 4.85], [77.3, 4.85]], 'sedan', 4),
   c(4, [[78.5, 4.37], [71.5, 4.37]], 'suv', 6), c(4, [[81, 4.26], [74, 4.26]], 'coupe', 5), c(4, [[76, 4.15], [70, 4.15]], 'pickup', 2), c(4, [[83, 4.37], [76, 4.37]], 'sedan', 7),
