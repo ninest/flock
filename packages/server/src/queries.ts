@@ -536,7 +536,7 @@ const toNumbers = (row: NumbersRow | undefined): OverviewNumbers => ({
 
 const emptyStats: NumericStats = { count: 0, average: null, sum: null, min: null, max: null, median: null }
 
-/** A Session's summary row, as `sessionSummary` selects it. */
+/** A ranked-list row, as `top` selects it. */
 interface TopRowRow {
   readonly value: string | null
   readonly visitors: number
@@ -546,6 +546,7 @@ interface TopRowRow {
 /** A ranked-list row, with only the optional columns its report fills in. */
 const toTopRow = ({ pageviews, ...row }: TopRowRow): TopRow => pageviews === null ? row : { ...row, pageviews }
 
+/** A Session's summary row, as `sessionSummary` selects it. */
 interface SessionRow {
   readonly id: string
   readonly startedAt: Date
