@@ -1,0 +1,15 @@
+{
+  "duration": 18,
+  "shot": 3,
+  "scenes": [
+    "home",
+    "street",
+    "stroad",
+    "shops",
+    "highway",
+    "work"
+  ],
+  "fps": 20,
+  "width": 1280,
+  "height": 720
+}

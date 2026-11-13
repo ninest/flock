@@ -8,7 +8,8 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r --if-present test",
     "build": "pnpm --filter @flock/dashboard build && pnpm --filter @flock/script build",
-    "dev": "make dev"
+    "dev": "make dev",
+    "landing:prototype": "node packages/landing-prototype/serve.mjs"
   },
   "devDependencies": {
     "typescript": "6.0.3"

@@ -1,0 +1,116 @@
+/* PROTOTYPE. The surveillance-feed page: dark, a plain sans for everything people read, monospace only for the
+   machine's own words (event names, snippets). */
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+h1, h2, h3, p, ul, ol, dl, dd, figure { margin: 0; padding: 0; }
+ul, ol { list-style: none; }
+a { color: inherit; }
+button { font: inherit; color: inherit; }
+video { display: block; }
+:root {
+  --bg: #0c0e0d; --panel: #141816; --panel2: #1a1f1c; --ink: #eef2ea; --dim: #9aa69a; --line: #29312c; --hot: #ff7a2f; --ok: #9be36a; --rec: #ff4b3e;
+  --sans: "Inter", "Helvetica Neue", Helvetica, Arial, ui-sans-serif, system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+}
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
+.mono { font-family: var(--mono); }
+.btn { display: inline-block; padding: 12px 18px; border-radius: 8px; background: var(--ink); color: #0c0e0d; font-weight: 650; text-decoration: none; }
+.btn:hover { background: var(--hot); }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--hot); outline-offset: 3px; border-radius: 4px; }
+
+/* ---------- hero ---------- */
+.hero { position: relative; height: 100svh; min-height: 580px; overflow: hidden; background: #111; }
+.hero video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.shade { position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(180deg, rgba(8,10,9,.6) 0, rgba(8,10,9,0) 20%, rgba(8,10,9,0) 46%, rgba(8,10,9,.88) 100%),
+    repeating-linear-gradient(0deg, rgba(0,0,0,.09) 0 1px, transparent 1px 3px); }
+.hero-top { position: absolute; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; padding: 18px 24px; }
+.logo { display: inline-flex; align-items: center; gap: 10px; font-weight: 700; font-size: 20px; letter-spacing: -.02em; color: #fff; text-decoration: none; }
+.logo i { width: 11px; height: 11px; border-radius: 50%; background: var(--rec); box-shadow: 0 0 0 4px rgba(255,75,62,.22); animation: blink 1.4s steps(2) infinite; }
+@keyframes blink { 50% { opacity: .2; } }
+.gh { font-weight: 600; font-size: 15px; color: #fff; text-decoration: none; padding: 8px 14px; border-radius: 999px; background: rgba(12,14,13,.55); border: 1px solid rgba(255,255,255,.22); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+.gh:hover { background: #fff; color: #0c0e0d; }
+
+/* the car is at the centre of the frame, so the reticle is too; the tag floats clear above it */
+.mark { position: absolute; left: 50%; top: 50%; width: 0; height: 0; pointer-events: none; }
+.reticle { position: absolute; left: -46px; top: -46px; width: 92px; height: 92px; }
+.reticle i { position: absolute; width: 16px; height: 16px; border: 2px solid var(--hot); }
+.reticle i:nth-child(1) { left: 0; top: 0; border-right: 0; border-bottom: 0; } .reticle i:nth-child(2) { right: 0; top: 0; border-left: 0; border-bottom: 0; }
+.reticle i:nth-child(3) { left: 0; bottom: 0; border-right: 0; border-top: 0; } .reticle i:nth-child(4) { right: 0; bottom: 0; border-left: 0; border-top: 0; }
+.cut .reticle { animation: lock .45s cubic-bezier(.2,.8,.2,1); }
+@keyframes lock { from { transform: scale(2.2); opacity: 0; } }
+.tag { position: absolute; left: 0; bottom: 74px; transform: translateX(-50%); display: flex; align-items: baseline; gap: 8px; padding: 5px 10px; border-radius: 6px; white-space: nowrap;
+  background: rgba(255,122,47,.78); color: #170a02; backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+.tag::after { content: ""; position: absolute; left: 50%; top: 100%; width: 2px; height: 22px; margin-left: -1px; background: rgba(255,122,47,.78); }
+.tag b { font-size: 12px; letter-spacing: .06em; } .tag span { font: 11px/1.4 var(--mono); }
+
+.pitch { position: absolute; left: 24px; bottom: 28px; width: min(48vw, 600px); }
+.pitch h1 { font-size: clamp(36px, 5.2vw, 68px); line-height: 1.02; font-weight: 750; letter-spacing: -.035em; color: #fff; text-wrap: balance; }
+.pitch p { margin-top: 16px; max-width: 44ch; color: #d6ded3; font-size: 17px; }
+.cta { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+.more { font-size: 15px; color: #d6ded3; }
+
+/* the report card: earlier entries, then this one; the count sits top right */
+.report { position: absolute; right: 24px; bottom: 28px; width: min(36vw, 330px); padding: 12px 14px; border-radius: 10px; font-size: 13px; line-height: 1.45;
+  background: rgba(12,14,13,.8); border: 1px solid rgba(255,255,255,.16); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+.report-n { position: absolute; right: 14px; top: 12px; font-size: 11.5px; font-weight: 650; color: var(--dim); font-variant-numeric: tabular-nums; }
+.report ol { display: grid; gap: 2px; margin-bottom: 8px; padding: 0 40px 8px 0; border-bottom: 1px solid rgba(255,255,255,.14); font-size: 12px; color: var(--dim); }
+.report ol:empty { display: none; }
+.report ol time { display: inline-block; width: 68px; margin-right: 10px; font-variant-numeric: tabular-nums; }
+.report dl > div { display: grid; grid-template-columns: 68px 1fr; gap: 10px; padding: 3px 0; }
+.report dl > div:first-child dd { padding-right: 40px; }
+.report ol:not(:empty) + dl > div:first-child dd { padding-right: 0; }
+.report dt { color: var(--dim); } .report dd.mono { font-size: 12px; overflow-wrap: anywhere; color: var(--ok); }
+.report dd[data-l] { font-weight: 650; font-size: 14px; }
+.report.cut dd { animation: type .5s steps(18); }
+@keyframes type { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+
+/* ---------- below the hero ---------- */
+.below { max-width: 1160px; margin: 0 auto; padding: 88px 24px 96px; }
+.statement { font-size: clamp(26px, 3.6vw, 44px); line-height: 1.14; font-weight: 650; letter-spacing: -.03em; max-width: 24ch; text-wrap: balance; }
+.below section { margin-top: 64px; }
+.below h2 { font-size: 15px; font-weight: 650; color: var(--dim); margin-bottom: 18px; }
+.below h3 { font-size: 18px; font-weight: 650; line-height: 1.25; letter-spacing: -.01em; }
+.below li p, .below dd { margin-top: 6px; color: #b4bfb2; font-size: 15px; line-height: 1.5; }
+.below code { display: block; font: 13px/1.5 var(--mono); color: var(--ok); overflow-wrap: anywhere; }
+.end { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 16px; margin-top: 88px; padding-top: 28px; border-top: 1px solid var(--line); color: var(--dim); }
+.tile { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 22px; }
+
+/* capabilities: a 4-column bento board; wide tiles take two or three columns, the tall one two rows */
+.feats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-auto-flow: dense; gap: 12px; }
+.feats .tile { display: flex; flex-direction: column; justify-content: flex-end; min-height: 190px; }
+.feats .tile.wide { grid-column: span 2; } .feats .tile.wide3 { grid-column: span 3; } .feats .tile.tall { grid-row: span 2; }
+.feats .stat { margin-bottom: auto; font-size: clamp(34px, 3.4vw, 46px); font-weight: 750; letter-spacing: -.04em; line-height: 1; color: var(--hot); }
+.feats code { margin-bottom: auto; align-self: flex-start; max-width: 100%; padding: 8px 10px; border-radius: 8px; background: #0c0e0d; border: 1px solid var(--line);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; }
+.feats .tile > :first-child:not(h3) + h3 { margin-top: 28px; }
+.mini { margin-bottom: auto; display: grid; gap: 0; font: 12.5px/1.4 var(--mono); }
+.mini li { display: grid; grid-template-columns: 40px 1fr; gap: 8px; padding: 7px 0 7px 14px; border-left: 2px solid var(--line); position: relative; color: #c9d2c6; }
+.mini li::before { content: ""; position: absolute; left: -5px; top: 12px; width: 8px; height: 8px; border-radius: 50%; background: var(--hot); }
+.mini time { color: var(--dim); }
+/* use cases: a plain grid, two by two */
+.uses { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.uses h3 { font-size: 20px; }
+
+@media (max-width: 900px) {
+  .feats { grid-template-columns: repeat(2, minmax(0, 1fr)); } .feats .tile.wide3 { grid-column: span 2; }
+}
+@media (max-width: 760px) {
+  .hero-top { padding: 14px 16px; }
+  .pitch { left: 16px; right: 16px; width: auto; bottom: 28px; }
+  .pitch p:not(.cta) { font-size: 15px; margin-top: 10px; }
+  .reticle { left: -38px; top: -38px; width: 76px; height: 76px; }
+  .tag { bottom: 62px; }
+  /* the report moves up under the header, clear of the car and the pitch, without the earlier entries */
+  .report { left: 16px; right: 16px; top: 64px; bottom: auto; width: auto; }
+  .report ol { display: none; } .report dl > div:first-child dd { padding-right: 40px !important; }
+  .below { padding: 64px 16px 96px; } .below section { margin-top: 56px; }
+  .uses { grid-template-columns: 1fr; }
+}
+@media (max-width: 520px) {
+  .feats { grid-template-columns: 1fr; }
+  .feats .tile.wide, .feats .tile.wide3 { grid-column: auto; } .feats .tile.tall { grid-row: auto; }
+  .feats .tile { min-height: 0; } .feats .stat, .feats code, .mini { margin-bottom: 20px; }
+}
+@media (max-height: 640px) and (min-width: 761px) { .pitch p:not(.cta) { display: none; } }
+@media (prefers-reduced-motion: reduce) { .logo i, .cut .reticle, .report.cut dd { animation: none; } html { scroll-behavior: auto; } }
