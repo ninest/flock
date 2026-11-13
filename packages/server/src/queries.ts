@@ -439,9 +439,13 @@ export class Queries extends Context.Service<Queries, {
           WITH ${sessionBounds(environment.id, sql`${sessionId}`)}
           SELECT ${sessionSummary(environment.id, sql`s`)}`
         if (!row) return yield* Effect.fail(new SessionNotFound({ id: sessionId }))
-        // Identified: the Visitor ID is one a device was linked to by Identify (persistent Tracking mode only).
+        // Identified: the Visitor ID is one a device was linked to by Identify, while the Project is in
+        // persistent Tracking mode (switching back to cookieless hides it, as Visitors start afresh).
         const [identified] = row.visitorId === null ? [] : yield* sql`
-          SELECT 1 FROM visitor_alias WHERE project_id = ${environment.projectId} AND visitor_id = ${row.visitorId} LIMIT 1`
+          SELECT 1 FROM visitor_alias a JOIN project p ON p.id = a.project_id
+          WHERE a.project_id = ${environment.projectId} AND a.visitor_id = ${row.visitorId}
+            AND p.tracking_mode = 'persistent'
+          LIMIT 1`
         const events = yield* sql<{
           readonly uuid: string
           readonly name: string

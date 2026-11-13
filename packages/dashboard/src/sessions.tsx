@@ -75,8 +75,9 @@ const minutesAgo = (t: DateTime.Utc, now: number) => Math.max(0, Math.floor((now
 
 /**
  * The Recent sessions card: Sessions with an Event in the range that matches every filter, most
- * recent activity first. The first page refreshes every 10 seconds; "Load more" adds older pages.
- * Remount it (with a `key`) when the Environment, range or filters change.
+ * recent activity first. The first page refreshes every 10 seconds until "Load more" is used; from
+ * then on the list is a snapshot, so the older pages line up with it. Remount it (with a `key`)
+ * when the Environment, range or filters change.
  */
 export const RecentSessions = ({ projectId, environment, range, search, timeZone }: {
   projectId: ProjectId
@@ -86,24 +87,24 @@ export const RecentSessions = ({ projectId, environment, range, search, timeZone
   timeZone: string
 }) => {
   const complete = isComplete(range)
+  // Older pages, loaded on demand; `cursor` is where the next one starts (undefined: none loaded yet).
+  const [older, setOlder] = useState<{ sessions: ReadonlyArray<SessionSummary>; cursor: string | null | undefined }>({
+    sessions: [],
+    cursor: undefined
+  })
   const { data, error } = usePoll(
     () =>
       complete
         ? request((api) => api.reports.sessions({ params: { environmentId: environment.id }, query: range }))
         : Promise.resolve(undefined),
     [environment.id, ...queryDeps(range)],
-    10_000
+    10_000,
+    () => older.cursor === undefined
   )
-  // Older pages, loaded on demand; `cursor` is where the next one starts (undefined: from the first page).
-  const [older, setOlder] = useState<{ sessions: ReadonlyArray<SessionSummary>; cursor: string | null | undefined }>({
-    sessions: [],
-    cursor: undefined
-  })
   const [loading, setLoading] = useState(false)
   const now = useNow()
   const cursor = older.cursor === undefined ? data?.nextCursor ?? null : older.cursor
-  const firstIds = new Set(data?.sessions.map((s) => s.id))
-  const sessions = [...(data?.sessions ?? []), ...older.sessions.filter((s) => !firstIds.has(s.id))]
+  const sessions = [...(data?.sessions ?? []), ...older.sessions]
 
   const loadMore = async () => {
     if (cursor === null) return
@@ -129,7 +130,7 @@ export const RecentSessions = ({ projectId, environment, range, search, timeZone
           : sessions.length === 0
           ? <p style={{ ...muted, padding: 12, margin: 0 }}>No Sessions in this range.</p>
           : sessions.map((session) => (
-            <SessionRow key={session.id} projectId={projectId} session={session} search={search} timeZone={timeZone} now={now} />
+            <SessionListItem key={session.id} projectId={projectId} session={session} search={search} timeZone={timeZone} now={now} />
           ))}
         {data && cursor !== null && (
           <button type="button" disabled={loading} onClick={() => void loadMore()} style={{ margin: 12, justifySelf: "start" }}>
@@ -141,7 +142,7 @@ export const RecentSessions = ({ projectId, environment, range, search, timeZone
   )
 }
 
-const SessionRow = ({ projectId, session, search, timeZone, now }: {
+const SessionListItem = ({ projectId, session, search, timeZone, now }: {
   projectId: ProjectId
   session: SessionSummary
   search: ProjectSearch
@@ -169,7 +170,8 @@ const SessionRow = ({ projectId, session, search, timeZone, now }: {
       <span style={muted}> · {session.referringDomain ?? "Direct"}</span>
     </span>
     <span style={{ ...muted, textAlign: "right" }}>
-      {session.status === "ended" ? formatTime(session.startedAt, timeZone) : `${STATUS[session.status].label} · ${minutesAgo(session.lastSeenAt, now)}m ago`}
+      {formatTime(session.startedAt, timeZone)}
+      {session.status !== "ended" && ` · ${STATUS[session.status].label}, last seen ${minutesAgo(session.lastSeenAt, now)}m ago`}
     </span>
     <span />
     <span style={muted}>
@@ -183,37 +185,17 @@ const SessionRow = ({ projectId, session, search, timeZone, now }: {
 
 // The Session page.
 
-const POLL_MS = 5000
-
 /** Loads a Session, and again every 5 seconds while it is active or idle. */
-const useSession = (environmentId: Environment["id"] | undefined, sessionId: string, filters: EventPropertyFilters | undefined) => {
-  const [state, setState] = useState<{ data?: SessionDetail; error?: unknown }>({})
-  const filterKey = JSON.stringify(filters ?? [])
-  useEffect(() => {
-    if (environmentId === undefined) return
-    let cancelled = false
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const load = () =>
-      request((api) => api.reports.session({ params: { environmentId, sessionId }, query: { filters } })).then(
-        (data) => {
-          if (cancelled) return
-          setState({ data })
-          if (data.status !== "ended") timer = setTimeout(load, POLL_MS)
-        },
-        (error: unknown) => {
-          if (cancelled) return
-          setState((s) => ({ ...s, error }))
-          timer = setTimeout(load, POLL_MS)
-        }
-      )
-    void load()
-    return () => {
-      cancelled = true
-      clearTimeout(timer)
-    }
-  }, [environmentId, sessionId, filterKey])
-  return state
-}
+const useSession = (environmentId: Environment["id"] | undefined, sessionId: string, filters: EventPropertyFilters | undefined) =>
+  usePoll(
+    () =>
+      environmentId === undefined
+        ? Promise.resolve(undefined)
+        : request((api) => api.reports.session({ params: { environmentId, sessionId }, query: { filters } })),
+    [environmentId, sessionId, JSON.stringify(filters ?? [])],
+    5000,
+    (session) => session !== undefined && session.status !== "ended"
+  )
 
 const atBottom = () => window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 48
 const scrollToBottom = () => window.scrollTo({ top: document.documentElement.scrollHeight })
@@ -234,7 +216,8 @@ export const SessionPage = ({ projectId, sessionId, search }: { projectId: Proje
   useLayoutEffect(() => {
     if (!session || count === undefined) return
     if (seen.current === undefined) {
-      if (session.status !== "ended") scrollToBottom()
+      if (session.status === "ended") window.scrollTo({ top: 0 })
+      else scrollToBottom()
     } else if (count > seen.current) {
       if (wasAtBottom.current) scrollToBottom()
       else setUnseen((n) => n + count - seen.current!)
@@ -304,7 +287,7 @@ export const SessionPage = ({ projectId, sessionId, search }: { projectId: Proje
             cursor: "pointer"
           }}
         >
-          ↓ {unseen} new {unseen === 1 ? "event" : "events"}
+          ↓ {unseen} new {unseen === 1 ? "Event" : "Events"}
         </button>
       )}
     </>

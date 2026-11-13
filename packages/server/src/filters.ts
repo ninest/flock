@@ -8,11 +8,13 @@ import type { Fragment } from "effect/sql/Statement"
 
 type Sql = PgClient.PgClient
 
+/** The Event properties column to read: the row's own, or a named lateral's (`fp`, a Session's first Pageview). */
+type PropertiesColumn = "properties" | "fp.properties"
+
 /**
  * The path of a URL property (`/pricing`): no scheme, host, query or fragment; `/` when empty.
- * `properties` is the Event properties column to read (default: the row's own).
  */
-export const pathOf = (sql: Sql, properties = "properties") => {
+export const pathOf = (sql: Sql, properties: PropertiesColumn = "properties") => {
   const url = sql`(${sql.unsafe(properties)} ->> '$url')`
   return sql`CASE WHEN ${url} ~* '^[a-z][a-z0-9+.-]*://'
     THEN coalesce(nullif(substring(${url} FROM '(?i)^[a-z][a-z0-9+.-]*://[^/?#]*([^?#]*)'), ''), '/')
@@ -20,11 +22,11 @@ export const pathOf = (sql: Sql, properties = "properties") => {
 }
 
 /** The host of a URL Event property, lowercased, without port or `www.`; null when it isn't a URL. */
-export const hostOf = (sql: Sql, eventProperty: "$url" | "$referrer", properties = "properties") =>
+export const hostOf = (sql: Sql, eventProperty: "$url" | "$referrer", properties: PropertiesColumn = "properties") =>
   sql`regexp_replace(lower(substring(${sql.unsafe(properties)} ->> ${eventProperty} FROM '(?i)^[a-z][a-z0-9+.-]*://(?:[^@/?#]*@)?([^/?#:]+)')), '^www[.]', '')`
 
 /** The referring domain; null for direct traffic (no referrer, or one from the page's own host). */
-export const referringDomainOf = (sql: Sql, properties = "properties") => {
+export const referringDomainOf = (sql: Sql, properties: PropertiesColumn = "properties") => {
   const referrer = hostOf(sql, "$referrer", properties)
   return sql`CASE WHEN ${referrer} = ${hostOf(sql, "$url", properties)} THEN NULL ELSE ${referrer} END`
 }

@@ -125,19 +125,22 @@ layer(Harness.layer())("Recent sessions with a range and Filters", (it) => {
     Effect.gen(function*() {
       const h = yield* Harness
       const { environments: [production] } = yield* h.createProject({})
+      // Sessions /0 to /52, one a minute, except /0 to /5 all at the same moment: the page
+      // boundary falls among Sessions with the same last activity.
       for (let i = 0; i < 53; i++) {
-        yield* at(`2026-03-01T${String(9 + Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}:00Z`)
+        yield* at(`2026-03-01T09:${String(Math.max(i, 5)).padStart(2, "0")}:00Z`)
         yield* h.ingest(production!.key, [visit(`https://example.com/${i}`)], { ip: `198.51.100.${i + 1}` })
       }
       yield* at("2026-03-01T12:00:00Z")
 
       const first = yield* h.sessions(production!.id, day)
       assert.strictEqual(first.sessions.length, 50)
-      assert.strictEqual(first.sessions[0]!.entryPage, "/52")
       assert.isNotNull(first.nextCursor)
       const second = yield* h.sessions(production!.id, day, first.nextCursor!)
-      assert.deepStrictEqual(second.sessions.map((s) => s.entryPage), ["/2", "/1", "/0"])
       assert.strictEqual(second.nextCursor, null)
+      const pages = [...first.sessions, ...second.sessions].map((s) => s.entryPage)
+      assert.deepStrictEqual([...pages].sort(), Array.from({ length: 53 }, (_, i) => `/${i}`).sort())
+      assert.deepStrictEqual(pages.slice(0, 47), Array.from({ length: 47 }, (_, i) => `/${52 - i}`))
     }))
 })
 
@@ -266,5 +269,9 @@ layer(Harness.layer())("Identified Visitors in a Session", (it) => {
       const { sessions } = yield* h.sessions(production.id, day)
       const visitorIds = yield* Effect.forEach(sessions, (s) => h.session(production.id, s.id).pipe(Effect.map((d) => d.visitorId)))
       assert.deepStrictEqual(visitorIds, ["user_123", null])
+
+      yield* h.client.projects.update({ params: { projectId: project.id }, payload: { trackingMode: "cookieless" } })
+      const afterSwitch = yield* h.session(production.id, sessions[0]!.id)
+      assert.strictEqual(afterSwitch.visitorId, null)
     }))
 })
