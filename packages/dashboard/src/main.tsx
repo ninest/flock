@@ -1,6 +1,7 @@
 import { RouterProvider } from "@tanstack/react-router"
 import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
+import "./console.css"
 import { router } from "./routes.tsx"
 
 createRoot(document.getElementById("root")!).render(
