@@ -27,7 +27,7 @@ docker compose up -d
 
 Then open the dashboard and sign up with `FLOCK_ADMIN_EMAIL` to create the Instance admin.
 
-Flock listens on port 2100 (`FLOCK_PORT=8080` in `.env` changes the host port). Put a reverse proxy with TLS (Caddy, Traefik, nginx, or `tailscale serve`) in front of it for anything public.
+Flock listens on port 2100 (`FLOCK_PORT=8080` in `.env` changes the host port). Put a reverse proxy with TLS (Caddy, Traefik, nginx, or `tailscale serve`) in front of it for anything public, and add `FLOCK_TRUSTED_PROXIES=1` to `.env` so Flock sees visitors' IPs (see [Client IP behind a proxy](#client-ip-behind-a-proxy)).
 
 ## Railway
 
@@ -35,7 +35,7 @@ Deploy from the Flock template (image source `ghcr.io/ninest/flock:1` plus a Pos
 
 1. Create a Postgres service.
 2. Create a service from the Docker image `ghcr.io/ninest/flock:1`.
-3. Set its variables `DATABASE_URL=${{Postgres.DATABASE_URL}}`, `FLOCK_ADMIN_EMAIL` (your email) and `FLOCK_PUBLIC_URL` (the generated domain, `https://…`). Railway sets `PORT`, and Flock listens on it.
+3. Set its variables `DATABASE_URL=${{Postgres.DATABASE_URL}}`, `FLOCK_ADMIN_EMAIL` (your email), `FLOCK_PUBLIC_URL` (the generated domain, `https://…`) and `FLOCK_TRUSTED_PROXIES=1` (see [Client IP behind a proxy](#client-ip-behind-a-proxy)). Railway sets `PORT`, and Flock listens on it.
 4. Settings → Deploy → Healthcheck path: `/api/health`.
 5. Settings → Source → enable automatic image updates, so Railway redeploys when a new `1.x.y` is published.
 6. Settings → Networking → generate a domain.
@@ -51,6 +51,7 @@ Deploy from the Flock template (image source `ghcr.io/ninest/flock:1` plus a Pos
 | `FLOCK_TRUSTED_ORIGINS` | no | | Comma-separated extra origins allowed to sign in, e.g. a second domain. |
 | `BETTER_AUTH_SECRET` | no | generated on first boot and kept in Postgres | Signs Member sessions; at least 32 random characters. Changing it signs every Member out. |
 | `FLOCK_GEOIP_DB` | no | the bundled DB-IP IP to Country Lite | A MaxMind-format (`.mmdb`) GeoIP database used to derive each Event's `$country` from the request IP (the IP itself is never stored). Point it at a City database, such as DB-IP IP to City Lite, to get `$region` too. Without a readable file, countries are unknown and ingest carries on. |
+| `FLOCK_TRUSTED_PROXIES` | no | | How many proxies in front of Flock append to `X-Forwarded-For` (e.g. `1`), or their comma-separated CIDR ranges. Unset, the header is ignored. Set it behind a reverse proxy or on Railway; see [Client IP behind a proxy](#client-ip-behind-a-proxy). |
 | `FLOCK_PASSWORD_SIGN_IN` | no | `true` | Set to `false` to turn email + password sign-up and sign-in off, leaving OIDC as the only way in. Needs `FLOCK_OIDC_ISSUER`. |
 | `FLOCK_OIDC_ISSUER` | no | | An OIDC issuer URL, e.g. `https://auth.misc.page`. When set, the sign-in page offers it. Needs the two variables below and `FLOCK_PUBLIC_URL`. See [OIDC sign-in](#oidc-sign-in). |
 | `FLOCK_OIDC_CLIENT_ID` | with an issuer | | The client ID Flock is registered under at the issuer. |
@@ -64,7 +65,20 @@ Contributors: every new environment variable gets a row here.
 
 ## Client IP behind a proxy
 
-Flock reads the visitor's IP from the first `X-Forwarded-For` address, falling back to the connection's address, and uses it only to look up the country. Make sure your reverse proxy sets `X-Forwarded-For` (Railway, Caddy, Traefik and `tailscale serve` do by default); otherwise every Event gets your proxy's country.
+Flock uses the visitor's IP for two things: looking up `$country` (and `$region`), and, in cookieless Tracking mode, hashing it with the User-Agent and a daily salt into the Visitor ID. The IP itself is never stored.
+
+Behind a reverse proxy, the connection comes from the proxy, and the visitor's IP is in `X-Forwarded-For`. Any client can put whatever it likes in that header, so Flock only reads it as far as `FLOCK_TRUSTED_PROXIES` says your proxies vouch for it:
+
+| `FLOCK_TRUSTED_PROXIES` | Client IP |
+|---|---|
+| unset (default) | The connection's address. `X-Forwarded-For` is ignored. Right when Flock is reachable directly. |
+| a hop count, e.g. `1` | The address that many entries from the right of `X-Forwarded-For`. Use the number of proxies in front of Flock that each append the address they saw: `1` behind a single Caddy, Traefik, nginx or `tailscale serve`. |
+| CIDRs, e.g. `10.0.0.0/8, fd00::/8` | The right-most address in `X-Forwarded-For` (after the connection's address) that isn't in these ranges. Use it when you know your proxies' addresses rather than how many there are. |
+
+Without it, every Event behind a proxy gets the proxy's country, and in cookieless mode all visitors with the same browser look like one Visitor. With a hop count that's too high, a client can choose its own IP; too low, and you get your proxy's IP.
+
+- **Docker Compose** with a reverse proxy on the host: `FLOCK_TRUSTED_PROXIES=1` in `.env`.
+- **Railway:** set `FLOCK_TRUSTED_PROXIES=1`. Railway's edge proxy appends the address it sees to `X-Forwarded-For`, so the right-most entry is the client. Railway doesn't document this contract firmly, so check it after deploying: send an Event with a made-up `X-Forwarded-For: 1.2.3.4` and confirm its country is yours, not 1.2.3.4's.
 
 IP geolocation by [DB-IP](https://db-ip.com), licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 

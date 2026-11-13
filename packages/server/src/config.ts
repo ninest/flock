@@ -1,5 +1,6 @@
 import { Config, Effect, Option, Redacted, Schema } from "effect"
 import type { AuthSettings } from "./access.ts"
+import { parseTrustedProxies, type TrustedProxies } from "./client-ip.ts"
 import { fileURLToPath } from "node:url"
 
 const defaultPublicDir = fileURLToPath(new URL("../../dashboard/dist", import.meta.url))
@@ -39,6 +40,11 @@ export const ServerConfig = Config.all({
   oidcName: Config.option(Config.String("FLOCK_OIDC_NAME")),
   /** Treat the issuer's emails as verified for the FLOCK_ADMIN_EMAIL bootstrap. */
   oidcTrustEmails: Config.Boolean("FLOCK_OIDC_TRUST_EMAILS").pipe(Config.withDefault(false)),
+  /**
+   * Proxies in front of Flock that append the client IP to X-Forwarded-For: a hop count (`1`
+   * behind Railway or one reverse proxy) or comma-separated CIDRs. Unset: X-Forwarded-For is ignored.
+   */
+  trustedProxies: Config.String("FLOCK_TRUSTED_PROXIES").pipe(Config.withDefault("")),
   /** Seed the playground Project with fixed keys (development only). */
   seedPlayground: Config.Boolean("FLOCK_SEED_PLAYGROUND").pipe(Config.withDefault(false))
 })
@@ -46,6 +52,16 @@ export const ServerConfig = Config.all({
 export class AuthConfigError extends Schema.TaggedError<AuthConfigError>()("AuthConfigError", {
   message: Schema.String
 }) {}
+
+export class TrustedProxiesError extends Schema.TaggedError<TrustedProxiesError>()("TrustedProxiesError", {
+  message: Schema.String
+}) {}
+
+/** FLOCK_TRUSTED_PROXIES, parsed. */
+export const trustedProxies = (config: Config.Success<typeof ServerConfig>): Effect.Effect<TrustedProxies, TrustedProxiesError> => {
+  const parsed = parseTrustedProxies(config.trustedProxies)
+  return typeof parsed === "string" ? Effect.fail(new TrustedProxiesError({ message: parsed })) : Effect.succeed(parsed)
+}
 
 /** The sign-in settings, or an error explaining which variables are missing. */
 export const authSettings = (config: Config.Success<typeof ServerConfig>): Effect.Effect<AuthSettings, AuthConfigError> =>

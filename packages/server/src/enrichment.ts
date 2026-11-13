@@ -7,7 +7,7 @@ import { GeoIp } from "./geoip.ts"
 
 /** What Enrichment knows about the request a batch came in. */
 export interface RequestContext {
-  /** The client IP (first X-Forwarded-For address, else the socket address). */
+  /** The client IP: the socket address, or X-Forwarded-For as far as trusted proxies vouch for it. */
   readonly ip: string | null
   readonly userAgent: string | null
   /** The `Origin` header; browsers send it, servers and native apps usually don't. */

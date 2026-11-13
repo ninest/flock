@@ -57,13 +57,14 @@ layer(Harness.layer({ geoIp }))("Enrichment", (it) => {
       ])
     }))
 
-  it.effect("uses the first address in X-Forwarded-For and leaves unknown values empty", () =>
+  it.effect("behind one trusted proxy, uses the right-most X-Forwarded-For address and leaves unknown values empty", () =>
     Effect.gen(function*() {
       const h = yield* Harness
       const { environments: [production] } = yield* h.createProject({})
       yield* TestClock.setTime(Date.parse("2026-03-01T10:00:00Z"))
 
-      yield* h.ingest(production!.key, [pageview()], { ip: "203.0.113.7, 10.0.0.1" })
+      // The client put 198.51.100.23 (US) in the header itself; the proxy appended the real 203.0.113.7.
+      yield* h.ingest(production!.key, [pageview()], { ip: "198.51.100.23, 203.0.113.7" })
       yield* h.ingest(production!.key, [pageview()], { ip: "192.0.2.99" })
       yield* h.ingest(production!.key, [pageview()], {})
 
@@ -143,5 +144,47 @@ layer(Harness.layer({ geoIp }))("Enrichment", (it) => {
         }
       }
       assert.notInclude(JSON.stringify(keys), "198.51.100.23")
+    }))
+})
+
+layer(Harness.layer({ geoIp, trustedProxies: "" }))("Client IP without trusted proxies", (it) => {
+  it.effect("ignores X-Forwarded-For, so a spoofed header changes neither country nor Visitor", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* h.createProject({})
+      yield* TestClock.setTime(Date.parse("2026-03-01T10:00:00Z"))
+
+      yield* h.ingest(production!.key, [pageview()], { ip: "203.0.113.7", userAgent: CHROME_WINDOWS })
+      yield* h.ingest(production!.key, [pageview()], { ip: "198.51.100.23", userAgent: CHROME_WINDOWS })
+
+      assert.deepStrictEqual(yield* h.breakdown(production!.id, "$country", day), [{ value: null, count: 2 }])
+      const overview = yield* h.overview(production!.id, { period: "custom", from: "2026-03-01", to: "2026-03-01" })
+      assert.strictEqual(overview.totals.visitors, 1)
+    }))
+})
+
+layer(Harness.layer({ geoIp, trustedProxies: "2" }))("Client IP behind two trusted proxies", (it) => {
+  it.effect("takes the second X-Forwarded-For address from the right", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* h.createProject({})
+      yield* TestClock.setTime(Date.parse("2026-03-01T10:00:00Z"))
+
+      yield* h.ingest(production!.key, [pageview()], { ip: "198.51.100.23, 203.0.113.7, 10.0.0.1" })
+
+      assert.deepStrictEqual(yield* h.breakdown(production!.id, "$country", day), [{ value: "DE", count: 1 }])
+    }))
+})
+
+layer(Harness.layer({ geoIp, trustedProxies: "10.0.0.0/8, fd00::/8" }))("Client IP behind trusted proxy ranges", (it) => {
+  it.effect("takes the right-most X-Forwarded-For address outside the trusted ranges", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* h.createProject({})
+      yield* TestClock.setTime(Date.parse("2026-03-01T10:00:00Z"))
+
+      yield* h.ingest(production!.key, [pageview()], { ip: "198.51.100.23, 203.0.113.7, 10.1.2.3, fd00::5" })
+
+      assert.deepStrictEqual(yield* h.breakdown(production!.id, "$country", day), [{ value: "DE", count: 1 }])
     }))
 })

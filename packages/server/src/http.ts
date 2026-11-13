@@ -5,6 +5,7 @@ import { Effect, Layer, Option } from "effect"
 import { HttpRouter, type HttpServerRequest, HttpServerResponse, HttpStaticServer } from "effect/http"
 import { HttpApiBuilder, HttpApiMiddleware, HttpApiScalar } from "effect/http-api"
 import { Access, AuthConfig } from "./access.ts"
+import { clientIp, type TrustedProxies } from "./client-ip.ts"
 import { CustomEventsHandlers } from "./custom-events.ts"
 import { AuthRoutes, currentMember, MemberAuthLive } from "./auth.ts"
 import type { RequestContext } from "./enrichment.ts"
@@ -17,25 +18,23 @@ const HealthHandlers = HttpApiBuilder.group(FlockApi, "health", Effect.fn(functi
   return handlers.handle("check", () => sql`SELECT 1`.pipe(Effect.as({ status: "ok" as const }), Effect.orDie))
 }))
 
-const IngestHandlers = HttpApiBuilder.group(FlockApi, "ingest", Effect.fn(function*(handlers) {
-  const ingest = yield* Ingest
-  return handlers
-    .handle("send", ({ payload, request }) => ingest.send(payload, requestContext(request)))
-    .handle("config", ({ query }) => ingest.config(query.key))
-}))
+const IngestHandlers = (trusted: TrustedProxies) =>
+  HttpApiBuilder.group(FlockApi, "ingest", Effect.fn(function*(handlers) {
+    const ingest = yield* Ingest
+    return handlers
+      .handle("send", ({ payload, request }) => ingest.send(payload, requestContext(request, trusted)))
+      .handle("config", ({ query }) => ingest.config(query.key))
+  }))
 
 /**
- * The client IP, User-Agent and Origin of an ingest request. Flock runs behind a proxy (Railway,
- * Docker, `tailscale serve`), so the first X-Forwarded-For address wins over the socket.
+ * The client IP, User-Agent and Origin of an ingest request. X-Forwarded-For counts only as far
+ * as FLOCK_TRUSTED_PROXIES vouches for it; otherwise the socket address is the client.
  */
-const requestContext = (request: HttpServerRequest.HttpServerRequest): RequestContext => {
-  const forwarded = request.headers["x-forwarded-for"]?.split(",")[0]?.trim()
-  return {
-    ip: forwarded || Option.getOrNull(request.remoteAddress),
-    userAgent: request.headers["user-agent"] ?? null,
-    origin: request.headers["origin"] ?? null
-  }
-}
+const requestContext = (request: HttpServerRequest.HttpServerRequest, trusted: TrustedProxies): RequestContext => ({
+  ip: clientIp({ forwardedFor: request.headers["x-forwarded-for"], socket: Option.getOrNull(request.remoteAddress), trusted }),
+  userAgent: request.headers["user-agent"] ?? null,
+  origin: request.headers["origin"] ?? null
+})
 
 const ProjectsHandlers = HttpApiBuilder.group(FlockApi, "projects", Effect.fn(function*(handlers) {
   const projects = yield* Projects
@@ -126,8 +125,8 @@ const InstanceHandlers = HttpApiBuilder.group(FlockApi, "instance", Effect.fn(fu
       })))
 }))
 
-const ApiRoutes = HttpApiBuilder.layer(FlockApi, { openapiPath: "/api/openapi.json" }).pipe(
-  Layer.provide([HealthHandlers, IngestHandlers, ProjectsHandlers, EnvironmentsHandlers, ReportsHandlers, CustomEventsHandlers, SignInHandlers, MembersHandlers, InstanceHandlers]),
+const ApiRoutes = (trusted: TrustedProxies) => HttpApiBuilder.layer(FlockApi, { openapiPath: "/api/openapi.json" }).pipe(
+  Layer.provide([HealthHandlers, IngestHandlers(trusted), ProjectsHandlers, EnvironmentsHandlers, ReportsHandlers, CustomEventsHandlers, SignInHandlers, MembersHandlers, InstanceHandlers]),
   Layer.provide(MemberAuthLive),
   Layer.provide(HttpApiMiddleware.layerProblemDetails({ includeDetails: true }))
 )
@@ -159,7 +158,9 @@ export interface AppRoutesOptions {
   readonly publicDir: string
   /** The built browser script, served at /flock.js. */
   readonly scriptFile: string
+  /** Which proxies may set the client IP through X-Forwarded-For. */
+  readonly trustedProxies: TrustedProxies
 }
 
 export const AppRoutes = (options: AppRoutesOptions) =>
-  Layer.mergeAll(ApiRoutes, AuthRoutes, DocsRoute, ScriptRoute(options.scriptFile), StaticRoutes(options.publicDir), Cors)
+  Layer.mergeAll(ApiRoutes(options.trustedProxies), AuthRoutes, DocsRoute, ScriptRoute(options.scriptFile), StaticRoutes(options.publicDir), Cors)

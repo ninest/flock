@@ -27,6 +27,9 @@ services:
       FLOCK_OIDC_NAME: ${FLOCK_OIDC_NAME:-}
       FLOCK_OIDC_TRUST_EMAILS: ${FLOCK_OIDC_TRUST_EMAILS:-false}
       FLOCK_PASSWORD_SIGN_IN: ${FLOCK_PASSWORD_SIGN_IN:-true}
+      # Behind a reverse proxy, how many proxies append to X-Forwarded-For (usually 1).
+      # Unset, X-Forwarded-For is ignored (see docs/self-hosting.md#client-ip-behind-a-proxy).
+      FLOCK_TRUSTED_PROXIES: ${FLOCK_TRUSTED_PROXIES:-}
     ports:
       - "${FLOCK_PORT:-2100}:2100"
     labels:

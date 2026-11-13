@@ -4,7 +4,7 @@ import { HttpRouter } from "effect/http"
 import { createServer } from "node:http"
 import { AuthConfig } from "./access.ts"
 import { AppLive } from "./app.ts"
-import { authSettings, ServerConfig } from "./config.ts"
+import { authSettings, ServerConfig, trustedProxies } from "./config.ts"
 import { PgLive } from "./db.ts"
 import { GeoIp } from "./geoip.ts"
 import { AppRoutes } from "./http.ts"
@@ -13,7 +13,7 @@ import { Seed } from "./seed.ts"
 
 const Main = Layer.unwrap(Effect.gen(function*() {
   const config = yield* ServerConfig
-  const Server = HttpRouter.serve(AppRoutes(config)).pipe(
+  const Server = HttpRouter.serve(AppRoutes({ ...config, trustedProxies: yield* trustedProxies(config) })).pipe(
     Layer.provide(NodeHttpServer.layer(createServer, { port: config.port }))
   )
   const App = AppLive(config.databaseUrl)

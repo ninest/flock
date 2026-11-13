@@ -44,6 +44,7 @@ import { fileURLToPath } from "node:url"
 import { Access, AuthConfig } from "../src/access.ts"
 import { type AdminCommandError, adminCommand } from "../src/admin-command.ts"
 import { AppLive } from "../src/app.ts"
+import { parseTrustedProxies } from "../src/client-ip.ts"
 import { PgLive } from "../src/db.ts"
 import { GeoIp } from "../src/geoip.ts"
 import { AppRoutes } from "../src/http.ts"
@@ -66,6 +67,8 @@ export interface HarnessOptions {
   readonly zeroConfig?: boolean
   /** Configure the stub OIDC issuer; `trustEmails` is FLOCK_OIDC_TRUST_EMAILS. */
   readonly oidc?: { readonly trustEmails?: boolean }
+  /** FLOCK_TRUSTED_PROXIES (default `1`, so `ingest`'s `ip` is the client IP). */
+  readonly trustedProxies?: string
   /** FLOCK_PASSWORD_SIGN_IN (default true). */
   readonly passwordSignIn?: boolean
 }
@@ -260,7 +263,9 @@ export class Harness extends Context.Service<Harness, {
         const deps = yield* TestClock.withLive(Layer.build(Deps))
         yield* TestClock.setTime(Date.now())
 
-        const app = yield* HttpRouter.toHttpEffect(AppRoutes({ publicDir, scriptFile })).pipe(Effect.provide(deps))
+        const trustedProxies = parseTrustedProxies(options.trustedProxies ?? "1")
+        if (typeof trustedProxies === "string") return yield* Effect.die(trustedProxies)
+        const app = yield* HttpRouter.toHttpEffect(AppRoutes({ publicDir, scriptFile, trustedProxies })).pipe(Effect.provide(deps))
         const context = yield* Effect.context<never>() // includes the TestClock
         const handler: (request: Request) => Promise<Response> = HttpEffect.toWebHandlerWith<
           never,
