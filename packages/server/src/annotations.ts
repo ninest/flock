@@ -13,6 +13,7 @@ import {
   ProjectOwnerRequired
 } from "@flock/shared"
 import { Context, DateTime, Effect, Layer } from "effect"
+import type { Fragment } from "effect/sql/Statement"
 import { makeId } from "./keys.ts"
 import { Projects } from "./projects.ts"
 import type { ReportRange } from "./report-range.ts"
@@ -74,7 +75,7 @@ export class Annotations extends Context.Service<Annotations, {
           )
         )
 
-      const select = (where: ReturnType<typeof sql>) =>
+      const select = (where: Fragment) =>
         sql<Row>`
           SELECT a.id, a.label, a.description, a.at, a.all_environments, a.created_at,
                  m.id AS created_by_id, m.name AS created_by_name, m.email AS created_by_email
