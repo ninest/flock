@@ -74,6 +74,7 @@ export interface EnvironmentAccess {
   readonly allowedOrigins: ReadonlyArray<string>
   readonly projectId: ProjectId
   readonly timeZone: string
+  readonly trackingMode: TrackingMode
   readonly role: ProjectRole
 }
 
@@ -179,8 +180,16 @@ export class Projects extends Context.Service<Projects, {
         get(member, id).pipe(Effect.tap((project) => requireOwner(project.role)))
 
       const environment = (member: MemberId, id: EnvironmentId) =>
-        sql<{ name: string; key: string; allowedOrigins: ReadonlyArray<string>; projectId: string; timeZone: string; role: ProjectRole }>`
-          SELECT e.name, e.key, e.allowed_origins, e.project_id, p.time_zone, pm.role
+        sql<{
+          name: string
+          key: string
+          allowedOrigins: ReadonlyArray<string>
+          projectId: string
+          timeZone: string
+          trackingMode: TrackingMode
+          role: ProjectRole
+        }>`
+          SELECT e.name, e.key, e.allowed_origins, e.project_id, p.time_zone, p.tracking_mode, pm.role
           FROM environment e
           JOIN project p ON p.id = e.project_id
           JOIN project_member pm ON pm.project_id = p.id AND pm.member_id = ${member}
@@ -195,6 +204,7 @@ export class Projects extends Context.Service<Projects, {
                 allowedOrigins: row.allowedOrigins,
                 projectId: ProjectId.make(row.projectId),
                 timeZone: row.timeZone,
+                trackingMode: row.trackingMode,
                 role: row.role
               })
               : Effect.fail(new EnvironmentNotFound({ id }))

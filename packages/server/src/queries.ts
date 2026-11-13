@@ -367,6 +367,12 @@ export class Queries extends Context.Service<Queries, {
         })
     )
 
+    /** Identified: the Visitor ID is one a device was linked to by Identify (ADR 0005). */
+    const isIdentified = (projectId: string, visitorId: string) =>
+      sql`SELECT 1 FROM visitor_alias WHERE project_id = ${projectId} AND visitor_id = ${visitorId} LIMIT 1`.pipe(
+        Effect.map((rows) => rows.length > 0)
+      )
+
     // Sessions.
 
     /**
@@ -439,13 +445,10 @@ export class Queries extends Context.Service<Queries, {
           WITH ${sessionBounds(environment.id, sql`${sessionId}`)}
           SELECT ${sessionSummary(environment.id, sql`s`)}`
         if (!row) return yield* Effect.fail(new SessionNotFound({ id: sessionId }))
-        // Identified: the Visitor ID is one a device was linked to by Identify, while the Project is in
-        // persistent Tracking mode (switching back to cookieless hides it, as Visitors start afresh).
-        const [identified] = row.visitorId === null ? [] : yield* sql`
-          SELECT 1 FROM visitor_alias a JOIN project p ON p.id = a.project_id
-          WHERE a.project_id = ${environment.projectId} AND a.visitor_id = ${row.visitorId}
-            AND p.tracking_mode = 'persistent'
-          LIMIT 1`
+        // The Visitor shows only in persistent Tracking mode (switching back to cookieless hides it, as
+        // Visitors start afresh).
+        const visitorId = environment.trackingMode === "persistent" ? row.visitorId : null
+        const visitorIdentified = visitorId === null ? null : yield* isIdentified(environment.projectId, visitorId)
         const events = yield* sql<{
           readonly uuid: string
           readonly name: string
@@ -465,7 +468,8 @@ export class Queries extends Context.Service<Queries, {
           utmCampaign: row.utmCampaign,
           browser: row.browser,
           os: row.os,
-          visitorId: identified ? row.visitorId : null,
+          visitorId,
+          visitorIdentified,
           timeline: events.map((e) => ({
             id: e.uuid,
             name: e.name,

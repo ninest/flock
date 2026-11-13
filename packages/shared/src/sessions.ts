@@ -81,8 +81,13 @@ export const SessionDetail = Schema.Struct({
   /** `$browser` and `$os` of the first Event. */
   browser: Schema.NullOr(Schema.String),
   os: Schema.NullOr(Schema.String),
-  /** The Visitor ID when the Visitor is identified (persistent Tracking mode); null for anonymous Visitors. */
+  /**
+   * The Session's Visitor ID in persistent Tracking mode, anonymous or identified (it opens the Visitor
+   * profile); null in cookieless mode.
+   */
   visitorId: Schema.NullOr(Schema.String),
+  /** Whether that Visitor is identified (their ID is one Identify linked a device to); null in cookieless mode. */
+  visitorIdentified: Schema.NullOr(Schema.Boolean),
   /** The Session timeline: the first `SESSION_EVENT_LIMIT` Events, oldest first. */
   timeline: Schema.Array(SessionEvent),
   /** More Events exist than the timeline holds. */
