@@ -4,6 +4,7 @@ import { type FormEvent, useEffect, useState } from "react"
 import { currentMember, oidcSignIn, signIn, signInOptions, signOut, signUp } from "./auth.ts"
 import { ProjectPage, ProjectsPage } from "./projects.tsx"
 import { InstancePage } from "./instance.tsx"
+import { SessionPage } from "./sessions.tsx"
 import { validateProjectSearch } from "./filters.tsx"
 
 const rootRoute = createRootRoute({
@@ -149,6 +150,18 @@ const projectRoute = createRoute({
   }
 })
 
+/** One Session and its Session timeline; keeps the Project page's search params for the way back. */
+const sessionRoute = createRoute({
+  getParentRoute: () => memberRoute,
+  path: "/projects/$projectId/sessions/$sessionId",
+  validateSearch: validateProjectSearch,
+  component: () => {
+    const { projectId, sessionId } = sessionRoute.useParams()
+    const search = sessionRoute.useSearch()
+    return <SessionPage key={sessionId} projectId={ProjectId.make(projectId)} sessionId={sessionId} search={search} />
+  }
+})
+
 const instanceRoute = createRoute({
   getParentRoute: () => memberRoute,
   path: "/instance",
@@ -158,7 +171,7 @@ const instanceRoute = createRoute({
   component: () => <InstancePage me={instanceRoute.useRouteContext().member} />
 })
 
-export const router = createRouter({ routeTree: rootRoute.addChildren([signInRoute, memberRoute.addChildren([indexRoute, projectRoute, instanceRoute])]) })
+export const router = createRouter({ routeTree: rootRoute.addChildren([signInRoute, memberRoute.addChildren([indexRoute, projectRoute, sessionRoute, instanceRoute])]) })
 
 declare module "@tanstack/react-router" {
   interface Register {

@@ -21,7 +21,8 @@ import { AudienceReports } from "./audience.tsx"
 import { LiveVisitors, PagesAndSources } from "./pages-sources.tsx"
 import { CustomEventsReport } from "./custom-events.tsx"
 import { currentMember } from "./auth.ts"
-import { FilterBar, type ProjectSearch, reportQuery, searchFor, withFilter } from "./filters.tsx"
+import { FilterBar, type ProjectSearch, queryDeps, reportQuery, searchFor, withFilter } from "./filters.tsx"
+import { RecentSessions } from "./sessions.tsx"
 import { usePoll } from "./use-poll.ts"
 
 const muted: CSSProperties = { fontSize: 14, color: "#666" }
@@ -143,6 +144,14 @@ export const ProjectPage = ({ projectId, search }: { projectId: ProjectId; searc
       <PagesAndSources key={`pages-${environment.id}`} environment={environment} range={range} onAddFilter={addFilter} />
       <AudienceReports key={`audience-${environment.id}`} environment={environment} range={range} onAddFilter={addFilter} />
       <CustomEventsReport key={`custom-events-${environment.id}`} environment={environment} range={range} onAddFilter={addFilter} />
+      <RecentSessions
+        key={`sessions-${environment.id}-${queryDeps(range).join("|")}`}
+        projectId={projectId}
+        environment={environment}
+        range={range}
+        search={search}
+        timeZone={project.timeZone}
+      />
       {project.role === "owner"
         ? (
           <>
