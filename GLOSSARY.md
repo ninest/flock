@@ -70,7 +70,7 @@ The Events of one Session in the order they happened, oldest first, so you can f
 _Avoid_: Journey, session replay, clickstream
 
 **Bounce**:
-A Session with a single Event. The bounce rate is the share of Sessions that are bounces, and the visit duration is the average time from a Session's first Event to its last.
+A Session with a single Event. The bounce rate is the share of Sessions that are bounces, and the visit duration is the average time from a Session's first Event to its last. A page's bounce rate counts only the Sessions that entered on it.
 
 **Tracking mode**:
 A per-Project choice of how Visitors are recognised: cookieless (an anonymous ID that resets daily) or persistent (an ID that is stored on the device and can be identified).
@@ -80,4 +80,18 @@ A condition on one top-level Event property (is, is not, contains) that narrows 
 _Avoid_: Segment, query
 
 **Identify**:
-Linking a persistent Visitor to an ID from the tracked app's own user system. Only possible in persistent Tracking mode.
+Linking a persistent Visitor to an ID from the tracked app's own user system. Only possible in persistent Tracking mode. Every device identified with the same ID is one Visitor.
+
+**Visitor name**:
+The made-up two-word name, such as "Quiet Heron", that an anonymous persistent Visitor is shown by. It is always the same for the same Visitor. An identified Visitor is shown by their ID instead.
+_Avoid_: Nickname, alias
+
+**Visitor profile**:
+Everything one persistent Visitor did in an Environment, over all time: when they were first and last seen, their activity, their Events by name and their Sessions. Not available in cookieless Tracking mode.
+_Avoid_: User profile, person
+
+## Reports
+
+**Annotation**:
+A short dated note on a Project, such as "Launched on Hacker News", with an optional description. It is drawn on the charts of the Environments it applies to (all of them unless narrowed), to explain a change later.
+_Avoid_: Event, marker, milestone
