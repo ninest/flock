@@ -65,6 +65,10 @@ _Avoid_: User, client
 A run of Events from one Visitor that ends after 30 minutes without activity.
 _Avoid_: Visit
 
+**Session timeline**:
+The Events of one Session in the order they happened, oldest first, so you can follow what the Visitor did from the moment they arrived.
+_Avoid_: Journey, session replay, clickstream
+
 **Bounce**:
 A Session with a single Event. The bounce rate is the share of Sessions that are bounces, and the visit duration is the average time from a Session's first Event to its last.
 
