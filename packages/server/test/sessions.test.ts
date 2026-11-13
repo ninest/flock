@@ -40,6 +40,7 @@ layer(Harness.layer({ geoIp: { "198.51.100.1": "DE", "198.51.100.2": "FR" } }))(
             events: 1,
             bounce: true,
             entryPage: "/blog",
+            lastPage: "/blog",
             referringDomain: null,
             country: "FR",
             device: null,
@@ -52,6 +53,7 @@ layer(Harness.layer({ geoIp: { "198.51.100.1": "DE", "198.51.100.2": "FR" } }))(
             events: 3,
             bounce: false,
             entryPage: "/",
+            lastPage: "/pricing",
             referringDomain: "news.ycombinator.com",
             country: "DE",
             device: null,
@@ -174,6 +176,7 @@ layer(Harness.layer({ geoIp: { "198.51.100.1": "DE" } }))("Session timeline", (i
           events: 3,
           bounce: false,
           entryPage: "/",
+          lastPage: "/signup",
           referringDomain: "news.ycombinator.com",
           referrer: "https://news.ycombinator.com/item",
           utmSource: "newsletter",
@@ -273,5 +276,51 @@ layer(Harness.layer())("Identified Visitors in a Session", (it) => {
       yield* h.client.projects.update({ params: { projectId: project.id }, payload: { trackingMode: "cookieless" } })
       const afterSwitch = yield* h.session(production.id, sessions[0]!.id)
       assert.strictEqual(afterSwitch.visitorId, null)
+    }))
+})
+
+layer(Harness.layer())("Last page", (it) => {
+  it.effect("is the latest Pageview's cleaned path, for a live Session and an ended one", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* h.createProject({})
+      // Ended: / then /pricing?plan=pro, then a Custom event (not a Pageview) after it.
+      yield* at("2026-03-01T09:00:00Z")
+      yield* h.ingest(production!.key, [visit("https://example.com/")], { ip: "198.51.100.1" })
+      yield* at("2026-03-01T09:01:00Z")
+      yield* h.ingest(production!.key, [visit("https://example.com/pricing?plan=pro#top")], { ip: "198.51.100.1" })
+      yield* at("2026-03-01T09:02:00Z")
+      yield* h.ingest(production!.key, [customEvent("signup_completed")], { ip: "198.51.100.1" })
+      // Live: /blog, then /docs/ a minute ago, still active.
+      yield* at("2026-03-01T11:58:00Z")
+      yield* h.ingest(production!.key, [visit("https://example.com/blog")], { ip: "198.51.100.2" })
+      yield* at("2026-03-01T11:59:00Z")
+      yield* h.ingest(production!.key, [visit("https://example.com/docs")], { ip: "198.51.100.2" })
+      yield* at("2026-03-01T12:00:00Z")
+
+      const { sessions } = yield* h.sessions(production!.id, day)
+      assert.deepStrictEqual(sessions.map((s) => [s.status, s.entryPage, s.lastPage]), [
+        ["active", "/blog", "/docs"],
+        ["ended", "/", "/pricing"]
+      ])
+      for (const summary of sessions) {
+        const detail = yield* h.session(production!.id, summary.id)
+        assert.strictEqual(detail.lastPage, summary.lastPage)
+      }
+    }))
+
+  it.effect("is empty for a Session without Pageviews", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* h.createProject({})
+      yield* at("2026-03-01T09:00:00Z")
+      yield* h.ingest(production!.key, [customEvent("app_opened")], { ip: "198.51.100.1" })
+      yield* at("2026-03-01T09:00:30Z")
+
+      const { sessions: [summary] } = yield* h.sessions(production!.id, day)
+      assert.strictEqual(summary!.entryPage, null)
+      assert.strictEqual(summary!.lastPage, null)
+      const detail = yield* h.session(production!.id, summary!.id)
+      assert.strictEqual(detail.lastPage, null)
     }))
 })

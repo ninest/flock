@@ -376,8 +376,8 @@ export class Queries extends Context.Service<Queries, {
     // Sessions.
 
     /**
-     * SELECT list summarising the Sessions in `from` (rows of `sessionBounds`), aliased `s`, from all their Events: the first Event (audience) and the first Pageview
-     * (entry page, referrer, UTM tags) as `first_event` and `first_pageview` laterals.
+     * SELECT list summarising the Sessions in `from` (rows of `sessionBounds`), aliased `s`, from all their Events: the first Event (audience), the first Pageview
+     * (entry page, referrer, UTM tags) and the latest Pageview (last page) as the `fe`, `fp` and `lp` laterals.
      */
     const sessionSummary = (environmentId: EnvironmentId, from: Fragment) => sql`
       s.session_id AS id, s.started_at, s.last_seen_at, s.events,
@@ -386,6 +386,7 @@ export class Queries extends Context.Service<Queries, {
       fe.properties ->> '$browser' AS browser, fe.properties ->> '$os' AS os,
       fe.visitor_id,
       CASE WHEN fp.properties IS NULL THEN NULL ELSE ${pathOf(sql, "fp.properties")} END AS entry_page,
+      CASE WHEN lp.properties IS NULL THEN NULL ELSE ${pathOf(sql, "lp.properties")} END AS last_page,
       ${referringDomainOf(sql, "fp.properties")} AS referring_domain,
       nullif(fp.properties ->> '$referrer', '') AS referrer,
       coalesce(fp.properties ->> '$utm_source', fp.properties ->> 'utm_source') AS utm_source,
@@ -401,7 +402,12 @@ export class Queries extends Context.Service<Queries, {
         SELECT properties FROM event
         WHERE environment_id = ${environmentId} AND session_id = s.session_id AND name = '$pageview'
         ORDER BY ts, received_at LIMIT 1
-      ) fp ON TRUE`
+      ) fp ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT properties FROM event
+        WHERE environment_id = ${environmentId} AND session_id = s.session_id AND name = '$pageview'
+        ORDER BY ts DESC, received_at DESC LIMIT 1
+      ) lp ON TRUE`
 
     /** CTE `s`: the given Sessions' first and last Event and Event count, over all their Events. */
     const sessionBounds = (environmentId: EnvironmentId, ids: Fragment) => sql`
@@ -559,6 +565,7 @@ interface SessionRow {
   readonly os: string | null
   readonly visitorId: string | null
   readonly entryPage: string | null
+  readonly lastPage: string | null
   readonly referringDomain: string | null
   readonly referrer: string | null
   readonly utmSource: string | null
@@ -582,6 +589,7 @@ const toSummary = (row: SessionRow, now: DateTime.Utc): SessionSummary => ({
   events: row.events,
   bounce: row.events === 1,
   entryPage: row.entryPage,
+  lastPage: row.lastPage,
   referringDomain: row.referringDomain,
   country: row.country,
   device: row.device,

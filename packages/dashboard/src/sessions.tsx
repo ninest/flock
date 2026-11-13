@@ -136,12 +136,6 @@ const pathOf = (url: unknown) => {
 
 const valueText = (value: unknown) => (typeof value === "string" ? value : JSON.stringify(value))
 
-/** The last Pageview's path, where the Visitor left from. */
-export const exitPage = (session: SessionDetail) => {
-  const last = [...session.timeline].reverse().find(isPageview)
-  return last ? pathOf(last.properties.$url) : null
-}
-
 /** What follows an Event's name: how long a Pageview lasted until the next one, or a Custom event's values. */
 const afterText = (timeline: ReadonlyArray<SessionEvent>, i: number) => {
   const event = timeline[i]!
@@ -265,7 +259,7 @@ export const SessionPage = ({ projectId, environment, sessionId, search, timeZon
     ["Events", formatCount(session.events)],
     ["From", session.referrer === null ? "Direct" : <a href={session.referrer} target="_blank" rel="noreferrer noopener" title={session.referrer}>{sourceOf(session)}</a>],
     ["Entered on", session.entryPage ?? "No Pageview"],
-    ["Left from", live ? "Still here" : exitPage(session) ?? "No Pageview"],
+    [live ? "Now on" : "Left from", session.lastPage ?? "No Pageview"],
     ["Device", device.length > 0 ? device.join(", ") : "Unknown"],
     ["Operating system", session.os ?? "Unknown"],
     ["Country", country(session.country)],
