@@ -281,26 +281,24 @@ export class Harness extends Context.Service<Harness, {
           )) as typeof globalThis.fetch
 
         const sdk = yield* makeClient(fetch)
-        const seed = Context.get(deps, Seed)
         const browser = () => makeBrowser(handler)
-        const seedMember: Harness["Service"]["seedMember"] = (input) => seed.member(input)
+        const runAdminCommand = (args: ReadonlyArray<string>) => adminCommand(args).pipe(Effect.provide(deps))
 
-        // The default client: a Member made Instance admin, signed in. With password sign-in
-        // off, they join through the OIDC issuer during a moment of Open sign-up.
-        const access = Context.get(deps, Access)
+        // The default client: a Member made Instance admin through the admin CLI, signed in. With
+        // password sign-in off, they join through the OIDC issuer during a moment of Open sign-up.
         const admin = { email: "harness-admin@flock.test", password: "harness-password" }
         const adminBrowser = yield* browser()
         if (settings.passwordSignIn || oidc === undefined) {
-          const adminId = yield* seedMember(admin)
-          yield* access.grantAdmin(adminId).pipe(Effect.orDie)
+          yield* runAdminCommand(["--email", admin.email, "--password", admin.password]).pipe(Effect.orDie)
           yield* adminBrowser.signIn(admin)
         } else {
           oidc.setNextUser({ sub: "harness-admin", email: admin.email, email_verified: true })
+          // No external seam: turning Open sign-up on through the API needs the admin we are creating.
+          const access = Context.get(deps, Access)
           yield* access.updateSettings({ openSignUp: true }).pipe(Effect.orDie)
           yield* adminBrowser.oidcSignIn()
           yield* access.updateSettings({ openSignUp: false }).pipe(Effect.orDie)
-          const adminMember = yield* access.memberByEmail(admin.email).pipe(Effect.orDie)
-          yield* access.grantAdmin(Option.getOrThrow(adminMember).id).pipe(Effect.orDie)
+          yield* runAdminCommand(["--email", admin.email]).pipe(Effect.orDie)
         }
         const client = adminBrowser.client
 
@@ -316,6 +314,10 @@ export class Harness extends Context.Service<Harness, {
             }
             return yield* api.projects.get({ params: { projectId: project.id } })
           }).pipe(Effect.orDie)
+
+        // Directly through the Seed service: the external way (an Invite plus sign-up) would leave a
+        // used Invite behind in every test's Instance, and fails with password sign-up off.
+        const seedMember: Harness["Service"]["seedMember"] = (input) => Context.get(deps, Seed).member(input)
 
         const pageviewCount: Harness["Service"]["pageviewCount"] = (environmentId, range) =>
           client.reports.pageviewCount({
@@ -364,7 +366,7 @@ export class Harness extends Context.Service<Harness, {
           sdk,
           admin: adminBrowser,
           client,
-          adminCommand: (args) => adminCommand(args).pipe(Effect.provide(deps)),
+          adminCommand: runAdminCommand,
           browser, seedMember, createProject, pageviewCount, overview })
       })
     ).pipe(Layer.provide(TestDatabase.layer))
