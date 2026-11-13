@@ -7,7 +7,7 @@ import type {
   CustomEventStats,
   Environment,
   NumericStats,
-  PropertyFilter,
+  EventPropertyFilter,
   ReportRangeQuery
 } from "@flock/shared"
 import { type CSSProperties, useState } from "react"
@@ -49,7 +49,7 @@ const SeriesChart = ({ label, data }: { label: string; data: ReadonlyArray<{ lab
 export const CustomEventsReport = ({ environment, range: query, onAddFilter }: {
   environment: Environment
   range: ReportRangeQuery
-  onAddFilter: (filter: PropertyFilter) => void
+  onAddFilter: (filter: EventPropertyFilter) => void
 }) => {
   const [selected, setSelected] = useState<string>()
   const valid = isComplete(query)
@@ -105,7 +105,7 @@ const Drilldown = ({ environment, name, query, onAddFilter }: {
   environment: Environment
   name: string
   query: ReportRangeQuery
-  onAddFilter: (filter: PropertyFilter) => void
+  onAddFilter: (filter: EventPropertyFilter) => void
 }) => {
   const [metric, setMetric] = useState<"count" | "visitors">("count")
   const { data, error } = usePoll(
@@ -140,7 +140,7 @@ const Drilldown = ({ environment, name, query, onAddFilter }: {
   )
 }
 
-const PropertyPicker = ({ label, keys, value, onChange }: { label: string; keys: ReadonlyArray<string>; value: string; onChange: (key: string) => void }) => (
+const EventPropertyPicker = ({ label, keys, value, onChange }: { label: string; keys: ReadonlyArray<string>; value: string; onChange: (key: string) => void }) => (
   <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
     <strong>{label}</strong>
     <select value={value} onChange={(e) => onChange(e.target.value)}>
@@ -161,22 +161,22 @@ const PropertyBreakdown = (
     detail: CustomEventDetail
     query: ReportRangeQuery
     keys: ReadonlyArray<string>
-    onAddFilter: (filter: PropertyFilter) => void
+    onAddFilter: (filter: EventPropertyFilter) => void
   }
 ) => {
-  const [property, setProperty] = useChosen(keys)
+  const [eventProperty, setEventProperty] = useChosen(keys)
   const { data } = usePoll(
     () =>
-      property === undefined
+      eventProperty === undefined
         ? Promise.resolve(undefined)
-        : request((api) => api.customEvents.breakdown({ params: { environmentId: environment.id }, query: { ...query, name: detail.name, property } })),
-    [environment.id, detail.name, property, ...queryDeps(query)]
+        : request((api) => api.customEvents.breakdown({ params: { environmentId: environment.id }, query: { ...query, name: detail.name, eventProperty } })),
+    [environment.id, detail.name, eventProperty, ...queryDeps(query)]
   )
-  if (property === undefined) return <p style={muted}>No string or boolean Event properties to break down by.</p>
+  if (eventProperty === undefined) return <p style={muted}>No string or boolean Event properties to break down by.</p>
   const total = data?.rows.reduce((sum, row) => sum + row.count, 0) ?? 0
   return (
     <div data-testid="custom-event-breakdown" style={{ display: "grid", gap: 8 }}>
-      <PropertyPicker label="Breakdown by" keys={keys} value={property} onChange={setProperty} />
+      <EventPropertyPicker label="Breakdown by" keys={keys} value={eventProperty} onChange={setEventProperty} />
       {data
         ? (
           <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 4 }}>
@@ -189,8 +189,8 @@ const PropertyBreakdown = (
                     : (
                       <button
                         type="button"
-                        title={`Filter by ${property} is ${row.value}`}
-                        onClick={() => onAddFilter({ property, op: "is", value: row.value! })}
+                        title={`Filter by ${eventProperty} is ${row.value}`}
+                        onClick={() => onAddFilter({ eventProperty, op: "is", value: row.value! })}
                         style={{ all: "unset", cursor: "pointer" }}
                       >
                         {row.value}
@@ -218,20 +218,20 @@ const STATS: ReadonlyArray<{ key: Exclude<keyof NumericStats, "count">; label: s
 const PropertyStats = (
   { environment, detail, query, keys }: { environment: Environment; detail: CustomEventDetail; query: ReportRangeQuery; keys: ReadonlyArray<string> }
 ) => {
-  const [property, setProperty] = useChosen(keys)
+  const [eventProperty, setEventProperty] = useChosen(keys)
   const [stat, setStat] = useState<(typeof STATS)[number]["key"]>("average")
   const { data } = usePoll<CustomEventStats | undefined>(
     () =>
-      property === undefined
+      eventProperty === undefined
         ? Promise.resolve(undefined)
-        : request((api) => api.customEvents.stats({ params: { environmentId: environment.id }, query: { ...query, name: detail.name, property } })),
-    [environment.id, detail.name, property, ...queryDeps(query)]
+        : request((api) => api.customEvents.stats({ params: { environmentId: environment.id }, query: { ...query, name: detail.name, eventProperty } })),
+    [environment.id, detail.name, eventProperty, ...queryDeps(query)]
   )
-  if (property === undefined) return <p style={muted}>No numeric Event properties.</p>
-  const label = `${STATS.find((s) => s.key === stat)!.label} ${property}`
+  if (eventProperty === undefined) return <p style={muted}>No numeric Event properties.</p>
+  const label = `${STATS.find((s) => s.key === stat)!.label} ${eventProperty}`
   return (
     <div data-testid="custom-event-stats" style={{ display: "grid", gap: 8 }}>
-      <PropertyPicker label="Statistics for" keys={keys} value={property} onChange={setProperty} />
+      <EventPropertyPicker label="Statistics for" keys={keys} value={eventProperty} onChange={setEventProperty} />
       <p style={{ ...muted, margin: 0 }}>Only numeric values count. {data ? `${formatNumber(data.totals.count)} Events had one.` : null}</p>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(90px, 1fr))", gap: 8 }}>
         {STATS.map((s) => (

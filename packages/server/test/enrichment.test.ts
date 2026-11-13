@@ -87,8 +87,8 @@ layer(Harness.layer({ geoIp }))("Enrichment", (it) => {
         { ip: "203.0.113.7", userAgent: CHROME_WINDOWS }
       )
 
-      for (const [property, value] of [["$country", "DE"], ["$region", "Berlin"], ["$browser", "Chrome"], ["$os", "Windows"], ["$device", "desktop"]]) {
-        assert.deepStrictEqual(yield* h.breakdown(production!.id, property!, day), [{ value: value!, count: 1 }])
+      for (const [eventProperty, value] of [["$country", "DE"], ["$region", "Berlin"], ["$browser", "Chrome"], ["$os", "Windows"], ["$device", "desktop"]]) {
+        assert.deepStrictEqual(yield* h.breakdown(production!.id, eventProperty!, day), [{ value: value!, count: 1 }])
       }
     }))
 
@@ -137,13 +137,13 @@ layer(Harness.layer({ geoIp }))("Enrichment", (it) => {
         })
       }
 
-      const keys = yield* h.propertyKeys(production!.id, day)
+      const keys = yield* h.eventPropertyKeys(production!.id, day)
       assert.includeMembers([...keys], ["$url", "$country", "$browser", "$os", "$device", "plan", "step"])
-      for (const property of keys) {
+      for (const eventProperty of keys) {
         for (const event of ["$pageview", "signup"]) {
-          const rows = yield* h.breakdown(production!.id, property, day, event)
+          const rows = yield* h.breakdown(production!.id, eventProperty, day, event)
           for (const ip of ips) {
-            assert.notInclude(JSON.stringify(rows), ip, `${property} on ${event} holds ${ip}`)
+            assert.notInclude(JSON.stringify(rows), ip, `${eventProperty} on ${event} holds ${ip}`)
           }
         }
       }

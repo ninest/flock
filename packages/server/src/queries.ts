@@ -15,7 +15,7 @@ import type {
   NumericStats,
   Overview,
   OverviewNumbers,
-  PropertyFilters,
+  EventPropertyFilters,
   ReportRangeQuery,
   Top,
   TopQuery
@@ -40,7 +40,7 @@ export interface DateRange {
 export interface ReportRequest<Q> {
   readonly member: MemberId
   readonly environmentId: EnvironmentId
-  readonly query: Q & { readonly filters?: PropertyFilters | undefined }
+  readonly query: Q & { readonly filters?: EventPropertyFilters | undefined }
 }
 
 type Report<Q, A> = (request: ReportRequest<Q>) => Effect.Effect<A, EnvironmentNotFound>
@@ -54,16 +54,16 @@ export class Queries extends Context.Service<Queries, {
   readonly liveVisitors: Report<{}, number>
   readonly pageviewCount: Report<DateRange, number>
   /** Counts `event` Events by the value of one Event property, most frequent first, `null` last. */
-  readonly breakdown: Report<DateRange & { readonly property: string; readonly event: string }, ReadonlyArray<BreakdownRow>>
+  readonly breakdown: Report<DateRange & { readonly eventProperty: string; readonly event: string }, ReadonlyArray<BreakdownRow>>
   /** Every Event property key seen in the range, sorted. */
-  readonly propertyKeys: Report<DateRange, ReadonlyArray<string>>
+  readonly eventPropertyKeys: Report<DateRange, ReadonlyArray<string>>
   /** The Custom events in the range (built-in `$` events never appear), most frequent first. */
   readonly customEvents: Report<ReportRangeQuery, CustomEventList>
   /** One Custom event: totals, a time series and its Event property keys with their types. */
   readonly customEvent: Report<ReportRangeQuery & { readonly name: string }, CustomEventDetail>
-  readonly customEventBreakdown: Report<ReportRangeQuery & { readonly name: string; readonly property: string }, CustomEventBreakdown>
+  readonly customEventBreakdown: Report<ReportRangeQuery & { readonly name: string; readonly eventProperty: string }, CustomEventBreakdown>
   /** Numeric stats of one Event property; only JSON numbers count. */
-  readonly customEventStats: Report<ReportRangeQuery & { readonly name: string; readonly property: string }, CustomEventStats>
+  readonly customEventStats: Report<ReportRangeQuery & { readonly name: string; readonly eventProperty: string }, CustomEventStats>
 }>()("flock/Queries") {
   static readonly layer = Layer.effect(Queries, Effect.gen(function*() {
     const sql = yield* PgClient.PgClient
@@ -233,12 +233,12 @@ export class Queries extends Context.Service<Queries, {
 
     const breakdown = report(
       "breakdown",
-      (request: ReportRequest<DateRange & { readonly property: string; readonly event: string }>) =>
+      (request: ReportRequest<DateRange & { readonly eventProperty: string; readonly event: string }>) =>
         Effect.gen(function*() {
           const environment = yield* checkAccess(request)
-          const { event, filters, property } = request.query
+          const { event, filters, eventProperty } = request.query
           return yield* sql<BreakdownRow>`
-            SELECT properties ->> ${property} AS value, count(*)::int AS count FROM event
+            SELECT properties ->> ${eventProperty} AS value, count(*)::int AS count FROM event
             WHERE environment_id = ${environment.id} AND name = ${event}
               AND ${inDateRange(request.query)}
               AND ${matchesFilters(sql, filters)}
@@ -247,7 +247,7 @@ export class Queries extends Context.Service<Queries, {
         })
     )
 
-    const propertyKeys = report("propertyKeys", (request: ReportRequest<DateRange>) =>
+    const eventPropertyKeys = report("eventPropertyKeys", (request: ReportRequest<DateRange>) =>
       Effect.gen(function*() {
         const environment = yield* checkAccess(request)
         const rows = yield* sql<{ key: string }>`
@@ -306,12 +306,12 @@ export class Queries extends Context.Service<Queries, {
 
     const customEventBreakdown = report(
       "customEventBreakdown",
-      (request: ReportRequest<ReportRangeQuery & { readonly name: string; readonly property: string }>) =>
+      (request: ReportRequest<ReportRangeQuery & { readonly name: string; readonly eventProperty: string }>) =>
         Effect.gen(function*() {
           const scope = yield* checkAccessAndResolveRange(request)
           const rows = yield* sql<{ value: string | null; count: number }>`
             WITH ${scopedEvents(scope, { customOnly: true })}
-            SELECT properties ->> ${request.query.property} AS value, count(*)::int AS count
+            SELECT properties ->> ${request.query.eventProperty} AS value, count(*)::int AS count
             FROM scoped WHERE name = ${request.query.name}
             GROUP BY 1
             ORDER BY count DESC, value ASC NULLS LAST`
@@ -322,16 +322,16 @@ export class Queries extends Context.Service<Queries, {
     /** Only JSON numbers count; strings, booleans, nulls, arrays and missing values are skipped. */
     const customEventStats = report(
       "customEventStats",
-      (request: ReportRequest<ReportRangeQuery & { readonly name: string; readonly property: string }>) =>
+      (request: ReportRequest<ReportRangeQuery & { readonly name: string; readonly eventProperty: string }>) =>
         Effect.gen(function*() {
           const scope = yield* checkAccessAndResolveRange(request)
           const { range } = scope
-          const { name, property } = request.query
+          const { name, eventProperty } = request.query
           const scoped = scopedEvents(scope, { customOnly: true })
           const numbers = sql`
             numbers AS (
-              SELECT bucket, (properties ->> ${property})::float8 AS value FROM scoped
-              WHERE name = ${name} AND jsonb_typeof(properties -> ${property}) = 'number'
+              SELECT bucket, (properties ->> ${eventProperty})::float8 AS value FROM scoped
+              WHERE name = ${name} AND jsonb_typeof(properties -> ${eventProperty}) = 'number'
             )`
           const aggregates = sql`
             count(value)::int AS count, avg(value) AS average, sum(value) AS sum,
@@ -357,7 +357,7 @@ export class Queries extends Context.Service<Queries, {
       liveVisitors,
       pageviewCount,
       breakdown,
-      propertyKeys,
+      eventPropertyKeys,
       customEvents,
       customEvent,
       customEventBreakdown,
@@ -370,7 +370,7 @@ export class Queries extends Context.Service<Queries, {
 interface ReportScope {
   readonly environmentId: EnvironmentId
   readonly range: ReportRange
-  readonly filters: PropertyFilters | undefined
+  readonly filters: EventPropertyFilters | undefined
 }
 
 /**

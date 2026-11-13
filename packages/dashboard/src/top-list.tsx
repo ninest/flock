@@ -1,7 +1,7 @@
 // A ranked-list report card (the `top` endpoint) with proportional bars. One card can offer
 // several reports as tabs, e.g. top, entry and exit pages. Follows the shared date range and
 // filters; clicking a row adds its value as a filter.
-import type { Environment, PropertyFilter, ReportRangeQuery, TopReport, TopRow } from "@flock/shared"
+import type { Environment, EventPropertyFilter, ReportRangeQuery, TopReport, TopRow } from "@flock/shared"
 import { type CSSProperties, useState } from "react"
 import { request } from "./api.ts"
 import { queryDeps } from "./filters.tsx"
@@ -34,7 +34,7 @@ export const TopList = (
     environment: Environment
     range: ReportRangeQuery
     tabs: ReadonlyArray<TopTab>
-    onAddFilter: (filter: PropertyFilter) => void
+    onAddFilter: (filter: EventPropertyFilter) => void
   }
 ) => {
   const [selected, setSelected] = useState(0)
@@ -83,7 +83,7 @@ export const TopList = (
 const Rows = ({ rows, tab, onAddFilter }: {
   rows: ReadonlyArray<TopRow>
   tab: TopTab
-  onAddFilter: (filter: PropertyFilter) => void
+  onAddFilter: (filter: EventPropertyFilter) => void
 }) => {
   const total = rows.reduce((sum, row) => sum + row.count, 0)
   const max = Math.max(...rows.map((row) => row.count))
@@ -108,7 +108,7 @@ const Rows = ({ rows, tab, onAddFilter }: {
                 <button
                   type="button"
                   title={`Filter by ${tab.filterKey} is ${row.value}`}
-                  onClick={() => onAddFilter({ property: tab.filterKey, op: "is", value: row.value! })}
+                  onClick={() => onAddFilter({ eventProperty: tab.filterKey, op: "is", value: row.value! })}
                   style={{ all: "unset", cursor: "pointer", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                 >
                   {tab.label ? tab.label(row.value) : row.value}

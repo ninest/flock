@@ -109,12 +109,12 @@ layer(Harness.layer())("Project sharing", (it) => {
       const reports = (api: Browser["client"]) => [
         api.reports.pageviewCount({ params: { environmentId }, query: allTime }),
         api.reports.overview({ params: { environmentId }, query: { period: "custom", from: "2026-03-01", to: "2026-03-01" } }),
-        api.reports.breakdown({ params: { environmentId }, query: { ...allTime, property: "$pathname" } }),
-        api.reports.propertyKeys({ params: { environmentId }, query: allTime }),
+        api.reports.breakdown({ params: { environmentId }, query: { ...allTime, eventProperty: "$pathname" } }),
+        api.reports.eventPropertyKeys({ params: { environmentId }, query: allTime }),
         api.customEvents.list({ params: { environmentId }, query: day }),
         api.customEvents.detail({ params: { environmentId }, query: { ...day, name: "game_completed" } }),
-        api.customEvents.breakdown({ params: { environmentId }, query: { ...day, name: "game_completed", property: "level" } }),
-        api.customEvents.stats({ params: { environmentId }, query: { ...day, name: "game_completed", property: "score" } })
+        api.customEvents.breakdown({ params: { environmentId }, query: { ...day, name: "game_completed", eventProperty: "level" } }),
+        api.customEvents.stats({ params: { environmentId }, query: { ...day, name: "game_completed", eventProperty: "score" } })
       ] as const
 
       const [count, overview, breakdown, keys, customEvents, detail, byLevel, score] = yield* Effect.all(reports(viewer.browser.client))

@@ -136,7 +136,7 @@ const indexRoute = createRoute({ getParentRoute: () => memberRoute, path: "/", c
 
 /**
  * One Project; `?env=dev` picks the Environment (default `production`). The shared date range
- * (`period`, `from`, `to`) and property `filters` live in the URL too, so views can be shared.
+ * (`period`, `from`, `to`) and Event property `filters` live in the URL too, so views can be shared.
  */
 const projectRoute = createRoute({
   getParentRoute: () => memberRoute,

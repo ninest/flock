@@ -29,7 +29,7 @@ import {
   type MemberId,
   type Overview,
   type OverviewQuery,
-  type PropertyFilters,
+  type EventPropertyFilters,
   type Project,
   type ReportRangeQuery,
   type Top,
@@ -211,13 +211,13 @@ export class Harness extends Context.Service<Harness, {
   /** Convenience: a breakdown report (Pageviews unless `event`) by one Event property. */
   readonly breakdown: (
     environmentId: EnvironmentId,
-    property: string,
+    eventProperty: string,
     range: { readonly from: string; readonly to: string },
     event?: string,
-    filters?: PropertyFilters
+    filters?: EventPropertyFilters
   ) => Effect.Effect<ReadonlyArray<BreakdownRow>>
   /** Convenience: the Event property keys seen in `[from, to)`. */
-  readonly propertyKeys: (
+  readonly eventPropertyKeys: (
     environmentId: EnvironmentId,
     range: { readonly from: string; readonly to: string }
   ) => Effect.Effect<ReadonlyArray<string>>
@@ -226,7 +226,7 @@ export class Harness extends Context.Service<Harness, {
   /** Convenience: a ranked-list report for an Environment, as `h.client`. */
   readonly top: (environmentId: EnvironmentId, report: TopReport, range: ReportRangeQuery) => Effect.Effect<Top>
   /** Convenience: the live counter (unique Visitors in the last 30 minutes), as `h.client`. */
-  readonly live: (environmentId: EnvironmentId, filters?: PropertyFilters) => Effect.Effect<number>
+  readonly live: (environmentId: EnvironmentId, filters?: EventPropertyFilters) => Effect.Effect<number>
 }>()("test/Harness") {
   static readonly layer = (options: HarnessOptions = {}) =>
     Layer.effect(
@@ -343,11 +343,11 @@ export class Harness extends Context.Service<Harness, {
         const overview: Harness["Service"]["overview"] = (environmentId, query) =>
           client.reports.overview({ params: { environmentId }, query })
 
-        const breakdown: Harness["Service"]["breakdown"] = (environmentId, property, range, event, filters) =>
-          client.reports.breakdown({ params: { environmentId }, query: { ...toRange(range), property, event, filters } }).pipe(Effect.orDie)
+        const breakdown: Harness["Service"]["breakdown"] = (environmentId, eventProperty, range, event, filters) =>
+          client.reports.breakdown({ params: { environmentId }, query: { ...toRange(range), eventProperty, event, filters } }).pipe(Effect.orDie)
 
-        const propertyKeys: Harness["Service"]["propertyKeys"] = (environmentId, range) =>
-          client.reports.propertyKeys({ params: { environmentId }, query: toRange(range) }).pipe(
+        const eventPropertyKeys: Harness["Service"]["eventPropertyKeys"] = (environmentId, range) =>
+          client.reports.eventPropertyKeys({ params: { environmentId }, query: toRange(range) }).pipe(
             Effect.map((r) => r.keys),
             Effect.orDie
           )
@@ -359,7 +359,7 @@ export class Harness extends Context.Service<Harness, {
           client.reports.live({ params: { environmentId }, query: { filters } }).pipe(Effect.map((r) => r.visitors), Effect.orDie)
 
         return Harness.of({
-          ingest, breakdown, propertyKeys, top, live,
+          ingest, breakdown, eventPropertyKeys, top, live,
           handler,
           oidc,
           fetch,

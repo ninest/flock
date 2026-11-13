@@ -60,10 +60,10 @@ layer(Harness.layer())("Custom event list", (it) => {
 
 const detail = (h: H, environmentId: EnvironmentId, name: string, range: ReportRangeQuery) =>
   h.client.customEvents.detail({ params: { environmentId }, query: { ...range, name } }).pipe(Effect.orDie)
-const breakdown = (h: H, environmentId: EnvironmentId, name: string, property: string, range: ReportRangeQuery) =>
-  h.client.customEvents.breakdown({ params: { environmentId }, query: { ...range, name, property } }).pipe(Effect.orDie)
-const stats = (h: H, environmentId: EnvironmentId, name: string, property: string, range: ReportRangeQuery) =>
-  h.client.customEvents.stats({ params: { environmentId }, query: { ...range, name, property } }).pipe(Effect.orDie)
+const breakdown = (h: H, environmentId: EnvironmentId, name: string, eventProperty: string, range: ReportRangeQuery) =>
+  h.client.customEvents.breakdown({ params: { environmentId }, query: { ...range, name, eventProperty } }).pipe(Effect.orDie)
+const stats = (h: H, environmentId: EnvironmentId, name: string, eventProperty: string, range: ReportRangeQuery) =>
+  h.client.customEvents.stats({ params: { environmentId }, query: { ...range, name, eventProperty } }).pipe(Effect.orDie)
 
 const gameCompleted = (properties: Record<string, unknown>) => customEvent("game_completed", properties)
 
@@ -152,7 +152,7 @@ layer(Harness.layer())("Custom event drill-down", (it) => {
       ])
     }))
 
-  it.effect("counts only numeric values of a property sent with mixed types", () =>
+  it.effect("counts only numeric values of an Event property sent with mixed types", () =>
     Effect.gen(function*() {
       const h = yield* Harness
       const { environments: [production] } = yield* h.createProject({})
@@ -171,7 +171,7 @@ layer(Harness.layer())("Custom event drill-down", (it) => {
       assert.deepStrictEqual(totals, { count: 2, average: 20, sum: 40, min: 10, max: 30, median: 20 })
     }))
 
-  it.effect("a property with no numeric values has no statistics", () =>
+  it.effect("an Event property with no numeric values has no statistics", () =>
     Effect.gen(function*() {
       const h = yield* Harness
       const { environments: [production] } = yield* h.createProject({})
