@@ -43,6 +43,10 @@ button:disabled { cursor: default; opacity: .5; }
 .link:hover { color: var(--ink); }
 input, select, textarea { font: inherit; font-size: 15px; color: var(--ink); background: #0c0c0c; border: 1px solid #2a2a2a; border-radius: 8px; padding: 9px 12px; min-width: 0; }
 input:focus, select:focus, textarea:focus { border-color: #555; outline: none; }
+/* Safari draws native selects at its own size, ignoring padding; draw them like the inputs instead. */
+select { -webkit-appearance: none; appearance: none; padding-right: 36px; cursor: pointer; text-overflow: ellipsis;
+  background: #0c0c0c url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%238c8c8c' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 12px center; }
+select option { background: #0c0c0c; color: var(--ink); }
 input[type="checkbox"] { width: 18px; height: 18px; padding: 0; accent-color: var(--accent); vertical-align: -3px; }
 textarea { font-family: var(--mono); font-size: 14px; }
 label.field { display: grid; gap: 6px; color: var(--muted); font-size: 14px; }
@@ -237,7 +241,7 @@ a.row:hover, button.row:hover { background: var(--hover); }
   .tabs em { margin-left: 6px; }
   .page h1 { font-size: 22px; margin: 20px 0 10px; }
   .top-button { padding: 7px 8px; }
-  .range-select { padding: 6px 8px; font-size: 14px; }
+  .range-select { padding: 6px 28px 6px 10px; background-position: right 9px center; font-size: 14px; }
 
   .kpis { grid-template-columns: 1fr; padding-top: 6px; }
   .kpis button, .kpis button + button, .kpis button:nth-child(4) { grid-template-columns: 1fr auto; align-items: baseline; gap: 12px; padding: 13px 0; border-left: 0; border-bottom: 1px solid var(--line); }
