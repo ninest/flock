@@ -3,6 +3,7 @@
 // main.ts provides the real infrastructure; the Seam 1 harness provides test layers.
 import { Layer, type Redacted } from "effect"
 import { Access } from "./access.ts"
+import { Annotations } from "./annotations.ts"
 import { AdminBootstrap } from "./admin-command.ts"
 import { BetterAuth } from "./auth.ts"
 import { Enrichment } from "./enrichment.ts"
@@ -16,6 +17,7 @@ import { Visitors } from "./visitors.ts"
 
 export const AppLive = (databaseUrl: Redacted.Redacted<string>) =>
   Layer.mergeAll(Queries.layer, Seed.layer, EventPartitions.maintenance, AdminBootstrap).pipe(
+    Layer.provideMerge(Annotations.layer),
     Layer.provideMerge(Projects.layer),
     // Ingest owns Events (and, through Sessions, their Sessions); Projects deletes them through it.
     Layer.provideMerge(Ingest.layer),

@@ -15,6 +15,7 @@ import type {
   NumericStats,
   Overview,
   OverviewNumbers,
+  ProjectId,
   EventPropertyFilters,
   ReportRangeQuery,
   SessionDetail,
@@ -30,6 +31,7 @@ import { Context, DateTime, Effect, Layer } from "effect"
 import type { SqlError } from "effect/sql/SqlError"
 import type { Fragment } from "effect/sql/Statement"
 import { matchesFilters, pathOf, referringDomainOf } from "./filters.ts"
+import { Annotations } from "./annotations.ts"
 import { Projects } from "./projects.ts"
 import { type ReportRange, resolveRange } from "./report-range.ts"
 import { SESSION_TIMEOUT_MINUTES } from "./sessions.ts"
@@ -81,6 +83,7 @@ export class Queries extends Context.Service<Queries, {
   static readonly layer = Layer.effect(Queries, Effect.gen(function*() {
     const sql = yield* PgClient.PgClient
     const projects = yield* Projects
+    const annotations = yield* Annotations
 
     /** Fails with EnvironmentNotFound unless the Member may read the Environment; returns its time zone. */
     const checkAccess = (request: ReportRequest<unknown>) => projects.environment(request.member, request.environmentId)
@@ -90,7 +93,7 @@ export class Queries extends Context.Service<Queries, {
       Effect.gen(function*() {
         const environment = yield* checkAccess(request)
         const range = resolveRange(request.query, environment.timeZone, yield* DateTime.now)
-        return { environmentId: environment.id, range, filters: request.query.filters } satisfies ReportScope
+        return { environmentId: environment.id, projectId: environment.projectId, range, filters: request.query.filters } satisfies ReportScope
       })
 
     /**
@@ -171,7 +174,8 @@ export class Queries extends Context.Service<Queries, {
         return {
           ...range,
           totals: toNumbers(totals),
-          series: series.map((row) => ({ bucket: row.bucket, ...toNumbers(row) }))
+          series: series.map((row) => ({ bucket: row.bucket, ...toNumbers(row) })),
+          annotations: yield* annotations.inRange(scope.projectId, scope.environmentId, range)
         }
       }))
 
@@ -497,6 +501,7 @@ export class Queries extends Context.Service<Queries, {
 /** A report after the access check: the Environment, its resolved local range and the filters. */
 interface ReportScope {
   readonly environmentId: EnvironmentId
+  readonly projectId: ProjectId
   readonly range: ReportRange
   readonly filters: EventPropertyFilters | undefined
 }
