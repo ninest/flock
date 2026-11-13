@@ -6,12 +6,11 @@ import { HttpRouter, type HttpServerRequest, HttpServerResponse, HttpStaticServe
 import { HttpApiBuilder, HttpApiMiddleware, HttpApiScalar } from "effect/http-api"
 import { Access, AuthConfig } from "./access.ts"
 import { clientIp, type TrustedProxies } from "./client-ip.ts"
-import { CustomEventsHandlers } from "./custom-events.ts"
 import { AuthRoutes, currentMember, MemberAuthLive } from "./auth.ts"
 import type { RequestContext } from "./enrichment.ts"
 import { Ingest } from "./ingest.ts"
 import { Projects } from "./projects.ts"
-import { Reports } from "./reports.ts"
+import { Queries } from "./queries.ts"
 
 const HealthHandlers = HttpApiBuilder.group(FlockApi, "health", Effect.fn(function*(handlers) {
   const sql = yield* PgClient.PgClient
@@ -70,19 +69,40 @@ const EnvironmentsHandlers = HttpApiBuilder.group(FlockApi, "environments", Effe
 }))
 
 const ReportsHandlers = HttpApiBuilder.group(FlockApi, "reports", Effect.fn(function*(handlers) {
-  const reports = yield* Reports
+  const queries = yield* Queries
   return handlers
-    .handle("pageviewCount", ({ params, query }) =>
-      CurrentMember.use(({ id }) => reports.pageviewCount(id, params.environmentId, query)).pipe(Effect.map((pageviews) => ({ pageviews }))))
-    .handle("overview", ({ params, query }) => CurrentMember.use(({ id }) => reports.overview(id, params.environmentId, query)))
-    .handle("live", ({ params, query }) =>
-      CurrentMember.use(({ id }) => reports.liveVisitors(id, params.environmentId, query.filters)).pipe(Effect.map((visitors) => ({ visitors }))))
-    .handle("top", ({ params, query }) => CurrentMember.use(({ id }) => reports.top(id, params.environmentId, query)))
-    .handle("breakdown", ({ params, query }) =>
-      CurrentMember.use(({ id }) =>
-        reports.breakdown(id, params.environmentId, query, { property: query.property, event: query.event ?? "$pageview", filters: query.filters })))
-    .handle("propertyKeys", ({ params, query }) =>
-      CurrentMember.use(({ id }) => reports.propertyKeys(id, params.environmentId, query)).pipe(Effect.map((keys) => ({ keys }))))
+    .handle("pageviewCount", ({ params: { environmentId }, query }) =>
+      CurrentMember.use(({ id: member }) => queries.pageviewCount({ member, environmentId, query })).pipe(
+        Effect.map((pageviews) => ({ pageviews }))
+      ))
+    .handle("overview", ({ params: { environmentId }, query }) =>
+      CurrentMember.use(({ id: member }) => queries.overview({ member, environmentId, query })))
+    .handle("live", ({ params: { environmentId }, query }) =>
+      CurrentMember.use(({ id: member }) => queries.liveVisitors({ member, environmentId, query })).pipe(
+        Effect.map((visitors) => ({ visitors }))
+      ))
+    .handle("top", ({ params: { environmentId }, query }) => CurrentMember.use(({ id: member }) => queries.top({ member, environmentId, query })))
+    .handle("breakdown", ({ params: { environmentId }, query }) =>
+      CurrentMember.use(({ id: member }) =>
+        queries.breakdown({ member, environmentId, query: { ...query, event: query.event ?? "$pageview" } })
+      ))
+    .handle("propertyKeys", ({ params: { environmentId }, query }) =>
+      CurrentMember.use(({ id: member }) => queries.propertyKeys({ member, environmentId, query })).pipe(
+        Effect.map((keys) => ({ keys }))
+      ))
+}))
+
+const CustomEventsHandlers = HttpApiBuilder.group(FlockApi, "customEvents", Effect.fn(function*(handlers) {
+  const queries = yield* Queries
+  return handlers
+    .handle("list", ({ params: { environmentId }, query }) =>
+      CurrentMember.use(({ id: member }) => queries.customEvents({ member, environmentId, query })))
+    .handle("detail", ({ params: { environmentId }, query }) =>
+      CurrentMember.use(({ id: member }) => queries.customEvent({ member, environmentId, query })))
+    .handle("breakdown", ({ params: { environmentId }, query }) =>
+      CurrentMember.use(({ id: member }) => queries.customEventBreakdown({ member, environmentId, query })))
+    .handle("stats", ({ params: { environmentId }, query }) =>
+      CurrentMember.use(({ id: member }) => queries.customEventStats({ member, environmentId, query })))
 }))
 
 const SignInHandlers = HttpApiBuilder.group(FlockApi, "signIn", Effect.fn(function*(handlers) {
