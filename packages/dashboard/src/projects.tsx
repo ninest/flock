@@ -262,6 +262,13 @@ const AllowedOrigins = ({ environment, onChange }: { environment: Environment; o
   }
   return (
     <form onSubmit={submit} style={{ display: "grid", gap: 4, maxWidth: 480 }}>
+      {environment.allowedOrigins.length === 0
+        ? (
+          <p role="status" style={{ margin: 0, padding: "8px 12px", border: "1px solid #e0b400", background: "#fff8db", borderRadius: 4 }}>
+            ⚠ Any public website can send Events with this key. Add your site's origin.
+          </p>
+        )
+        : null}
       <label style={{ display: "grid", gap: 4 }}>
         Allowed origins
         <textarea
