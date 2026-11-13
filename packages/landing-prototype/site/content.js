@@ -33,7 +33,7 @@ export const STATEMENT = 'Flock counts the pageviews, events and sessions on you
 export const FEATURES = [
   ['Yours to run', 'One Docker image and a Postgres database. Put it on Railway or any box you own. The data never leaves it.', { size: 'wide', code: 'docker compose up -d' }],
   ['A tiny script', 'One tag on your site. Pageviews arrive on their own, single-page apps included.', { stat: '< 2 KB' }],
-  ['Custom events', 'Name anything that happens and attach properties to it. Break any Event down by its properties.', { code: 'flock.track("login_clicked")' }],
+  ['Custom events', 'Name anything that happens and attach properties to it. Break any Event down by its properties.', { code: 'flock.track("signup")' }],
   ['Sessions and timelines', 'Bounce rate, visit duration, and every Session readable Event by Event.', { size: 'tall', timeline: true }],
   ['Sources, pages, countries', 'Referrers and utm tags, top, entry and exit pages, and where in the world Visitors are.', { code: 'utm_source=newsletter' }],
   ['Filters', 'Click any row to narrow every report to it. Filters live in the URL, so a view is a link.', { code: '$country is DE' }],
@@ -46,5 +46,4 @@ export const EXAMPLES = [
   ['Do people finish my game?', 'Send game_completed with a score and a level. Count it, and split it by either.'],
   ['Where do people give up on sign-up?', 'Read a few Session timelines. The last Event before they left is usually the answer.'],
   ['Is my own testing in these numbers?', 'Give local builds the dev Environment’s key. Production stays clean.'],
-  ['Which of my side projects is anyone using?', 'One Instance, a Project each, all on one page.'],
 ];

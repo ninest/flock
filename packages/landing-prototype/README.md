@@ -2,18 +2,19 @@
 
 **Question:** what should the `flock.misc.page` landing page look like, and how should the hero tell the "John is being tracked" joke?
 
-Round one compared three pages (surveillance feed, John's session, scroll to follow John; see commit `f4e7186`). **The surveillance feed won.** Round two is all that page, with two things to choose, each on its own URL parameter and its own half of the pill at the bottom:
+Three rounds so far, each narrowing the last:
+
+| Round | Commit | Compared | Chosen |
+|---|---|---|---|
+| 1 | `f4e7186` | Three pages: surveillance feed, John's session, scroll to follow John | Surveillance feed |
+| 2 | `8f644db` | Caption styles (notifications, callout on the car, field report) and layouts below the hero (bento, grid, no boxes) | Field report; bento for capabilities; a plain grid for use cases |
+| 3 | this one | One page, no switcher | |
 
 ```sh
-pnpm landing:prototype   # http://hel:2110/?variant=bento&caption=toast
+pnpm landing:prototype   # http://hel:2110/
 ```
 
-| Parameter | Values | What changes |
-|---|---|---|
-| `variant` (← → keys) | `bento`, `grid`, `plain` | How Capabilities and Use cases are laid out below the hero: tiles of mixed sizes, even cards, or no boxes |
-| `caption` (Shift + ↑ ↓) | `toast`, `callout`, `report` | How the hero says what John is doing: stacked notifications, a callout hanging off the car, or a field report |
-
-`site/` is plain HTML, CSS and JS with no build. `site/content.js` holds the words; `hero.js` the hero and caption styles; `sections.js` the layouts.
+`site/` is plain HTML, CSS and JS with no build. `site/content.js` holds the words; `hero.js` the hero and its report card; `sections.js` what is below it.
 
 ## The video
 
