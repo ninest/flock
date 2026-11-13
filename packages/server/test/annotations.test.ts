@@ -115,4 +115,55 @@ layer(Harness.layer())("Annotations", (it) => {
       const plain = yield* h.client.annotations.create({ params: { projectId: project.id }, payload: { label: "Plain", description: "" } })
       assert.isNull(plain.description)
     }))
+
+  it.effect("the overview carries only the Annotations in its local range, whatever the Filters", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const project = yield* h.createProject({ timeZone: "America/New_York" })
+      const [production] = project.environments
+      const projectId = project.id
+      const add = (label: string, iso: string) =>
+        h.client.annotations.create({ params: { projectId }, payload: { label, at: DateTime.makeUnsafe(iso) } })
+      yield* at("2026-03-10T15:00:00Z")
+      // 2026-03-02 local starts at 05:00Z; 2026-03-10 local ends at 2026-03-11T04:00Z (after the DST change).
+      yield* add("Before", "2026-03-02T04:59:00Z")
+      yield* add("First day", "2026-03-02T05:00:00Z")
+      yield* add("Late on the last day", "2026-03-11T03:59:00Z")
+      yield* add("After", "2026-03-11T04:00:00Z")
+      yield* add("Earlier today", "2026-03-10T14:00:00Z")
+
+      const labels = (query: Parameters<typeof h.overview>[1]) =>
+        h.overview(production!.id, query).pipe(Effect.map((o) => o.annotations.map((a) => a.label)))
+      const custom = { period: "custom" as const, from: "2026-03-02", to: "2026-03-10" }
+      assert.deepStrictEqual(yield* labels(custom), ["First day", "Earlier today", "Late on the last day"])
+      assert.deepStrictEqual(yield* labels({ period: "today" }), ["Earlier today", "Late on the last day"])
+      assert.deepStrictEqual(
+        yield* labels({ ...custom, filters: [{ eventProperty: "$path", op: "is", value: "/nothing-matches" }] }),
+        ["First day", "Earlier today", "Late on the last day"]
+      )
+    }))
+
+  it.effect("an Annotation for all Environments also shows on an Environment added later", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const project = yield* h.createProject({})
+      yield* at("2026-03-01T10:00:00Z")
+      yield* h.client.annotations.create({ params: { projectId: project.id }, payload: { label: "Launch" } })
+
+      const staging = yield* h.client.projects.addEnvironment({ params: { projectId: project.id }, payload: { name: "staging" } })
+      const overview = yield* h.overview(staging.id, { period: "today" })
+      assert.deepStrictEqual(overview.annotations.map((a) => a.label), ["Launch"])
+    }))
+
+  it.effect("deleting the Project deletes its Annotations", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const project = yield* h.createProject({})
+      yield* at("2026-03-01T10:00:00Z")
+      const launch = yield* h.client.annotations.create({ params: { projectId: project.id }, payload: { label: "Launch" } })
+
+      yield* h.client.projects.delete({ params: { projectId: project.id } })
+      const gone = yield* h.client.annotations.delete({ params: { projectId: project.id, annotationId: launch.id } }).pipe(Effect.flip)
+      assert.strictEqual(gone._tag, "ProjectNotFound")
+    }))
 })
