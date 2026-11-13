@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Playground: Home</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <nav><a href="/">Home</a><a href="/pricing">Pricing</a><a href="/blog">Blog</a><a href="/sources">Sources</a><a href="/spa">SPA</a><a href="/ingest">Raw ingest</a></nav>
+    <h1>Home</h1>
+    <p>The Flock browser script sends a <code>$pageview</code> when this page loads. Watch the requests to <code>/api/ingest</code> in your browser's dev tools.</p>
+    <p class="muted" id="config"></p>
+    <h2>Custom events</h2>
+    <p>
+      <button id="login">Log in</button>
+      sends <code>login_clicked</code>, then leaves for the Pricing page straight away (the Event is sent during page unload).
+    </p>
+    <p>
+      <button id="game">Complete game</button>
+      sends <code>game_completed</code> with a random <code>score</code> (a number) and <code>level</code>
+      (easy, medium or hard). Open it under Custom events on the dashboard to break it down by
+      <code>level</code> and see statistics for <code>score</code>.
+    </p>
+    <h2>Tracking mode</h2>
+    <p>Tracking mode: <strong id="mode"></strong>. Change it on the Playground Project in the dashboard, then reload.</p>
+    <p>
+      <button id="identify">Identify as test-user</button>
+      calls <code>flock.identify("test-user")</code>. In persistent mode it sends <code>$identify</code> and
+      later Events count as the Visitor <code>test-user</code>, on every device that does the same. In
+      cookieless mode it does nothing.
+    </p>
+    <h2>Enrichment</h2>
+    <p>
+      <a id="tracked-link" href="/pricing?token=s3cret&amp;email=someone%40example.com&amp;utm_source=playground&amp;utm_campaign=enrichment">Open Pricing with a token, an email and UTM tags</a>
+      in the URL. Flock stores the Pageview's URL with only the <code>utm_*</code> parameters left, and adds
+      <code>$country</code>, <code>$browser</code>, <code>$os</code> and <code>$device</code> from the request
+      (never the IP itself). See them under Audience on the dashboard. Visiting from localhost or a private
+      network gives an unknown country.
+    </p>
+    <script>
+      document.getElementById("config").textContent = `Script from ${FLOCK.api}/flock.js, key ${FLOCK.key}`
+      document.getElementById("mode").textContent = FLOCK.mode === "persistent"
+        ? `persistent (Visitor ID stored on this device: ${localStorage.getItem("flock_id") ?? "none yet"})`
+        : "cookieless (nothing stored on this device)"
+      document.getElementById("identify").onclick = () => flock.identify("test-user")
+      document.getElementById("login").onclick = () => {
+        flock.track("login_clicked")
+        location.href = "/pricing"
+      }
+      document.getElementById("game").onclick = () => {
+        const levels = ["easy", "medium", "hard"]
+        flock.track("game_completed", {
+          score: Math.floor(Math.random() * 100),
+          level: levels[Math.floor(Math.random() * levels.length)]
+        })
+      }
+    </script>
+  </body>
+</html>

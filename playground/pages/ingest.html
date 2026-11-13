@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Playground: Raw ingest</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <nav><a href="/">Home</a><a href="/pricing">Pricing</a><a href="/blog">Blog</a><a href="/sources">Sources</a><a href="/spa">SPA</a><a href="/ingest">Raw ingest</a></nav>
+    <h1>Raw ingest</h1>
+    <p>Paste any JSON batch and send it to <code>POST /api/ingest</code>. This page itself sends no Pageview.</p>
+    <p class="muted" id="config"></p>
+    <form id="form">
+      <textarea id="batch" rows="16" spellcheck="false"></textarea>
+      <p><button type="submit">Send</button> <button type="button" id="reset">Reset example</button></p>
+    </form>
+    <p>
+      Ingest rejects Events that break its limits, and reports why:
+      <button type="button" id="oversized">Send an oversized Event</button>
+      <button type="button" id="reserved">Send a reserved name</button>
+    </p>
+    <pre id="result"></pre>
+    <script type="module">
+      const { api, key } = window.FLOCK
+      document.getElementById("config").textContent = `Sending to ${api}`
+      const textarea = document.getElementById("batch")
+      const example = () => JSON.stringify({
+        key,
+        events: [
+          { uuid: crypto.randomUUID(), name: "$pageview", properties: { $url: location.origin + "/raw" } },
+          { uuid: crypto.randomUUID(), name: "game_completed", properties: { score: 34 } }
+        ]
+      }, null, 2)
+      textarea.value = example()
+      document.getElementById("reset").onclick = () => { textarea.value = example() }
+      const send = async (body) => {
+        const result = document.getElementById("result")
+        result.textContent = "Sending…"
+        try {
+          const response = await fetch(`${api}/api/ingest`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body
+          })
+          const text = await response.text()
+          result.textContent = `HTTP ${response.status} ${response.statusText}\n\n${text || "(empty body)"}`
+        } catch (error) {
+          result.textContent = `Network error: ${error}`
+        }
+      }
+      document.getElementById("form").onsubmit = (event) => {
+        event.preventDefault()
+        void send(textarea.value)
+      }
+      // Each button puts its batch in the textarea, so you can see what was sent.
+      const sendBatch = (events) => {
+        textarea.value = JSON.stringify({ key, events }, null, 2)
+        void send(textarea.value)
+      }
+      document.getElementById("oversized").onclick = () => sendBatch([
+        { uuid: crypto.randomUUID(), name: "oversized", properties: { blob: "x".repeat(9000) } },
+        { uuid: crypto.randomUUID(), name: "too_many_properties", properties: Object.fromEntries(Array.from({ length: 51 }, (_, i) => [`p${i}`, i])) }
+      ])
+      document.getElementById("reserved").onclick = () => sendBatch([
+        { uuid: crypto.randomUUID(), name: "$login", properties: {} },
+        { uuid: crypto.randomUUID(), name: "game_completed", properties: { $score: 34 } }
+      ])
+    </script>
+  </body>
+</html>

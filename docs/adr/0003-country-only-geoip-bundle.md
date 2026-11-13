@@ -1,0 +1,3 @@
+# Bundle a country-only GeoIP database
+
+The image bundles DB-IP's free IP to Country Lite database (about 8 MB, CC BY 4.0), downloaded during the Docker build by `scripts/download-geoip.sh` rather than committed to git. The City Lite edition, which would also give regions, is about 130 MB, more than the rest of the image, so by default Events get `$country` but no `$region`. `FLOCK_GEOIP_DB` can point at any MaxMind-format database, and a City database fills in `$region` with no code change. The client IP comes from the first `X-Forwarded-For` address because Flock always runs behind a proxy (Railway, Compose with a TLS proxy, `tailscale serve`); a client that forges that header only mislabels its own country. The IP is used for the lookup and then dropped.
