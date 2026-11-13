@@ -1,0 +1,7 @@
+{
+  "name": "flock-landing-capture",
+  "private": true,
+  "type": "module",
+  "description": "PROTOTYPE: renders the landing hero video from ../../../../air-city with headless Chromium + ffmpeg. Not part of the pnpm workspace.",
+  "dependencies": { "ffmpeg-static": "5.2.0", "playwright-core": "1.64.1" }
+}
