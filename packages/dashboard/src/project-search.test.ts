@@ -18,7 +18,17 @@ describe("validateProjectSearch", () => {
   })
   it("keeps the Visitors tab and its ID search", () =>
     expect(validateProjectSearch({ tab: "visitors", q: "user_" })).toEqual({ tab: "visitors", q: "user_" }))
-  it("keeps the selected live Session", () => expect(validateProjectSearch({ tab: "live", live: "abc" })).toEqual({ tab: "live", live: "abc" }))
+  it("keeps the Custom event's chart choices", () =>
+    expect(validateProjectSearch({ tab: "events", event: "checkout", measure: "visitors", number: "price", stat: "median" })).toEqual({
+      tab: "events",
+      event: "checkout",
+      measure: "visitors",
+      number: "price",
+      stat: "median"
+    }))
+  it("drops chart choices that are not ones", () =>
+    expect(validateProjectSearch({ measure: "revenue", number: "", stat: "mode" })).toEqual({}))
+  it("keeps the selected live Session",() => expect(validateProjectSearch({ tab: "live", live: "abc" })).toEqual({ tab: "live", live: "abc" }))
 })
 
 describe("reportQuery", () => {
