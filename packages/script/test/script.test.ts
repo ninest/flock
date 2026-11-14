@@ -82,35 +82,27 @@ describe("Delivery", () => {
     expect(new Set(uuids).size).toBe(4)
   })
 
-  it("sends with sendBeacon, as a CORS-safelisted text/plain POST", async () => {
+  it("sends with fetch, not sendBeacon, as a CORS-safelisted text/plain POST", async () => {
+    // EasyPrivacy blocks third-party sendBeacon requests (`*$ping,third-party`).
     const site = await openPlayground(browser())
-    await site.goto("/pricing")
-    await site.waitForEvents(1)
-    expect(site.requests[0]).toMatchObject({ transport: "ping", method: "POST", contentType: expect.stringMatching(/^text\/plain/) })
-  })
-
-  it("falls back to fetch when sendBeacon is unavailable", async () => {
-    const site = await openPlayground(browser(), { sendBeacon: false })
     await site.goto("/pricing")
     await site.waitForEvents(1)
     expect(site.requests[0]).toMatchObject({ transport: "fetch", method: "POST", contentType: expect.stringMatching(/^text\/plain/) })
   })
 
-  for (const sendBeacon of [true, false]) {
-    it(`delivers an Event sent while the page unloads (${sendBeacon ? "sendBeacon" : "fetch keepalive"})`, async () => {
-      const site = await openPlayground(browser(), { sendBeacon })
-      await site.goto("/")
-      await site.waitForEvents(1)
-      await site.page.click("text=Log in") // tracks login_clicked, then leaves for /pricing at once
-      await site.page.waitForURL(`**/pricing`)
-      const events = await site.waitForEvents(3)
-      expect(events.map((e) => [e.name, e.properties.$url])).toEqual([
-        ["$pageview", "http://playground.test/"],
-        ["login_clicked", "http://playground.test/"],
-        ["$pageview", "http://playground.test/pricing"]
-      ])
-    })
-  }
+  it("delivers an Event sent while the page unloads", async () => {
+    const site = await openPlayground(browser())
+    await site.goto("/")
+    await site.waitForEvents(1)
+    await site.page.click("text=Log in") // tracks login_clicked, then leaves for /pricing at once
+    await site.page.waitForURL(`**/pricing`)
+    const events = await site.waitForEvents(3)
+    expect(events.map((e) => [e.name, e.properties.$url])).toEqual([
+      ["$pageview", "http://playground.test/"],
+      ["login_clicked", "http://playground.test/"],
+      ["$pageview", "http://playground.test/pricing"]
+    ])
+  })
 })
 
 describe("Cookieless mode", () => {

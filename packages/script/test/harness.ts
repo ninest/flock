@@ -71,7 +71,6 @@ export interface Playground {
 export const openPlayground = async (
   browser: Browser,
   options: {
-    readonly sendBeacon?: boolean
     /** The Tracking mode in the page's snippet (`data-mode`). Default: cookieless. */
     readonly mode?: TrackingMode
     /** The Project's Tracking mode, as `/api/ingest/config` answers it. Default: `mode`. */
@@ -82,11 +81,6 @@ export const openPlayground = async (
 ): Promise<Playground> => {
   const code = await builtScript()
   const context = await browser.newContext()
-  if (options.sendBeacon === false) {
-    await context.addInitScript(() => {
-      Object.defineProperty(Navigator.prototype, "sendBeacon", { value: undefined })
-    })
-  }
   if (options.localStorage !== undefined) {
     await context.addInitScript((entries) => {
       for (const [name, value] of Object.entries(entries)) localStorage.setItem(name, value)

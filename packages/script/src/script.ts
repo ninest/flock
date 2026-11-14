@@ -61,9 +61,10 @@ const whenReady = (f: () => void) => (ready ? ready.then(f) : f())
 const post = (name: string, properties: Record<string, unknown>, $url = location.href) => {
   const event = { uuid: uuid(), name, distinct_id: distinctId, properties: { ...properties, $url } }
   const body = JSON.stringify({ key, events: [event] })
-  // A string body goes as text/plain, which needs no CORS preflight. sendBeacon survives page
-  // unload; it is missing in some browsers and returns false when its queue is full.
-  if (!navigator.sendBeacon?.(endpoint, body)) fetch(endpoint, { method: "POST", body, keepalive: true }).catch(() => {})
+  // A string body goes as text/plain, which needs no CORS preflight; keepalive lets it outlive
+  // page unload. Not sendBeacon: browsers send that as a "ping", and EasyPrivacy blocks every
+  // third-party ping (`*$ping,third-party`), so adblockers would drop the Events.
+  fetch(endpoint, { method: "POST", body, keepalive: true }).catch(() => {})
 }
 
 const send = (name: string, properties: Record<string, unknown> = {}) => {

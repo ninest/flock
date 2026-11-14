@@ -35,8 +35,8 @@ import { CreatedInvite, Forbidden, Invite, InviteId, InviteNotFound, InstanceSet
 export class IngestGroup extends HttpApiGroup.make("ingest")
   .add(
     HttpApiEndpoint.post("send", "/api/ingest", {
-      // JSON either way. The browser script sends text/plain, which sendBeacon and
-      // cross-origin fetch can send without a CORS preflight.
+      // JSON either way. The browser script sends text/plain, which cross-origin fetch
+      // can send without a CORS preflight.
       payload: [IngestBatch, IngestBatch.pipe(HttpApiSchema.asJson({ contentType: "text/plain" }))],
       success: IngestResult,
       error: [UnknownKey, OriginNotAllowed]

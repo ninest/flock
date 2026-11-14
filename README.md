@@ -79,7 +79,7 @@ The browser script:
 <script>flock.track("login_clicked", { plan: "pro" })</script>
 ```
 
-It sends a `$pageview` on load and on `pushState`/`popstate`, gives each Event a UUID, and sends with `sendBeacon` (falling back to `fetch` with `keepalive`) as a `text/plain` JSON body, which needs no CORS preflight. Events go to the origin the script came from, or to `data-api` if set.
+It sends a `$pageview` on load and on `pushState`/`popstate`, gives each Event a UUID, and sends with `fetch` and `keepalive` as a `text/plain` JSON body, which needs no CORS preflight. Events go to the origin the script came from, or to `data-api` if set.
 
 `data-mode` is the Project's Tracking mode (ADR 0002), which the dashboard's snippet fills in. In `cookieless` mode (the default) the script writes no cookies or storage, and `identify` does nothing. In `persistent` mode it first asks `GET /api/ingest/config?key=…` for the Project's current Tracking mode, then stores a random Visitor ID in `localStorage` and sends it as each Event's `distinct_id`. `flock.identify("user-42")` sends a `$identify` Event that links the device to `user-42`, and from then on the device sends Events as `user-42`. The server only trusts `distinct_id` when the Project is persistent, so switching the mode in the dashboard takes effect at once for counting, and Visitor counts start afresh. If the Project is switched back to cookieless while sites still carry a `persistent` snippet, the script sees that on the next page load, deletes its stored IDs and stores nothing more. Update the snippet anyway: a stale persistent snippet waits for that check before sending.
 

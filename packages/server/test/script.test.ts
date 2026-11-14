@@ -14,7 +14,7 @@ layer(Harness.layer())("Browser script", (it) => {
       assert.strictEqual(yield* Effect.promise(() => response.text()), readFileSync(scriptFile, "utf8"))
     }))
 
-  it.effect("accepts a batch sent as text/plain, the way sendBeacon sends it", () =>
+  it.effect("accepts a batch sent as text/plain, the way the browser script sends it", () =>
     Effect.gen(function*() {
       const h = yield* Harness
       const { environments: [production] } = yield* h.createProject({ environments: ["production"] })
