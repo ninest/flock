@@ -18,24 +18,44 @@ const isPrivateIpv4 = (host: string) => {
 const ipv6Groups = (ip: string): ReadonlyArray<number> | undefined => {
   const [head, tail, ...rest] = ip.split("::")
   if (rest.length > 0) return undefined
-  const parse = (part: string | undefined) => (part ? part.split(":").map((g) => parseInt(g, 16)) : [])
+  const parse = (part: string | undefined) => (part ? part.split(":") : [])
   const left = parse(head)
   const right = parse(tail)
-  const groups = tail === undefined ? left : [...left, ...Array(8 - left.length - right.length).fill(0), ...right]
-  return groups.length === 8 && groups.every((g) => Number.isInteger(g) && g >= 0 && g <= 0xffff) ? groups : undefined
+  const zeros = 8 - left.length - right.length
+  // Without "::" all eight groups are written out; with it, it stands for at least one.
+  if (tail === undefined ? zeros !== 0 : zeros < 1) return undefined
+  const groups = [...left, ...Array<string>(zeros).fill("0"), ...right]
+  return groups.every((g) => /^[0-9a-f]{1,4}$/i.test(g)) ? groups.map((g) => parseInt(g, 16)) : undefined
 }
 
-/** A bracketed IPv6 literal that isn't publicly routable; IPv4-mapped addresses are judged as IPv4. */
-const isPrivateIpv6 = (host: string) => {
-  const groups = ipv6Groups(host.slice(1, -1))
+type Ipv6Groups = readonly [number, number, number, number, number, number, number, number]
+
+/** The IPv4 address written into two neighbouring groups, in dotted form. */
+const dotted = (high: number, low: number) => [high >> 8, high & 0xff, low >> 8, low & 0xff].join(".")
+
+/** The IPv4 address an IPv6 address stands for, when it is one of the forms that carry one. */
+const embeddedIpv4 = ([a, b, c, d, e, f, g, h]: Ipv6Groups): string | undefined => {
+  if (a === 0x2002) return dotted(b, c) // 2002::/16, 6to4
+  if (a === 0x64 && b === 0xff9b && c === 0 && d === 0 && e === 0 && f === 0) return dotted(g, h) // 64:ff9b::/96, NAT64
+  if (a !== 0 || b !== 0 || c !== 0 || d !== 0) return undefined
+  // ::/96 (IPv4-compatible; also :: and ::1), ::ffff:0:0/96 (IPv4-mapped), ::ffff:0:0:0/96 (IPv4-translated)
+  return (e === 0 && (f === 0 || f === 0xffff)) || (e === 0xffff && f === 0) ? dotted(g, h) : undefined
+}
+
+/**
+ * A bracketed host that isn't a publicly routable IPv6 address, which includes one that isn't
+ * an IPv6 address at all. An address that carries an IPv4 address is judged as that address.
+ */
+const isNotPublicIpv6 = (host: string) => {
+  const groups = ipv6Groups(host.slice(1, -1)) as Ipv6Groups | undefined
   if (groups === undefined) return true
-  const [first, , , , , mapped, high, low] = groups as [number, number, number, number, number, number, number, number]
-  if (groups.slice(0, 5).every((g) => g === 0) && mapped === 0xffff) {
-    return isPrivateIpv4([high >> 8, high & 0xff, low >> 8, low & 0xff].join("."))
-  }
-  return (groups.slice(0, 7).every((g) => g === 0) && low <= 1) || // :: (unspecified) and ::1 (loopback)
-    (first & 0xfe00) === 0xfc00 || // fc00::/7, unique local
-    (first & 0xffc0) === 0xfe80 // fe80::/10, link-local
+  const ipv4 = embeddedIpv4(groups)
+  if (ipv4 !== undefined) return isPrivateIpv4(ipv4)
+  const [first, second, third] = groups
+  return (first & 0xfe00) === 0xfc00 || // fc00::/7, unique local
+    (first & 0xff80) === 0xfe80 || // fe80::/10, link-local, and fec0::/10, site-local
+    (first & 0xff00) === 0xff00 || // ff00::/8, multicast
+    (first === 0x64 && second === 0xff9b && third === 1) // 64:ff9b:1::/48, local-use NAT64
 }
 
 const PRIVATE_SUFFIXES = [".localhost", ".local", ".internal", ".lan", ".home.arpa", ".ts.net"]
@@ -43,7 +63,7 @@ const PRIVATE_SUFFIXES = [".localhost", ".local", ".internal", ".lan", ".home.ar
 /** localhost, private-network addresses (IPv4 and IPv6) and names, and single-label intranet names such as `hel`. */
 export const isPrivateHost = (host: string) =>
   host.startsWith("[")
-    ? isPrivateIpv6(host)
+    ? isNotPublicIpv6(host)
     : host === "localhost" || !host.includes(".") || isPrivateIpv4(host) ||
       PRIVATE_SUFFIXES.some((suffix) => host.endsWith(suffix))
 
