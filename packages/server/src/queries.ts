@@ -569,9 +569,9 @@ export class Queries extends Context.Service<Queries, {
         })
     )
 
-    /** Identified: the Visitor ID is one a device was linked to by Identify (ADR 0005). */
+    /** Identified: an Identify once named the Visitor ID, whatever its devices are linked to now (ADR 0005). */
     const isIdentified = (projectId: string, visitorId: string) =>
-      sql`SELECT 1 FROM visitor_alias WHERE project_id = ${projectId} AND visitor_id = ${visitorId} LIMIT 1`.pipe(
+      sql`SELECT 1 FROM identified_visitor WHERE project_id = ${projectId} AND visitor_id = ${visitorId}`.pipe(
         Effect.map((rows) => rows.length > 0)
       )
 
@@ -756,7 +756,7 @@ export class Queries extends Context.Service<Queries, {
             SELECT DISTINCT visitor_id FROM scoped
             WHERE visitor_id IS NOT NULL
               ${search === undefined ? sql`` : sql`AND visitor_id IN (
-                SELECT visitor_id FROM visitor_alias WHERE project_id = ${projectId} AND starts_with(visitor_id, ${search})
+                SELECT visitor_id FROM identified_visitor WHERE project_id = ${projectId} AND starts_with(visitor_id, ${search})
               )`}
           ),
           totals AS (
@@ -773,7 +773,7 @@ export class Queries extends Context.Service<Queries, {
             LIMIT ${VISITORS_PAGE_SIZE + 1}
           )
           SELECT p.visitor_id, p.first_seen_at, p.last_seen_at, p.sessions, p.events,
-                 EXISTS (SELECT 1 FROM visitor_alias a WHERE a.project_id = ${projectId} AND a.visitor_id = p.visitor_id) AS identified,
+                 EXISTS (SELECT 1 FROM identified_visitor i WHERE i.project_id = ${projectId} AND i.visitor_id = p.visitor_id) AS identified,
                  fe.properties ->> '$country' AS country, fe.properties ->> '$device' AS device,
                  fe.properties ->> '$browser' AS browser,
                  ${referringDomainOf(sql, "fp.properties")} AS referring_domain

@@ -38,7 +38,8 @@ export class Visitors extends Context.Service<Visitors, {
    * Links a device to an identified Visitor: from now on its Events count as that Visitor, and its
    * earlier Events and Sessions in the Project move over to it. A device that already identified
    * as someone else switches to the new ID (the person signed in as another account). An ID that
-   * is itself an identified Visitor is never linked, so two identified Visitors are never merged.
+   * was ever identified stays an identified Visitor, also once no device is linked to it, and is
+   * never linked to another, so two identified Visitors are never merged.
    * Run it inside the ingest transaction.
    */
   readonly identify: (input: IdentifyInput) => Effect.Effect<void, SqlError>
@@ -83,8 +84,12 @@ export class Visitors extends Context.Service<Visitors, {
 
       const identify = Effect.fn("Visitors.identify")(function*({ deviceId, projectId, visitorId }: IdentifyInput) {
         if (deviceId === visitorId) return
+        // Recorded for good: the ID stays identified when its devices later switch to another one.
+        yield* sql`
+          INSERT INTO identified_visitor ${sql.insert({ projectId, visitorId })}
+          ON CONFLICT (project_id, visitor_id) DO NOTHING`
         const [identified] = yield* sql`
-          SELECT 1 FROM visitor_alias WHERE project_id = ${projectId} AND visitor_id = ${deviceId} LIMIT 1`
+          SELECT 1 FROM identified_visitor WHERE project_id = ${projectId} AND visitor_id = ${deviceId}`
         if (identified) return
         yield* sql`
           INSERT INTO visitor_alias ${sql.insert({ projectId, deviceId, visitorId })}

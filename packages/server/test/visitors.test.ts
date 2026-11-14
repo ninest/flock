@@ -191,6 +191,42 @@ layer(Harness.layer())("Visitor profile and Identify (ADR 0005)", (it) => {
       assert.strictEqual(one.events, 3)
       assert.strictEqual(two.events, 3)
     }))
+
+  it.effect("a Visitor stays identified after its only device switches to another account, and is never merged afterwards", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* persistentProject()
+      yield* at("2026-03-01T09:00:00Z")
+      yield* h.ingest(production!.key, [identify("person-1", "laptop"), as("person-1", pageview())])
+      // Someone else signs in on the same laptop: the device switches to person-2.
+      yield* at("2026-03-01T10:00:00Z")
+      yield* h.ingest(production!.key, [identify("person-2", "laptop"), as("person-2", pageview())])
+
+      const afterSwitch = yield* profile(production!.id, "person-1")
+      assert.strictEqual(afterSwitch.identified, true)
+      assert.strictEqual(afterSwitch.events, 2)
+      assert.strictEqual(afterSwitch.sessions, 1)
+      const list = yield* visitors(production!.id, march("01"))
+      assert.deepStrictEqual(list.visitors.map((v) => [v.visitorId, v.identified]), [["person-2", true], ["person-1", true]])
+      const found = yield* visitors(production!.id, { ...march("01"), search: "person-1" })
+      assert.deepStrictEqual(found.visitors.map((v) => v.visitorId), ["person-1"])
+      const { sessions: [session] } = yield* visitorSessions(production!.id, "person-1")
+      const details = yield* h.session(production!.id, session!.id)
+      assert.deepStrictEqual([details.visitorId, details.visitorIdentified], ["person-1", true])
+
+      // An Identify that would move person-1's history into person-2 is ignored.
+      yield* at("2026-03-01T11:00:00Z")
+      yield* h.ingest(production!.key, [identify("person-2", "person-1"), as("person-1", pageview())])
+
+      const one = yield* profile(production!.id, "person-1")
+      const two = yield* profile(production!.id, "person-2")
+      assert.strictEqual(one.identified, true)
+      assert.strictEqual(two.identified, true)
+      assert.strictEqual(one.events, 3)
+      assert.strictEqual(two.events, 3)
+      assert.strictEqual(one.sessions, 2)
+      assert.strictEqual(two.sessions, 2)
+    }))
 })
 
 const CHROME_WINDOWS =
