@@ -91,7 +91,7 @@ It sends a `$pageview` on load and on `pushState`/`popstate`, gives each Event a
 - `$` is reserved for Flock: only Built-in event names (`$pageview`) and Flock-defined Event properties (`$url`, `$referrer`, and the audience properties, which Flock replaces) may start with it.
 - A repeated `uuid` (per Environment) is ignored but still counted as accepted, so retries are safe.
 - `timestamp` is kept when it is at most 24 hours old; otherwise (older, in the future, unparseable) the receive time is used.
-- Browser requests (with an `Origin` header) must match the Environment's allowed origins, or the whole batch gets a 403 `OriginNotAllowed`. Empty (production's default) means any public origin, rejecting localhost and private networks; new non-production Environments allow `localhost` and `*.ts.net`. Owners edit them in the dashboard.
+- Browser requests (with an `Origin` header) must match the Environment's allowed origins, or the whole batch gets a 403 `OriginNotAllowed`. Empty (production's default) means any public origin (public IPv6 literals included), rejecting localhost, private networks and single-label names such as `hel`; new non-production Environments allow `localhost` and `*.ts.net`. Owners edit them in the dashboard.
 - Requests from known bots and headless browsers are dropped: a 200 with nothing accepted and nothing stored.
 
 ## Self-hosting

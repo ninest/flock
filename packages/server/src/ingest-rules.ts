@@ -14,18 +14,38 @@ const isPrivateIpv4 = (host: string) => {
     (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) // 100.64/10: carrier-grade NAT, Tailscale
 }
 
+/** The eight 16-bit groups of an IPv6 address as URL hostnames serialize it (compressed, hex only). */
+const ipv6Groups = (ip: string): ReadonlyArray<number> | undefined => {
+  const [head, tail, ...rest] = ip.split("::")
+  if (rest.length > 0) return undefined
+  const parse = (part: string | undefined) => (part ? part.split(":").map((g) => parseInt(g, 16)) : [])
+  const left = parse(head)
+  const right = parse(tail)
+  const groups = tail === undefined ? left : [...left, ...Array(8 - left.length - right.length).fill(0), ...right]
+  return groups.length === 8 && groups.every((g) => Number.isInteger(g) && g >= 0 && g <= 0xffff) ? groups : undefined
+}
+
+/** A bracketed IPv6 literal that isn't publicly routable; IPv4-mapped addresses are judged as IPv4. */
 const isPrivateIpv6 = (host: string) => {
-  if (!host.startsWith("[")) return false
-  const ip = host.slice(1, -1)
-  return ip === "::1" || ip === "::" || /^f[cd]/.test(ip) || /^fe[89ab]/.test(ip) || ip.startsWith("::ffff:")
+  const groups = ipv6Groups(host.slice(1, -1))
+  if (groups === undefined) return true
+  const [first, , , , , mapped, high, low] = groups as [number, number, number, number, number, number, number, number]
+  if (groups.slice(0, 5).every((g) => g === 0) && mapped === 0xffff) {
+    return isPrivateIpv4([high >> 8, high & 0xff, low >> 8, low & 0xff].join("."))
+  }
+  return (groups.slice(0, 7).every((g) => g === 0) && low <= 1) || // :: (unspecified) and ::1 (loopback)
+    (first & 0xfe00) === 0xfc00 || // fc00::/7, unique local
+    (first & 0xffc0) === 0xfe80 // fe80::/10, link-local
 }
 
 const PRIVATE_SUFFIXES = [".localhost", ".local", ".internal", ".lan", ".home.arpa", ".ts.net"]
 
-/** localhost, private-network addresses and names, and single-label intranet hosts such as `hel`. */
+/** localhost, private-network addresses (IPv4 and IPv6) and names, and single-label intranet names such as `hel`. */
 export const isPrivateHost = (host: string) =>
-  host === "localhost" || !host.includes(".") || isPrivateIpv4(host) || isPrivateIpv6(host) ||
-  PRIVATE_SUFFIXES.some((suffix) => host.endsWith(suffix))
+  host.startsWith("[")
+    ? isPrivateIpv6(host)
+    : host === "localhost" || !host.includes(".") || isPrivateIpv4(host) ||
+      PRIVATE_SUFFIXES.some((suffix) => host.endsWith(suffix))
 
 const matches = (host: string, pattern: string) => {
   const p = pattern.toLowerCase()
