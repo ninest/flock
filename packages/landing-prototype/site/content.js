@@ -27,7 +27,7 @@ export const BEATS = [
 
 export const HEADLINE = 'Flock cameras, but for your website.';
 export const SUB = 'Self-hosted analytics for the sites and apps you run. It sees every visit, and it only reports to you.';
-export const STATEMENT = 'Flock counts the pageviews, events and sessions on your websites and apps, and keeps them on a server you run.';
+export const STATEMENT = 'Flock counts the pageviews, events, and sessions on your websites and apps, and keeps them on a server you run.';
 
 // [title, text, extra]: `extra` is what a bento tile shows besides the words (ignored by the other layouts).
 export const FEATURES = [

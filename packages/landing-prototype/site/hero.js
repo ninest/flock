@@ -14,7 +14,7 @@ export function renderHero(root) {
   const mark = h('div', 'mark', `<div class="reticle"><i></i><i></i><i></i><i></i></div><div class="tag"><b>${VISITOR.toUpperCase()}</b><span data-event></span></div>`);
   mark.setAttribute('aria-hidden', 'true');
   const pitch = h('div', 'pitch', `<h1>${HEADLINE}</h1><p>${SUB}</p>
-    <p class="cta"><a class="btn" href="${GITHUB}">View on GitHub</a><a class="more" href="#more">Learn more ↓</a></p>`);
+    <p class="cta"><a class="btn" href="${GITHUB}">View on GitHub</a><a class="more" href="#more">Learn more</a></p>`);
   const report = h('div', 'report', `<span class="report-n" data-n></span><ol data-log></ol>
     <dl><div><dt>Event</dt><dd data-e class="mono"></dd></div><div><dt>Observed</dt><dd data-l></dd></div><div><dt>Note</dt><dd data-a></dd></div><div><dt>Time</dt><dd data-t></dd></div></dl>`);
   report.setAttribute('aria-live', 'polite');
