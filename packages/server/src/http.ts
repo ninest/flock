@@ -5,6 +5,7 @@ import { Effect, Layer, Option } from "effect"
 import { HttpRouter, type HttpServerRequest, HttpServerResponse, HttpStaticServer } from "effect/http"
 import { HttpApiBuilder, HttpApiMiddleware, HttpApiScalar } from "effect/http-api"
 import { Access, AuthConfig } from "./access.ts"
+import { Annotations } from "./annotations.ts"
 import { clientIp, type TrustedProxies } from "./client-ip.ts"
 import { AuthRoutes, currentMember, MemberAuthLive } from "./auth.ts"
 import type { RequestContext } from "./enrichment.ts"
@@ -109,6 +110,14 @@ const CustomEventsHandlers = HttpApiBuilder.group(FlockApi, "customEvents", Effe
       CurrentMember.use(({ id: member }) => queries.customEventStats({ member, environmentId, query })))
 }))
 
+const AnnotationsHandlers = HttpApiBuilder.group(FlockApi, "annotations", Effect.fn(function*(handlers) {
+  const annotations = yield* Annotations
+  return handlers
+    .handle("create", ({ params, payload }) => CurrentMember.use(({ id }) => annotations.create(id, params.projectId, payload)))
+    .handle("delete", ({ params }) =>
+      CurrentMember.use(({ id }) => annotations.delete(id, params.projectId, params.annotationId)))
+}))
+
 const SignInHandlers = HttpApiBuilder.group(FlockApi, "signIn", Effect.fn(function*(handlers) {
   const { oidc, passwordSignIn } = yield* AuthConfig
   const options = { password: passwordSignIn, oidc: Option.match(oidc, { onNone: () => null, onSome: ({ name }) => ({ name }) }) }
@@ -150,7 +159,7 @@ const InstanceHandlers = HttpApiBuilder.group(FlockApi, "instance", Effect.fn(fu
 }))
 
 const ApiRoutes = (trusted: TrustedProxies) => HttpApiBuilder.layer(FlockApi, { openapiPath: "/api/openapi.json" }).pipe(
-  Layer.provide([HealthHandlers, IngestHandlers(trusted), ProjectsHandlers, EnvironmentsHandlers, ReportsHandlers, CustomEventsHandlers, SignInHandlers, MembersHandlers, InstanceHandlers]),
+  Layer.provide([HealthHandlers, IngestHandlers(trusted), ProjectsHandlers, EnvironmentsHandlers, ReportsHandlers, CustomEventsHandlers, AnnotationsHandlers, SignInHandlers, MembersHandlers, InstanceHandlers]),
   Layer.provide(MemberAuthLive),
   Layer.provide(HttpApiMiddleware.layerProblemDetails({ includeDetails: true }))
 )

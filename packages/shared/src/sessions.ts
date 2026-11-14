@@ -24,6 +24,8 @@ export const SessionSummary = Schema.Struct({
   bounce: Schema.Boolean,
   /** The cleaned path of the first Pageview; null without Pageviews. */
   entryPage: Schema.NullOr(Schema.String),
+  /** The cleaned path of the latest Pageview: where a live Visitor is now, or where an ended Session left from; null without Pageviews. */
+  lastPage: Schema.NullOr(Schema.String),
   /** The referring domain of the first Pageview, as in the Referrers report; null for direct traffic. */
   referringDomain: Schema.NullOr(Schema.String),
   /** `$country` and `$device` of the first Event; null when unknown. */

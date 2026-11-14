@@ -15,6 +15,7 @@ import type {
   NumericStats,
   Overview,
   OverviewNumbers,
+  ProjectId,
   EventPropertyFilters,
   ReportRangeQuery,
   SessionDetail,
@@ -23,13 +24,15 @@ import type {
   SessionsQuery,
   SessionSummary,
   Top,
-  TopQuery
+  TopQuery,
+  TopRow
 } from "@flock/shared"
 import { SESSION_EVENT_LIMIT, SessionNotFound, SESSIONS_PAGE_SIZE, TOP_LIMIT } from "@flock/shared"
 import { Context, DateTime, Effect, Layer } from "effect"
 import type { SqlError } from "effect/sql/SqlError"
 import type { Fragment } from "effect/sql/Statement"
 import { matchesFilters, pathOf, referringDomainOf } from "./filters.ts"
+import { Annotations } from "./annotations.ts"
 import { Projects } from "./projects.ts"
 import { type ReportRange, resolveRange } from "./report-range.ts"
 import { SESSION_TIMEOUT_MINUTES } from "./sessions.ts"
@@ -81,6 +84,7 @@ export class Queries extends Context.Service<Queries, {
   static readonly layer = Layer.effect(Queries, Effect.gen(function*() {
     const sql = yield* PgClient.PgClient
     const projects = yield* Projects
+    const annotations = yield* Annotations
 
     /** Fails with EnvironmentNotFound unless the Member may read the Environment; returns its time zone. */
     const checkAccess = (request: ReportRequest<unknown>) => projects.environment(request.member, request.environmentId)
@@ -90,7 +94,7 @@ export class Queries extends Context.Service<Queries, {
       Effect.gen(function*() {
         const environment = yield* checkAccess(request)
         const range = resolveRange(request.query, environment.timeZone, yield* DateTime.now)
-        return { environmentId: environment.id, range, filters: request.query.filters } satisfies ReportScope
+        return { environmentId: environment.id, projectId: environment.projectId, range, filters: request.query.filters } satisfies ReportScope
       })
 
     /**
@@ -171,42 +175,48 @@ export class Queries extends Context.Service<Queries, {
         return {
           ...range,
           totals: toNumbers(totals),
-          series: series.map((row) => ({ bucket: row.bucket, ...toNumbers(row) }))
+          series: series.map((row) => ({ bucket: row.bucket, ...toNumbers(row) })),
+          annotations: yield* annotations.inRange(scope.projectId, scope.environmentId, range)
         }
       }))
 
-    /** The first (or last) Pageview of each Session in the range, as `properties`. */
+    /** The first (or last) Pageview of each Session in the range, as `properties` and `visitor_id`. */
     const sessionPageview = (which: "first" | "last") => sql`
-      SELECT DISTINCT ON (session_id) properties FROM scoped
+      SELECT DISTINCT ON (session_id) properties, visitor_id FROM scoped
       WHERE name = '$pageview' AND session_id IS NOT NULL
       ORDER BY session_id, ${which === "first" ? sql`ts ASC, received_at ASC` : sql`ts DESC, received_at DESC`}`
 
-    /** One SELECT per ranked-list report, over the `scoped` CTE, yielding `value` and `count` rows. */
+    const visitors = sql`count(DISTINCT visitor_id)::int AS visitors`
+
+    /**
+     * One SELECT per ranked-list report, over the `scoped` CTE, yielding `value` and `visitors` rows,
+     * plus the optional columns that report fills in (`NULL` elsewhere).
+     */
     const topRows = (kind: TopQuery["report"]) => {
       switch (kind) {
         case "pages":
-          return sql`SELECT ${pathOf(sql)} AS value, count(*)::int AS count
+          return sql`SELECT ${pathOf(sql)} AS value, ${visitors}, count(*)::int AS pageviews
             FROM scoped WHERE name = '$pageview' GROUP BY 1`
         case "entryPages":
         case "exitPages":
-          return sql`SELECT ${pathOf(sql)} AS value, count(*)::int AS count
+          return sql`SELECT ${pathOf(sql)} AS value, ${visitors}, NULL::int AS pageviews
             FROM (${sessionPageview(kind === "entryPages" ? "first" : "last")}) s GROUP BY 1`
         case "referrers":
-          return sql`SELECT ${referringDomainOf(sql)} AS value, count(*)::int AS count
+          return sql`SELECT ${referringDomainOf(sql)} AS value, ${visitors}, NULL::int AS pageviews
             FROM (${sessionPageview("first")}) s GROUP BY 1`
         case "utmSources":
         case "utmMediums":
         case "utmCampaigns": {
           const tag = UTM_TAGS[kind]
           const value = sql`coalesce(properties ->> ${"$" + tag}, properties ->> ${tag})`
-          return sql`SELECT ${value} AS value, count(*)::int AS count
+          return sql`SELECT ${value} AS value, ${visitors}, NULL::int AS pageviews
             FROM (${sessionPageview("first")}) s WHERE ${value} IS NOT NULL AND ${value} <> '' GROUP BY 1`
         }
         case "countries":
         case "browsers":
         case "oses":
         case "devices":
-          return sql`SELECT properties ->> ${AUDIENCE[kind]} AS value, count(*)::int AS count
+          return sql`SELECT properties ->> ${AUDIENCE[kind]} AS value, ${visitors}, NULL::int AS pageviews
             FROM scoped WHERE name = '$pageview' GROUP BY 1`
       }
     }
@@ -215,12 +225,12 @@ export class Queries extends Context.Service<Queries, {
       Effect.gen(function*() {
         const scope = yield* checkAccessAndResolveRange(request)
         const { range } = scope
-        const rows = yield* sql<{ readonly value: string | null; readonly count: number }>`
+        const rows = yield* sql<TopRowRow>`
           WITH ${scopedEvents(scope)}, ${scopedSessions}
-          SELECT value, count FROM (${topRows(request.query.report)}) t
-          ORDER BY count DESC, value ASC NULLS LAST
+          SELECT value, visitors, pageviews FROM (${topRows(request.query.report)}) t
+          ORDER BY visitors DESC, value ASC NULLS LAST
           LIMIT ${TOP_LIMIT}`
-        return { from: range.from, to: range.to, timeZone: range.timeZone, report: request.query.report, rows }
+        return { from: range.from, to: range.to, timeZone: range.timeZone, report: request.query.report, rows: rows.map(toTopRow) }
       }))
 
     const liveVisitors = report("liveVisitors", (request: ReportRequest<{}>) =>
@@ -376,8 +386,8 @@ export class Queries extends Context.Service<Queries, {
     // Sessions.
 
     /**
-     * SELECT list summarising the Sessions in `from` (rows of `sessionBounds`), aliased `s`, from all their Events: the first Event (audience) and the first Pageview
-     * (entry page, referrer, UTM tags) as `first_event` and `first_pageview` laterals.
+     * SELECT list summarising the Sessions in `from` (rows of `sessionBounds`), aliased `s`, from all their Events: the first Event (audience), the first Pageview
+     * (entry page, referrer, UTM tags) and the latest Pageview (last page) as the `fe`, `fp` and `lp` laterals.
      */
     const sessionSummary = (environmentId: EnvironmentId, from: Fragment) => sql`
       s.session_id AS id, s.started_at, s.last_seen_at, s.events,
@@ -386,6 +396,7 @@ export class Queries extends Context.Service<Queries, {
       fe.properties ->> '$browser' AS browser, fe.properties ->> '$os' AS os,
       fe.visitor_id,
       CASE WHEN fp.properties IS NULL THEN NULL ELSE ${pathOf(sql, "fp.properties")} END AS entry_page,
+      CASE WHEN lp.properties IS NULL THEN NULL ELSE ${pathOf(sql, "lp.properties")} END AS last_page,
       ${referringDomainOf(sql, "fp.properties")} AS referring_domain,
       nullif(fp.properties ->> '$referrer', '') AS referrer,
       coalesce(fp.properties ->> '$utm_source', fp.properties ->> 'utm_source') AS utm_source,
@@ -401,7 +412,12 @@ export class Queries extends Context.Service<Queries, {
         SELECT properties FROM event
         WHERE environment_id = ${environmentId} AND session_id = s.session_id AND name = '$pageview'
         ORDER BY ts, received_at LIMIT 1
-      ) fp ON TRUE`
+      ) fp ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT properties FROM event
+        WHERE environment_id = ${environmentId} AND session_id = s.session_id AND name = '$pageview'
+        ORDER BY ts DESC, received_at DESC LIMIT 1
+      ) lp ON TRUE`
 
     /** CTE `s`: the given Sessions' first and last Event and Event count, over all their Events. */
     const sessionBounds = (environmentId: EnvironmentId, ids: Fragment) => sql`
@@ -501,6 +517,7 @@ export class Queries extends Context.Service<Queries, {
 /** A report after the access check: the Environment, its resolved local range and the filters. */
 interface ReportScope {
   readonly environmentId: EnvironmentId
+  readonly projectId: ProjectId
   readonly range: ReportRange
   readonly filters: EventPropertyFilters | undefined
 }
@@ -534,6 +551,16 @@ const toNumbers = (row: NumbersRow | undefined): OverviewNumbers => ({
 
 const emptyStats: NumericStats = { count: 0, average: null, sum: null, min: null, max: null, median: null }
 
+/** A ranked-list row, as `top` selects it. */
+interface TopRowRow {
+  readonly value: string | null
+  readonly visitors: number
+  readonly pageviews: number | null
+}
+
+/** A ranked-list row, with only the optional columns its report fills in. */
+const toTopRow = ({ pageviews, ...row }: TopRowRow): TopRow => pageviews === null ? row : { ...row, pageviews }
+
 /** A Session's summary row, as `sessionSummary` selects it. */
 interface SessionRow {
   readonly id: string
@@ -547,6 +574,7 @@ interface SessionRow {
   readonly os: string | null
   readonly visitorId: string | null
   readonly entryPage: string | null
+  readonly lastPage: string | null
   readonly referringDomain: string | null
   readonly referrer: string | null
   readonly utmSource: string | null
@@ -570,6 +598,7 @@ const toSummary = (row: SessionRow, now: DateTime.Utc): SessionSummary => ({
   events: row.events,
   bounce: row.events === 1,
   entryPage: row.entryPage,
+  lastPage: row.lastPage,
   referringDomain: row.referringDomain,
   country: row.country,
   device: row.device,

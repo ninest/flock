@@ -26,6 +26,7 @@ import { IngestBatch, IngestResult, OriginNotAllowed, UnknownKey } from "./inges
 import { filtersField, LiveVisitors, Overview, OverviewQuery, Top, TopQuery } from "./reports.ts"
 import { CustomEventsGroup } from "./custom-events.ts"
 import { VisitorsGroup } from "./visitors.ts"
+import { AnnotationsGroup } from "./annotations.ts"
 import { SessionDetail, SessionList, SessionNotFound, SessionQuery, SessionsQuery } from "./sessions.ts"
 import { CreatedInvite, Forbidden, Invite, InviteId, InviteNotFound, InstanceSettings, Member, MemberAuth, MemberId, MemberNotFound, SignInOptions } from "./members.ts"
 
@@ -273,6 +274,7 @@ export class FlockApi extends HttpApi.make("flock")
   .add(ReportsGroup)
   .add(CustomEventsGroup)
   .add(VisitorsGroup)
+  .add(AnnotationsGroup)
   .add(SignInGroup)
   .add(MembersGroup)
   .add(InstanceGroup)

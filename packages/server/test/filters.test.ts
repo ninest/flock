@@ -103,17 +103,17 @@ layer(Harness.layer({ geoIp }))("Pages, sources and audience with filters", (it)
       const de = day([is("$country", "DE")])
 
       assert.deepStrictEqual((yield* h.top(production!.id, "pages", de)).rows, [
-        { value: "/", count: 1 },
-        { value: "/pricing", count: 1 }
+        { value: "/", visitors: 1, pageviews: 1 },
+        { value: "/pricing", visitors: 1, pageviews: 1 }
       ])
-      assert.deepStrictEqual((yield* h.top(production!.id, "entryPages", de)).rows, [{ value: "/", count: 1 }])
-      assert.deepStrictEqual((yield* h.top(production!.id, "exitPages", de)).rows, [{ value: "/pricing", count: 1 }])
+      assert.deepStrictEqual((yield* h.top(production!.id, "entryPages", de)).rows, [{ value: "/", visitors: 1 }])
+      assert.deepStrictEqual((yield* h.top(production!.id, "exitPages", de)).rows, [{ value: "/pricing", visitors: 1 }])
       // Filtering by a page keeps only its Pageviews, so it is each Session's entry and exit.
       const pricing = day([is("$path", "/pricing")])
-      assert.deepStrictEqual((yield* h.top(production!.id, "entryPages", pricing)).rows, [{ value: "/pricing", count: 2 }])
+      assert.deepStrictEqual((yield* h.top(production!.id, "entryPages", pricing)).rows, [{ value: "/pricing", visitors: 2 }])
     }))
 
-  it.effect("referrers and UTM tags count only matching Sessions", () =>
+  it.effect("referrers and UTM tags count only Visitors with a matching Session", () =>
     Effect.gen(function*() {
       const h = yield* Harness
       const { environments: [production] } = yield* h.createProject({})
@@ -122,15 +122,15 @@ layer(Harness.layer({ geoIp }))("Pages, sources and audience with filters", (it)
       yield* h.ingest(production!.key, [pageview({ $url: url("/?utm_source=twitter"), $referrer: "https://www.google.com/" })], { ip: US })
       const de = day([is("$country", "DE")])
 
-      assert.deepStrictEqual((yield* h.top(production!.id, "referrers", de)).rows, [{ value: "news.ycombinator.com", count: 1 }])
-      assert.deepStrictEqual((yield* h.top(production!.id, "utmSources", de)).rows, [{ value: "newsletter", count: 1 }])
+      assert.deepStrictEqual((yield* h.top(production!.id, "referrers", de)).rows, [{ value: "news.ycombinator.com", visitors: 1 }])
+      assert.deepStrictEqual((yield* h.top(production!.id, "utmSources", de)).rows, [{ value: "newsletter", visitors: 1 }])
       const google = day([is("$referring_domain", "google.com")])
-      assert.deepStrictEqual((yield* h.top(production!.id, "countries", google)).rows, [{ value: "US", count: 1 }])
+      assert.deepStrictEqual((yield* h.top(production!.id, "countries", google)).rows, [{ value: "US", visitors: 1 }])
       const twitter = day([is("$utm_source", "twitter")])
-      assert.deepStrictEqual((yield* h.top(production!.id, "referrers", twitter)).rows, [{ value: "google.com", count: 1 }])
+      assert.deepStrictEqual((yield* h.top(production!.id, "referrers", twitter)).rows, [{ value: "google.com", visitors: 1 }])
     }))
 
-  it.effect("audience reports count only matching Pageviews", () =>
+  it.effect("audience reports count only Visitors with a matching Pageview", () =>
     Effect.gen(function*() {
       const h = yield* Harness
       const { environments: [production] } = yield* h.createProject({})
@@ -142,10 +142,11 @@ layer(Harness.layer({ geoIp }))("Pages, sources and audience with filters", (it)
 
       const pricing = day([is("$path", "/pricing")])
       assert.deepStrictEqual((yield* h.top(production!.id, "countries", pricing)).rows, [
-        { value: "DE", count: 1 },
-        { value: "US", count: 1 }
+        { value: "DE", visitors: 1 },
+        { value: "US", visitors: 1 }
       ])
-      assert.deepStrictEqual((yield* h.top(production!.id, "browsers", day([is("$country", "US")]))).rows, [{ value: "Firefox", count: 2 }])
+      // The US Visitor's two Pageviews count once.
+      assert.deepStrictEqual((yield* h.top(production!.id, "browsers", day([is("$country", "US")]))).rows, [{ value: "Firefox", visitors: 1 }])
       // The exact-range breakdown endpoint takes filters too.
       const range = { from: "2026-03-01T00:00:00Z", to: "2026-03-02T00:00:00Z" }
       assert.deepStrictEqual(yield* h.breakdown(production!.id, "$country", range, undefined, [is("$path", "/")]), [{ value: "US", count: 1 }])

@@ -1,5 +1,6 @@
 // Dashboard report schemas. Every report takes a date range in the Project's time zone.
 import { Schema } from "effect"
+import { Annotation } from "./annotations.ts"
 
 const isLocalDate = (value: string) => {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
@@ -104,20 +105,25 @@ export const Overview = Schema.Struct({
   /** For the whole range: a Visitor seen on several days counts once. */
   totals: OverviewNumbers,
   /** Every bucket in the range, including empty ones. A Session counts in the bucket where it starts. */
-  series: Schema.Array(OverviewBucket)
+  series: Schema.Array(OverviewBucket),
+  /** The Annotations that apply to the Environment and fall in the range, oldest first. Filters don't affect them. */
+  annotations: Schema.Array(Annotation)
 })
 export type Overview = typeof Overview.Type
 
 /**
- * The ranked-list reports. Each counts something per value, most first:
- * - `pages`: Pageviews per cleaned URL path (`/pricing`; no host, query or fragment).
- * - `entryPages` / `exitPages`: Sessions per path of their first / last Pageview.
- * - `referrers`: Sessions per referring domain of their first Pageview (`www.` dropped).
+ * The ranked-list reports. Each counts unique Visitors per value, the same unit as the headline
+ * Visitors number, and ranks by that count, most first. A Visitor counts once per value however
+ * many Pageviews or Sessions they have with it.
+ * - `pages`: Visitors per cleaned URL path (`/pricing`; no host, query or fragment) they viewed.
+ *   Rows also carry `pageviews`, the path's Pageview count.
+ * - `entryPages` / `exitPages`: Visitors per path of their Sessions' first / last Pageview.
+ * - `referrers`: Visitors per referring domain of their Sessions' first Pageview (`www.` dropped).
  *   `null` is direct traffic: no referrer, or one from the page's own host.
- * - `utmSources` / `utmMediums` / `utmCampaigns`: Sessions per `utm_source` / `utm_medium` /
- *   `utm_campaign` of their first Pageview. Sessions without the tag are left out.
- * - `countries` / `browsers` / `oses` / `devices`: Pageviews per `$country` / `$browser` /
- *   `$os` / `$device`; `null` when unknown.
+ * - `utmSources` / `utmMediums` / `utmCampaigns`: Visitors per `utm_source` / `utm_medium` /
+ *   `utm_campaign` of their Sessions' first Pageview. Sessions without the tag are left out.
+ * - `countries` / `browsers` / `oses` / `devices`: Visitors per `$country` / `$browser` /
+ *   `$os` / `$device` of their Pageviews; `null` when unknown.
  */
 export const TopReport = Schema.Literals([
   "pages",
@@ -137,7 +143,16 @@ export type TopReport = typeof TopReport.Type
 export const TopQuery = Schema.Struct({ ...rangeFields, report: TopReport }).check(validRange)
 export type TopQuery = typeof TopQuery.Type
 
-export const TopRow = Schema.Struct({ value: Schema.NullOr(Schema.String), count: Schema.Number })
+/**
+ * One value of a ranked-list report and its unique Visitors. Optional columns are filled in only
+ * by the reports they apply to.
+ */
+export const TopRow = Schema.Struct({
+  value: Schema.NullOr(Schema.String),
+  visitors: Schema.Number,
+  /** `pages` only: the path's Pageviews. */
+  pageviews: Schema.optional(Schema.Number)
+})
 export type TopRow = typeof TopRow.Type
 
 /** At most this many rows come back, most frequent first. */
