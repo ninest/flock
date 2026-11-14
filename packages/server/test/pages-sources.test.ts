@@ -239,6 +239,22 @@ layer(Harness.layer({ geoIp: { "203.0.113.7": "DE", "198.51.100.23": "US" } }))(
       const top = yield* h.top(production!.id, "countries", day)
       assert.deepStrictEqual([top.from, top.to, top.timeZone], ["2026-03-01", "2026-03-01", "America/New_York"])
     }))
+
+  it.effect("a Visitor with only a Custom event is in every audience breakdown", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* h.createProject({})
+      yield* at("2026-03-01T12:00:00Z")
+      yield* h.ingest(production!.key, [customEvent("signup")], { ip: "203.0.113.7", userAgent: CHROME_WINDOWS })
+
+      assert.strictEqual((yield* h.overview(production!.id, day)).totals.visitors, 1)
+      const rows = (report: "countries" | "browsers" | "oses" | "devices") =>
+        h.top(production!.id, report, day).pipe(Effect.map((top) => counts(top.rows)))
+      assert.deepStrictEqual(yield* rows("countries"), [{ value: "DE", visitors: 1 }])
+      assert.deepStrictEqual(yield* rows("browsers"), [{ value: "Chrome", visitors: 1 }])
+      assert.deepStrictEqual(yield* rows("oses"), [{ value: "Windows", visitors: 1 }])
+      assert.deepStrictEqual(yield* rows("devices"), [{ value: "desktop", visitors: 1 }])
+    }))
 })
 
 layer(Harness.layer())("Live counter", (it) => {

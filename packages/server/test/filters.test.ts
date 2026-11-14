@@ -173,7 +173,7 @@ layer(Harness.layer({ geoIp }))("Pages, sources and audience with filters", (it)
       assert.deepStrictEqual(yield* rows("utmCampaigns"), [{ value: "launch", visitors: 1 }])
     }))
 
-  it.effect("audience reports count only Visitors with a matching Pageview", () =>
+  it.effect("audience reports count only Visitors with a matching Event", () =>
     Effect.gen(function*() {
       const h = yield* Harness
       const { environments: [production] } = yield* h.createProject({})
@@ -193,6 +193,30 @@ layer(Harness.layer({ geoIp }))("Pages, sources and audience with filters", (it)
       // The exact-range breakdown endpoint takes filters too.
       const range = { from: "2026-03-01T00:00:00Z", to: "2026-03-02T00:00:00Z" }
       assert.deepStrictEqual(yield* h.breakdown(production!.id, "$country", range, undefined, [is("$path", "/")]), [{ value: "US", count: 1 }])
+    }))
+
+  it.effect("a Filter that matches only Custom events lists the Visitors the headline counts", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* h.createProject({})
+      yield* at("2026-03-01T09:00:00Z")
+      const firefox = "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0"
+      // One Visitor signs up after a Pageview, one sends the Custom event alone, one only views a page.
+      yield* h.ingest(production!.key, [pageview({ $url: url("/") }), customEvent("signup", { plan: "pro" })], { ip: DE, userAgent: firefox })
+      yield* h.ingest(production!.key, [customEvent("signup", { plan: "pro" })], { ip: US, userAgent: firefox })
+      yield* h.ingest(production!.key, [pageview({ $url: url("/") })], { ip: "198.51.100.99" })
+
+      const pro = day([is("plan", "pro")])
+      assert.strictEqual((yield* h.overview(production!.id, pro)).totals.visitors, 2)
+      const rows = (report: "countries" | "browsers" | "oses" | "devices") => h.top(production!.id, report, pro).pipe(Effect.map((top) => top.rows))
+      // The US Session is its one Custom event, a Bounce; the DE one has a Pageview too.
+      assert.deepStrictEqual(yield* rows("countries"), [
+        { value: "DE", visitors: 1, bounceRate: 0 },
+        { value: "US", visitors: 1, bounceRate: 1 }
+      ])
+      assert.deepStrictEqual(yield* rows("browsers"), [{ value: "Firefox", visitors: 2, bounceRate: 0.5 }])
+      assert.deepStrictEqual(yield* rows("oses"), [{ value: "Linux", visitors: 2, bounceRate: 0.5 }])
+      assert.deepStrictEqual(yield* rows("devices"), [{ value: "desktop", visitors: 2, bounceRate: 0.5 }])
     }))
 
   it.effect("the live counter counts only Visitors with a matching Event", () =>
