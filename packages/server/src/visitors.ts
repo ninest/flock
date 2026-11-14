@@ -84,7 +84,15 @@ export class Visitors extends Context.Service<Visitors, {
 
       const identify = Effect.fn("Visitors.identify")(function*({ deviceId, projectId, visitorId }: IdentifyInput) {
         if (deviceId === visitorId) return
+        // Identifies that name the same ID, as the device or as the Visitor, take turns, even across
+        // servers: the check below then sees an earlier Identify of `deviceId` that hasn't committed
+        // yet. Both IDs are locked in a fixed order, so opposite Identifies can't deadlock.
+        for (const id of [deviceId, visitorId].sort()) {
+          yield* sql`SELECT pg_advisory_xact_lock(hashtextextended(${`identify:${projectId}:${id}`}, 0))`
+        }
         // Recorded for good: the ID stays identified when its devices later switch to another one.
+        // Also when the link below is refused: the tracked app has named the ID as a person, and the
+        // device sends its Events as that ID from now on, so it must never be merged away either.
         yield* sql`
           INSERT INTO identified_visitor ${sql.insert({ projectId, visitorId })}
           ON CONFLICT (project_id, visitor_id) DO NOTHING`
