@@ -9,7 +9,7 @@ export const BEATS = [
     line: 'Sam left his house.', aside: 'The front door was open for 14 seconds. He went back for something.',
     feature: 'Pageview', maps: 'The moment someone arrives. The script sends a Pageview by itself, with the page, the referrer, and the screen it was on.' },
   { key: 'street', time: '8:03:40', event: '$pageview', props: { path: '/maple-street', mph: 31 },
-    line: 'Sam is on Maple Street.', aside: '31 in a 25. We are not the police. We just know.',
+    line: 'Sam is on Maple Street.', aside: '31 in a 25. In March he did 25. He has been creeping up ever since.',
     feature: 'Session', maps: 'Everything one Visitor does in a row is a Session. It ends after 30 minutes of quiet, the way a drive ends when the car stops.' },
   { key: 'stroad', time: '8:09:05', event: '$pageview', props: { path: '/route-9', lane: 2 },
     line: 'Sam is on Route 9.', aside: 'So are five other cars. We have names for them too.',
