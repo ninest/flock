@@ -1,9 +1,10 @@
-// One series over time as an orange line with a faint area, a hairline grid, and a crosshair with
-// a tooltip on hover or touch. Drawn as SVG so it can follow the Console look exactly.
+// One series over time as an orange line with a faint area, optionally the previous period as a grey
+// line under it, a hairline grid, and a crosshair with a tooltip on hover or touch. Drawn as SVG so it can follow the Console look exactly.
 import { type PointerEvent, useEffect, useRef, useState } from "react"
 import { labelStep, niceMax } from "./chart-scale.ts"
 
 const COLOR = "var(--accent)"
+const PREVIOUS_COLOR = "var(--previous)"
 const TOP = 24
 const BOTTOM_AXIS = 28
 
@@ -43,18 +44,20 @@ const runs = (values: ReadonlyArray<number | null>) => {
   return result
 }
 
-export const TrendChart = ({ name, labels, values, format, height = 300 }: {
+export const TrendChart = ({ name, labels, values, format, height = 300, previous }: {
   /** What the values are, e.g. "Unique Visitors". */
   name: string
   labels: ReadonlyArray<string>
   values: ReadonlyArray<number | null>
   format: (value: number) => string
   height?: number
+  /** The previous period, bucket for bucket with `values`, drawn as a grey line under it. */
+  previous?: { labels: ReadonlyArray<string>; values: ReadonlyArray<number | null> }
 }) => {
   const [ref, width] = useWidth()
   const [hover, setHover] = useState<number | null>(null)
   const n = values.length
-  const max = niceMax(Math.max(0, ...values.map((v) => v ?? 0)))
+  const max = niceMax(Math.max(0, ...values.map((v) => v ?? 0), ...(previous?.values ?? []).map((v) => v ?? 0)))
   const padX = width < 500 ? 16 : 28
   const bottom = height - BOTTOM_AXIS
   const x = (i: number) => (n <= 1 ? width / 2 : padX + (i * (width - 2 * padX)) / (n - 1))
@@ -68,6 +71,7 @@ export const TrendChart = ({ name, labels, values, format, height = 300 }: {
     setHover(Math.max(0, Math.min(n - 1, i)))
   }
   const hovered = hover === null ? undefined : values[hover]
+  const hoveredPrevious = hover === null ? undefined : previous?.values[hover]
 
   return (
     <div ref={ref} className="trend" style={{ height }} onPointerMove={move} onPointerDown={move} onPointerLeave={() => setHover(null)}>
@@ -80,6 +84,12 @@ export const TrendChart = ({ name, labels, values, format, height = 300 }: {
             </g>
           ))}
           <line x1={0} x2={width} y1={bottom} y2={bottom} stroke="var(--line)" />
+          {previous && runs(previous.values.slice(0, n)).map((run) => {
+            const points = run.map((i) => [x(i), y(previous.values[i]!)] as const)
+            return points.length > 1
+              ? <path key={run[0]} className="trend-previous" d={smooth(points)} fill="none" stroke={PREVIOUS_COLOR} strokeWidth={1.5} strokeLinecap="round" />
+              : <circle key={run[0]} className="trend-previous" cx={points[0]![0]} cy={points[0]![1]} r={2.5} fill={PREVIOUS_COLOR} />
+          })}
           {runs(values).map((run) => {
             const points = run.map((i) => [x(i), y(values[i]!)] as const)
             const line = smooth(points)
@@ -115,6 +125,11 @@ export const TrendChart = ({ name, labels, values, format, height = 300 }: {
         <div className="trend-tip" style={x(hover) > width - 180 ? { right: width - x(hover) + 12 } : { left: x(hover) + 12 }}>
           <span>{labels[hover]}</span>
           <strong>{hovered === null || hovered === undefined ? "–" : format(hovered)}</strong>
+          {previous && hover < previous.labels.length && (
+            <span className="trend-tip-previous">
+              {previous.labels[hover]}: {hoveredPrevious === null || hoveredPrevious === undefined ? "–" : format(hoveredPrevious)}
+            </span>
+          )}
         </div>
       )}
     </div>

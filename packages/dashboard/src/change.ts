@@ -23,7 +23,7 @@ export const formatChange = (
   current: number | null | undefined,
   previous: number | null | undefined,
   unit: ChangeUnit,
-  options: { readonly lowerIsBetter?: boolean } = {}
+  options: { readonly lowerIsBetter?: boolean | undefined } = {}
 ): Change => {
   if (current === null || current === undefined || previous === null || previous === undefined || previous === 0) return NONE
   const delta = unit === "percent" ? ((current - previous) / previous) * 100 : (current - previous) * 100
