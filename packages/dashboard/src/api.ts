@@ -21,6 +21,7 @@ const describe = (error: unknown): string => {
     if (e._tag === "ProjectNotFound" || e._tag === "EnvironmentNotFound") return "Not found. It may have been deleted."
     if (e._tag === "NoMemberWithEmail") return `No Member of this Instance signs in with ${String((e as { email?: unknown }).email)}.`
     if (e._tag === "AlreadyProjectMember") return "That Member already has access. Change their role instead."
+    if (e._tag === "AnnotationNotFound") return "That Annotation was already deleted."
     if (e._tag === "ProjectMemberNotFound") return "That Member no longer has access to this Project."
     if (e._tag) return e._tag
   }

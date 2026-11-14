@@ -1,5 +1,6 @@
 // Dashboard report schemas. Every report takes a date range in the Project's time zone.
 import { Schema } from "effect"
+import { Annotation } from "./annotations.ts"
 
 const isLocalDate = (value: string) => {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
@@ -122,7 +123,9 @@ export const Overview = Schema.Struct({
   /** Every bucket in the range, including empty ones. A Session counts in the bucket where it starts. */
   series: Schema.Array(OverviewBucket),
   /** The same numbers for the previous period, with the same Filters. */
-  previous: OverviewPreviousPeriod
+  previous: OverviewPreviousPeriod,
+  /** The Annotations that apply to the Environment and fall in the range, oldest first. Filters don't affect them. */
+  annotations: Schema.Array(Annotation)
 })
 export type Overview = typeof Overview.Type
 

@@ -96,7 +96,7 @@ export const ProjectPage = ({ projectId, search }: { projectId: ProjectId; searc
   return (
     <Shell section={section} chrome={chrome}>
       {section === "dashboard" && (
-        <Dashboard key={environment.id} projectId={projectId} environment={environment} search={search} timeZone={project.timeZone} onAddFilter={addFilter} />
+        <Dashboard key={environment.id} projectId={projectId} environment={environment} search={search} timeZone={project.timeZone} isOwner={project.role === "owner"} onAddFilter={addFilter} />
       )}
       {section === "live" && <Live key={environment.id} projectId={projectId} environment={environment} search={search} timeZone={project.timeZone} />}
       {section === "events" && <CustomEvents key={environment.id} projectId={projectId} environment={environment} search={search} onAddFilter={addFilter} />}

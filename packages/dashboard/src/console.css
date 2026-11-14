@@ -129,6 +129,22 @@ label.field > input, label.field > select, label.field > textarea { color: var(-
 .trend-tip span { color: var(--muted); }
 .trend-tip strong { font: 500 15px var(--mono); }
 .trend-tip .trend-tip-previous { margin-top: 4px; font-size: 13px; }
+.trend-annotations > g { cursor: pointer; outline: none; }
+.trend-annotations line { stroke: var(--muted); opacity: .7; }
+.trend-annotations rect { fill: #0c0c0c; stroke: #333; }
+.trend .trend-annotations text { fill: var(--ink); font-size: 13px; }
+.trend-annotations > g:hover rect, .trend-annotations > g:focus-visible rect, .trend-annotations > g[data-selected="true"] rect { stroke: var(--accent); }
+.trend-annotations > g[data-selected="true"] line { stroke: var(--accent); opacity: 1; }
+
+/* Above the chart: the Add Annotation action; below it, the open Annotations and the form. */
+.chart-head { display: flex; justify-content: flex-end; margin: -12px 0 8px; }
+.annotations { display: grid; gap: 0; margin-top: 20px; border-top: 1px solid var(--line); }
+.annotation { display: grid; gap: 6px; padding: 16px 0; border-bottom: 1px solid var(--line); }
+.annotation-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.annotation-head strong { font-weight: 500; overflow-wrap: anywhere; }
+.annotation p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.annotation p a { color: var(--accent); }
+.annotation-form { margin-top: 20px; max-width: 560px; }
 
 /* Rows: tables built from grids. --cols sets the columns; cells marked data-wide drop on a phone. */
 .rows { min-width: 0; font-size: 14px; }
