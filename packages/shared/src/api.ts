@@ -25,6 +25,9 @@ import {
 import { IngestBatch, IngestResult, OriginNotAllowed, UnknownKey } from "./ingest.ts"
 import { filtersField, LiveVisitors, Overview, OverviewQuery, Top, TopQuery } from "./reports.ts"
 import { CustomEventsGroup } from "./custom-events.ts"
+import { VisitorsGroup } from "./visitors.ts"
+import { AnnotationsGroup } from "./annotations.ts"
+import { ProjectNumbers } from "./project-numbers.ts"
 import { SessionDetail, SessionList, SessionNotFound, SessionQuery, SessionsQuery } from "./sessions.ts"
 import { CreatedInvite, Forbidden, Invite, InviteId, InviteNotFound, InstanceSettings, Member, MemberAuth, MemberId, MemberNotFound, SignInOptions } from "./members.ts"
 
@@ -67,6 +70,12 @@ export class ProjectsGroup extends HttpApiGroup.make("projects")
       payload: Schema.Struct({ name: ProjectName, timeZone: TimeZone }),
       success: Project
     }),
+    /**
+     * For the Projects page: every Project the Member can see, in list order, with live Visitors,
+     * Visitors over the last 7 local days and the 7 before, and Visitors per day, for its
+     * `production` Environment.
+     */
+    HttpApiEndpoint.get("numbers", "/numbers", { success: Schema.Array(ProjectNumbers) }),
     HttpApiEndpoint.get("get", "/:projectId", { params: projectParams, success: Project, error: ProjectNotFound }),
     HttpApiEndpoint.patch("update", "/:projectId", {
       params: projectParams,
@@ -271,6 +280,8 @@ export class FlockApi extends HttpApi.make("flock")
   .add(EnvironmentsGroup)
   .add(ReportsGroup)
   .add(CustomEventsGroup)
+  .add(VisitorsGroup)
+  .add(AnnotationsGroup)
   .add(SignInGroup)
   .add(MembersGroup)
   .add(InstanceGroup)

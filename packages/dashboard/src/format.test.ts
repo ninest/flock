@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { barWidth, formatClock, formatDuration, formatPercent } from "./format.ts"
+import { barWidth, formatClock, formatDuration, formatPercent, formatShare } from "./format.ts"
 
 describe("formatDuration", () => {
   it("shows seconds under a minute", () => expect(formatDuration(42.4)).toBe("42s"))
@@ -15,6 +15,14 @@ describe("formatClock", () => {
 
 describe("formatPercent", () => {
   it("rounds a share to a whole percent", () => expect(formatPercent(0.436)).toBe("44%"))
+})
+
+describe("formatShare", () => {
+  it("shows a share as a whole percent", () => expect(formatShare(2 / 3)).toBe("67%"))
+  it("shows a dash when nothing counts", () => {
+    expect(formatShare(null)).toBe("–")
+    expect(formatShare(undefined)).toBe("–")
+  })
 })
 
 describe("barWidth", () => {

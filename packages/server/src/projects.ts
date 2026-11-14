@@ -21,7 +21,8 @@ import {
   ProjectNotFound,
   ProjectOwnerRequired,
   type ProjectRole,
-  type TrackingMode
+  type TrackingMode,
+  VisitorsNeedPersistentMode
 } from "@flock/shared"
 import { Context, Effect, Layer, Option } from "effect"
 import { isSqlError, type SqlError } from "effect/sql/SqlError"
@@ -74,6 +75,7 @@ export interface EnvironmentAccess {
   readonly allowedOrigins: ReadonlyArray<string>
   readonly projectId: ProjectId
   readonly timeZone: string
+  readonly trackingMode: TrackingMode
   readonly role: ProjectRole
 }
 
@@ -89,6 +91,8 @@ export interface NewProject {
 export class Projects extends Context.Service<Projects, {
   readonly list: (member: MemberId) => Effect.Effect<Array<Project>>
   readonly get: (member: MemberId, id: ProjectId) => Effect.Effect<Project, ProjectNotFound>
+  /** The Project, if the Member owns it: the check before every owner-only action on a Project. */
+  readonly ownProject: (member: MemberId, id: ProjectId) => Effect.Effect<Project, ProjectNotFound | ProjectOwnerRequired>
   readonly create: (project: NewProject) => Effect.Effect<ProjectId>
   readonly update: (
     member: MemberId,
@@ -121,6 +125,11 @@ export class Projects extends Context.Service<Projects, {
   ) => Effect.Effect<void, EnvironmentNotFound | ProjectOwnerRequired | ProductionProtected>
   /** An Environment the Member may read (any role). */
   readonly environment: (member: MemberId, id: EnvironmentId) => Effect.Effect<EnvironmentAccess, EnvironmentNotFound>
+  /** An Environment the Member may read whose Project is in persistent Tracking mode: the access check of every Visitors endpoint. */
+  readonly persistentEnvironment: (
+    member: MemberId,
+    id: EnvironmentId
+  ) => Effect.Effect<EnvironmentAccess, EnvironmentNotFound | VisitorsNeedPersistentMode>
   /** The Project with an Environment that has this key, if any (for idempotent seeding). */
   readonly projectWithKey: (key: string) => Effect.Effect<Option.Option<ProjectId>>
   /** Who the Project is shared with (any role may look). */
@@ -179,8 +188,16 @@ export class Projects extends Context.Service<Projects, {
         get(member, id).pipe(Effect.tap((project) => requireOwner(project.role)))
 
       const environment = (member: MemberId, id: EnvironmentId) =>
-        sql<{ name: string; key: string; allowedOrigins: ReadonlyArray<string>; projectId: string; timeZone: string; role: ProjectRole }>`
-          SELECT e.name, e.key, e.allowed_origins, e.project_id, p.time_zone, pm.role
+        sql<{
+          name: string
+          key: string
+          allowedOrigins: ReadonlyArray<string>
+          projectId: string
+          timeZone: string
+          trackingMode: TrackingMode
+          role: ProjectRole
+        }>`
+          SELECT e.name, e.key, e.allowed_origins, e.project_id, p.time_zone, p.tracking_mode, pm.role
           FROM environment e
           JOIN project p ON p.id = e.project_id
           JOIN project_member pm ON pm.project_id = p.id AND pm.member_id = ${member}
@@ -195,9 +212,21 @@ export class Projects extends Context.Service<Projects, {
                 allowedOrigins: row.allowedOrigins,
                 projectId: ProjectId.make(row.projectId),
                 timeZone: row.timeZone,
+                trackingMode: row.trackingMode,
                 role: row.role
               })
               : Effect.fail(new EnvironmentNotFound({ id }))
+          )
+        )
+
+      const persistentEnvironment = (member: MemberId, id: EnvironmentId) =>
+        environment(member, id).pipe(
+          Effect.filterOrFail(
+            (env) => env.trackingMode === "persistent",
+            () =>
+              new VisitorsNeedPersistentMode({
+                message: "Visitor profiles need persistent Tracking mode: in cookieless mode a Visitor starts afresh every day"
+              })
           )
         )
 
@@ -267,6 +296,7 @@ export class Projects extends Context.Service<Projects, {
       return Projects.of({
         list: (member) => select(member, undefined).pipe(orDie),
         get,
+        ownProject,
 
         create: ({ environments, name, owner, timeZone }) =>
           sql.withTransaction(Effect.gen(function*() {
@@ -324,6 +354,14 @@ export class Projects extends Context.Service<Projects, {
             yield* notProduction(env, "The production Environment can't be deleted")
             yield* sql.withTransaction(Effect.gen(function*() {
               yield* ingest.deleteEvents([id])
+              // Narrowed Annotations whose only Environment this is go with it; the others lose it
+              // from their set when the row cascades.
+              yield* sql`
+                DELETE FROM annotation a
+                WHERE a.project_id = ${env.projectId} AND NOT a.all_environments
+                  AND NOT EXISTS (
+                    SELECT 1 FROM annotation_environment ae WHERE ae.annotation_id = a.id AND ae.environment_id <> ${id}
+                  )`
               yield* sql`DELETE FROM environment WHERE id = ${id}`
             })).pipe(orDie)
           }),
@@ -344,6 +382,7 @@ export class Projects extends Context.Service<Projects, {
           }),
 
         environment,
+        persistentEnvironment,
 
         projectWithKey: (key) =>
           sql<{ projectId: string }>`SELECT project_id FROM environment WHERE key = ${key}`.pipe(

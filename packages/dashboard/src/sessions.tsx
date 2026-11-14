@@ -1,7 +1,7 @@
 // Sessions: Recent Sessions on the Dashboard, the Session timeline (shared with the Live tab), and
 // the Session page. A live Session (active or idle) refreshes itself; on its page the timeline
 // follows new Events at the bottom while you stay there, like a chat.
-import type { Environment, EventPropertyFilters, ProjectId, ReportRangeQuery, SessionDetail, SessionEvent, SessionSummary } from "@flock/shared"
+import { type Environment, type EventPropertyFilters, type ProjectId, type ReportRangeQuery, type SessionDetail, type SessionEvent, type SessionSummary, visitorLabel } from "@flock/shared"
 import { Link } from "@tanstack/react-router"
 import { DateTime } from "effect"
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
@@ -136,12 +136,6 @@ const pathOf = (url: unknown) => {
 
 const valueText = (value: unknown) => (typeof value === "string" ? value : JSON.stringify(value))
 
-/** The last Pageview's path, where the Visitor left from. */
-export const exitPage = (session: SessionDetail) => {
-  const last = [...session.timeline].reverse().find(isPageview)
-  return last ? pathOf(last.properties.$url) : null
-}
-
 /** What follows an Event's name: how long a Pageview lasted until the next one, or a Custom event's values. */
 const afterText = (timeline: ReadonlyArray<SessionEvent>, i: number) => {
   const event = timeline[i]!
@@ -265,12 +259,19 @@ export const SessionPage = ({ projectId, environment, sessionId, search, timeZon
     ["Events", formatCount(session.events)],
     ["From", session.referrer === null ? "Direct" : <a href={session.referrer} target="_blank" rel="noreferrer noopener" title={session.referrer}>{sourceOf(session)}</a>],
     ["Entered on", session.entryPage ?? "No Pageview"],
-    ["Left from", live ? "Still here" : exitPage(session) ?? "No Pageview"],
+    [live ? "Now on" : "Left from", session.lastPage ?? "No Pageview"],
     ["Device", device.length > 0 ? device.join(", ") : "Unknown"],
     ["Operating system", session.os ?? "Unknown"],
     ["Country", country(session.country)],
     ...(utm.length > 0 ? [["UTM", utm.join(", ")] as [string, string]] : []),
-    ...(session.visitorId !== null ? [["Identified as", <code key="id">{session.visitorId}</code>] as [string, React.ReactNode]] : [])
+    ...(session.visitorId !== null
+      ? [[
+        "Visitor",
+        <Link key="visitor" to="/projects/$projectId/visitors/$visitorId" params={{ projectId, visitorId: session.visitorId }} search={sharedSearch(search)} data-testid="session-visitor">
+          {visitorLabel({ visitorId: session.visitorId, identified: session.visitorIdentified === true })}
+        </Link>
+      ] as [string, React.ReactNode]]
+      : [])
   ]
   return (
     <div className="page session">
@@ -282,6 +283,20 @@ export const SessionPage = ({ projectId, environment, sessionId, search, timeZon
       <dl className="facts">
         {facts.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
       </dl>
+      {(session.earlierSessionId !== null || session.laterSessionId !== null) && (
+        <nav className="session-steps" aria-label="The Visitor's other Sessions">
+          {session.earlierSessionId !== null && (
+            <Link to="/projects/$projectId/sessions/$sessionId" params={{ projectId, sessionId: session.earlierSessionId }} search={sharedSearch(search)} data-testid="earlier-session">
+              ← Earlier Session
+            </Link>
+          )}
+          {session.laterSessionId !== null && (
+            <Link className="later" to="/projects/$projectId/sessions/$sessionId" params={{ projectId, sessionId: session.laterSessionId }} search={sharedSearch(search)} data-testid="later-session">
+              Later Session →
+            </Link>
+          )}
+        </nav>
+      )}
       <Timeline session={session} timeZone={timeZone} highlight={(search.filters?.length ?? 0) > 0} />
       <p className="timeline-end"><StatusDot status={session.status} />{timelineEnd(session, now)}</p>
       {unseen > 0 && (

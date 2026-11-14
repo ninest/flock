@@ -225,3 +225,109 @@ layer(Harness.layer())("Overview date ranges", (it) => {
       assert.strictEqual((error as { _tag: string })._tag, "EnvironmentNotFound")
     }))
 })
+
+layer(Harness.layer())("Overview previous period", (it) => {
+  it.effect("7 days compare with the 7 local days before, bucket by bucket", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* h.createProject({})
+      for (const [date, ip] of [["2026-02-15", "198.51.100.1"], ["2026-02-16", "198.51.100.1"], ["2026-02-16", "198.51.100.2"], ["2026-02-22", "198.51.100.3"], ["2026-02-23", "198.51.100.4"]] as const) {
+        yield* at(`${date}T12:00:00Z`)
+        yield* h.ingest(production!.key, [pageview()], { ip })
+      }
+      yield* at("2026-03-01T13:00:00Z")
+
+      const { previous } = yield* h.overview(production!.id, { period: "7d" })
+      assert.deepStrictEqual([previous.from, previous.to, previous.until], ["2026-02-16", "2026-02-22", null])
+      assert.strictEqual(previous.totals.pageviews, 3) // Feb 15 is before it, Feb 23 is the current week
+      assert.strictEqual(previous.totals.visitors, 3)
+      assert.deepStrictEqual(previous.series.map((b) => [b.bucket, b.pageviews]), [
+        ["2026-02-16", 2],
+        ["2026-02-17", 0],
+        ["2026-02-18", 0],
+        ["2026-02-19", 0],
+        ["2026-02-20", 0],
+        ["2026-02-21", 0],
+        ["2026-02-22", 1]
+      ])
+
+      const month = yield* h.overview(production!.id, { period: "30d" })
+      assert.deepStrictEqual([month.from, month.to], ["2026-01-31", "2026-03-01"])
+      assert.deepStrictEqual([month.previous.from, month.previous.to, month.previous.until], ["2026-01-01", "2026-01-30", null])
+      assert.strictEqual(month.previous.series.length, 30)
+      assert.strictEqual(month.previous.totals.pageviews, 0)
+    }))
+
+  it.effect("today compares with yesterday only up to the current local time of day", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* h.createProject({ timeZone: "Europe/Berlin" }) // UTC+1 in January
+      yield* at("2026-01-09T22:30:00Z") // Jan 9 in Berlin: the day before yesterday
+      yield* h.ingest(production!.key, [pageview()], { ip: "198.51.100.1" })
+      yield* at("2026-01-10T07:10:00Z") // yesterday 08:10, before now's time of day
+      yield* h.ingest(production!.key, [pageview(), pageview()], { ip: "198.51.100.2" })
+      yield* at("2026-01-10T15:00:00Z") // yesterday 16:00, after it
+      yield* h.ingest(production!.key, [pageview()], { ip: "198.51.100.3" })
+      yield* at("2026-01-11T08:15:00Z") // today, 09:15 in Berlin
+      yield* h.ingest(production!.key, [pageview()], { ip: "198.51.100.4" })
+
+      const today = yield* h.overview(production!.id, { period: "today" })
+      const { previous } = today
+      assert.deepStrictEqual([previous.from, previous.to, previous.until], ["2026-01-10", "2026-01-10", "2026-01-10T09:15:00"])
+      assert.deepStrictEqual(previous.totals, { visitors: 1, pageviews: 2, sessions: 1, bounceRate: 0, visitDuration: 0 })
+      assert.strictEqual(previous.series.length, today.series.length)
+      assert.strictEqual(previous.series[0]!.bucket, "2026-01-10T00:00")
+      assert.deepStrictEqual(previous.series.filter((b) => b.pageviews > 0).map((b) => [b.bucket, b.pageviews]), [["2026-01-10T08:00", 2]])
+    }))
+
+  it.effect("a custom range of only today compares with yesterday up to the current local time of day, like today", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* h.createProject({ timeZone: "Europe/Berlin" }) // UTC+1 in January
+      yield* at("2026-01-10T07:10:00Z") // yesterday 08:10, before now's time of day
+      yield* h.ingest(production!.key, [pageview()], { ip: "198.51.100.2" })
+      yield* at("2026-01-10T15:00:00Z") // yesterday 16:00, after it
+      yield* h.ingest(production!.key, [pageview()], { ip: "198.51.100.3" })
+      yield* at("2026-01-11T08:15:00Z") // today, 09:15 in Berlin
+
+      const { previous } = yield* h.overview(production!.id, custom("2026-01-11", "2026-01-11"))
+      assert.deepStrictEqual([previous.from, previous.to, previous.until], ["2026-01-10", "2026-01-10", "2026-01-10T09:15:00"])
+      assert.strictEqual(previous.totals.pageviews, 1)
+    }))
+
+  it.effect("a custom range compares with the same number of days before from", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* h.createProject({})
+      for (const date of ["2026-02-20", "2026-02-21", "2026-02-23", "2026-02-24"]) {
+        yield* at(`${date}T12:00:00Z`)
+        yield* h.ingest(production!.key, [pageview()], { ip: "198.51.100.1" })
+      }
+      yield* at("2026-03-10T12:00:00Z")
+
+      const overview = yield* h.overview(production!.id, custom("2026-02-24", "2026-02-26"))
+      const { previous } = overview
+      assert.deepStrictEqual([previous.from, previous.to, previous.until], ["2026-02-21", "2026-02-23", null])
+      assert.deepStrictEqual(previous.series.map((b) => [b.bucket, b.pageviews]), [["2026-02-21", 1], ["2026-02-22", 0], ["2026-02-23", 1]])
+      assert.strictEqual(previous.totals.pageviews, 2)
+
+      const day = yield* h.overview(production!.id, custom("2026-02-21", "2026-02-21"))
+      assert.deepStrictEqual([day.previous.from, day.previous.to, day.previous.until], ["2026-02-20", "2026-02-20", null])
+      assert.strictEqual(day.previous.series.length, 24)
+      assert.strictEqual(day.previous.totals.pageviews, 1)
+    }))
+
+  it.effect("the previous period applies the same Filters", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* h.createProject({})
+      yield* at("2026-02-20T12:00:00Z") // in the previous week
+      yield* h.ingest(production!.key, [pageview({ $url: "https://example.com/pricing" })], { ip: "198.51.100.1" })
+      yield* h.ingest(production!.key, [pageview({ $url: "https://example.com/" })], { ip: "198.51.100.2" })
+      yield* at("2026-03-01T13:00:00Z")
+
+      const filters = [{ eventProperty: "$path", op: "is" as const, value: "/pricing" }]
+      const { previous } = yield* h.overview(production!.id, { period: "7d", filters })
+      assert.deepStrictEqual([previous.totals.visitors, previous.totals.pageviews], [1, 1])
+    }))
+})

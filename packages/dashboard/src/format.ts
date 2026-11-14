@@ -29,6 +29,9 @@ export const formatClock = (seconds: number) => {
 /** A share from 0 to 1 as a whole percent: `44%`. */
 export const formatPercent = (share: number) => `${Math.round(share * 100)}%`
 
+/** A breakdown share such as a bounce rate: a whole percent, or `–` when nothing counts toward it. */
+export const formatShare = (share: number | null | undefined) => share == null ? "–" : formatPercent(share)
+
 /** The CSS width of a breakdown row's bar: its count against the largest row's, never quite empty. */
 export const barWidth = (count: number, max: number) => `${max > 0 ? Math.max(1, Math.round((count / max) * 100)) : 1}%`
 

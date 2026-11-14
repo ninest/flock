@@ -1,6 +1,7 @@
 // A Project's settings page: the current Environment's key, snippet and allowed origins, adding an
-// Environment, the Project's name, time zone and Tracking mode, deletion, and sharing. Viewers see
-// only who the Project is shared with; the controls they can't use are hidden.
+// Environment, the Project's name, time zone and Tracking mode, deletion, its Annotations, and
+// sharing. Viewers see only the Annotations and who the Project is shared with; the controls they
+// can't use are hidden.
 import {
   type Environment,
   type MemberId,
@@ -14,6 +15,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { type FormEvent, type ReactNode, useState } from "react"
 import { request } from "./api.ts"
 import { currentMember } from "./auth.ts"
+import { AnnotationList } from "./chart-annotations.tsx"
 import { useProject } from "./projects.tsx"
 import { type ProjectSearch, sharedSearch } from "./project-search.ts"
 import { environmentOf, Shell } from "./shell.tsx"
@@ -66,6 +68,7 @@ export const SettingsPage = ({ projectId, search }: { projectId: ProjectId; sear
             </>
           )
           : <p className="dim">You're a viewer of {project.name}: you see its reports for every Environment but can't change it.</p>}
+        <Annotations project={project} />
         <Sharing project={project} onChange={reload} />
       </div>
     </Shell>
@@ -244,13 +247,41 @@ const ProjectSettings = ({ project, onChange }: { project: Project; onChange: ()
           Tracking mode
           <select name="trackingMode" defaultValue={project.trackingMode}>
             <option value="cookieless">Cookieless: anonymous Visitors that reset daily, nothing stored on the device</option>
-            <option value="persistent">Persistent: a Visitor ID stored on the device, with identify()</option>
+            <option value="persistent">Persistent: a Visitor ID stored on the device, with identify() and Visitor profiles</option>
           </select>
+          <span className="dim">Persistent mode adds a Visitors tab and Visitor profiles: each Visitor's whole history across days and devices.</span>
         </label>
         <div><button type="submit" className="btn" disabled={action.busy}>Save</button></div>
       </form>
       <div><button type="button" className="btn btn-danger" disabled={action.busy} onClick={remove}>Delete Project</button></div>
       {action.alert}
+    </Section>
+  )
+}
+
+/** Every Annotation of the Project, newest first, whatever its Environments. Owners edit and delete them. */
+const Annotations = ({ project }: { project: Project }) => {
+  const projectId = project.id
+  const { data, error, reload } = usePoll(() => request((api) => api.annotations.list({ params: { projectId } })), [projectId])
+  return (
+    <Section title="Annotations" testId="annotations">
+      <p className="dim">
+        Dated notes drawn on the overview and Custom event charts.{project.role === "owner" ? " Add one from the overview chart." : ""}
+      </p>
+      {!data
+        ? error ? <Notice alert>Could not load the Annotations.</Notice> : <Notice>Loading…</Notice>
+        : data.length === 0
+        ? <Notice>No Annotations yet.</Notice>
+        : (
+          <AnnotationList
+            projectId={projectId}
+            annotations={data}
+            environments={project.environments}
+            timeZone={project.timeZone}
+            isOwner={project.role === "owner"}
+            onChange={reload}
+          />
+        )}
     </Section>
   )
 }

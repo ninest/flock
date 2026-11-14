@@ -51,11 +51,11 @@ export const Live = ({ projectId, environment, search, timeZone }: {
       <section className="split-list">
         <Rows
           variant="select"
-          columns={[{ label: "Entered on" }, { label: "From", width: 150 }, { label: "Events", width: 64, wide: true }, { label: "On site", width: 84 }]}
+          columns={[{ label: "Now on" }, { label: "From", width: 150 }, { label: "Events", width: 64, wide: true }, { label: "On site", width: 84 }]}
         >
           {!sessions ? pending(error, "live Sessions") : sessions.length === 0 ? <Notice>Nobody is here right now.</Notice> : sessions.map((s) => (
             <button key={s.id} type="button" role="row" className="row" aria-current={s.id === selectedId} onClick={() => select(s.id)}>
-              <span><StatusDot status={s.status} />{s.entryPage ?? "No Pageview"}</span>
+              <span><StatusDot status={s.status} />{s.lastPage ?? "No Pageview"}</span>
               <span>{sourceOf(s)}</span>
               <span {...wide}>{formatCount(s.events)}</span>
               <span>{formatDuration((now - DateTime.toEpochMillis(s.startedAt)) / 1000)}</span>
@@ -84,8 +84,8 @@ const LiveSession = ({ projectId, environment, sessionId, search, timeZone }: {
   const where = [session.country && countryName(session.country), session.device && capitalize(session.device)].filter((v) => v !== null)
   return (
     <>
-      <h2>{session.entryPage ?? "No Pageview"}</h2>
-      <p className="dim">From {sourceOf(session)}{where.length > 0 ? `, ${where.join(", ")}` : ""}</p>
+      <h2>{session.lastPage ?? "No Pageview"}</h2>
+      <p className="dim">{session.entryPage === null ? "From" : `Entered on ${session.entryPage} from`} {sourceOf(session)}{where.length > 0 ? `, ${where.join(", ")}` : ""}</p>
       {session.visitorId !== null && <p className="dim">Identified as <code>{session.visitorId}</code></p>}
       <Timeline
         session={session}

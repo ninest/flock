@@ -2,9 +2,10 @@
 // breakdowns and numeric statistics. Every report takes the date range picker.
 import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/http-api"
+import { Annotation } from "./annotations.ts"
 import { EnvironmentId, EnvironmentNotFound } from "./domain.ts"
 import { MemberAuth } from "./members.ts"
-import { ReportInterval, ReportRangeQuery } from "./reports.ts"
+import { PreviousPeriod, ReportInterval, ReportRangeQuery } from "./reports.ts"
 
 /** The resolved range of a report, as local dates (inclusive) in the Project's time zone. */
 const ResolvedRange = {
@@ -18,11 +19,20 @@ const ResolvedRange = {
 export const CustomEventNumbers = Schema.Struct({ count: Schema.Number, visitors: Schema.Number })
 export type CustomEventNumbers = typeof CustomEventNumbers.Type
 
-export const CustomEventSummary = Schema.Struct({ name: Schema.String, ...CustomEventNumbers.fields })
+export const CustomEventSummary = Schema.Struct({
+  name: Schema.String,
+  ...CustomEventNumbers.fields,
+  /** Its count in every bucket of the range, including empty ones, for a sparkline. */
+  series: Schema.Array(Schema.Struct({ bucket: Schema.String, count: Schema.Number })),
+  /** Its count in the previous period, with the same Filters; 0 when it wasn't sent then. */
+  previousCount: Schema.Number
+})
 export type CustomEventSummary = typeof CustomEventSummary.Type
 
 export const CustomEventList = Schema.Struct({
   ...ResolvedRange,
+  /** The previous period, as for the overview. */
+  previous: PreviousPeriod,
   /** Every Custom event name sent in the range, most sent first. Built-in events are left out. */
   events: Schema.Array(CustomEventSummary)
 })
@@ -46,7 +56,9 @@ export const CustomEventDetail = Schema.Struct({
   /** Every bucket in the range, including empty ones. */
   series: Schema.Array(Schema.Struct({ bucket: Schema.String, ...CustomEventNumbers.fields })),
   /** The Event properties sent with this Custom event in the range, by key. */
-  properties: Schema.Array(CustomEventProperty)
+  properties: Schema.Array(CustomEventProperty),
+  /** The Annotations that apply to the Environment and fall in the range, oldest first. Filters don't affect them. */
+  annotations: Schema.Array(Annotation)
 })
 export type CustomEventDetail = typeof CustomEventDetail.Type
 

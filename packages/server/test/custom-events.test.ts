@@ -26,10 +26,91 @@ layer(Harness.layer())("Custom event list", (it) => {
       yield* h.ingest(production!.key, [customEvent("outside_range")], { ip: "198.51.100.1" })
 
       const { events } = yield* listEvents(h, production!.id, day)
-      assert.deepStrictEqual(events, [
+      assert.deepStrictEqual(events.map(({ name, count, visitors }) => ({ name, count, visitors })), [
         { name: "game_completed", count: 3, visitors: 2 },
         { name: "signup", count: 1, visitors: 1 }
       ])
+    }))
+
+  it.effect("gives each Custom event its count per bucket over the whole range, empty buckets included", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* h.createProject({})
+      yield* at("2026-03-01T09:00:00Z")
+      yield* h.ingest(production!.key, [customEvent("signup"), customEvent("game_completed")], { ip: "198.51.100.1" })
+      yield* at("2026-03-03T09:00:00Z")
+      yield* h.ingest(production!.key, [customEvent("game_completed"), customEvent("game_completed")], { ip: "198.51.100.2" })
+
+      const { events } = yield* listEvents(h, production!.id, custom("2026-03-01", "2026-03-04"))
+      assert.deepStrictEqual(events.map((e) => ({ name: e.name, series: e.series })), [
+        {
+          name: "game_completed",
+          series: [
+            { bucket: "2026-03-01", count: 1 },
+            { bucket: "2026-03-02", count: 0 },
+            { bucket: "2026-03-03", count: 2 },
+            { bucket: "2026-03-04", count: 0 }
+          ]
+        },
+        {
+          name: "signup",
+          series: [
+            { bucket: "2026-03-01", count: 1 },
+            { bucket: "2026-03-02", count: 0 },
+            { bucket: "2026-03-03", count: 0 },
+            { bucket: "2026-03-04", count: 0 }
+          ]
+        }
+      ])
+    }))
+
+  it.effect("gives an hourly series for a single day", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* h.createProject({})
+      yield* at("2026-03-01T09:30:00Z")
+      yield* h.ingest(production!.key, [customEvent("signup"), customEvent("signup")], { ip: "198.51.100.1" })
+
+      const { events: [signup] } = yield* listEvents(h, production!.id, day)
+      assert.strictEqual(signup!.series.length, 24)
+      assert.deepStrictEqual(signup!.series[9], { bucket: "2026-03-01T09:00", count: 2 })
+      assert.strictEqual(signup!.series.reduce((sum, b) => sum + b.count, 0), 2)
+    }))
+
+  it.effect("gives each Custom event its count in the previous period, the same length just before", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* h.createProject({})
+      yield* at("2026-02-22T09:00:00Z") // previous period of 7 days ending 2026-03-01: 2026-02-16 to 2026-02-22
+      yield* h.ingest(production!.key, [customEvent("signup"), customEvent("signup"), customEvent("gone")], { ip: "198.51.100.1" })
+      yield* at("2026-02-15T09:00:00Z") // before the previous period
+      yield* h.ingest(production!.key, [customEvent("signup")], { ip: "198.51.100.1" })
+      yield* at("2026-03-01T09:00:00Z")
+      yield* h.ingest(production!.key, [customEvent("signup"), customEvent("new_one")], { ip: "198.51.100.1" })
+
+      const list = yield* listEvents(h, production!.id, { period: "7d" })
+      assert.deepStrictEqual([list.previous.from, list.previous.to, list.previous.until], ["2026-02-16", "2026-02-22", null])
+      // Only names sent in the chosen range are listed; one absent before has a previous count of 0.
+      assert.deepStrictEqual(list.events.map((e) => [e.name, e.count, e.previousCount]), [
+        ["new_one", 1, 0],
+        ["signup", 1, 2]
+      ])
+    }))
+
+  it.effect("compares today with yesterday only up to the current local time of day", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* h.createProject({ timeZone: "Europe/Berlin" })
+      yield* at("2026-01-10T07:00:00Z") // yesterday, 08:00 in Berlin
+      yield* h.ingest(production!.key, [customEvent("signup")], { ip: "198.51.100.1" })
+      yield* at("2026-01-10T15:00:00Z") // yesterday, 16:00 in Berlin: later in the day than now
+      yield* h.ingest(production!.key, [customEvent("signup"), customEvent("signup")], { ip: "198.51.100.1" })
+      yield* at("2026-01-11T08:15:00Z") // today, 09:15 in Berlin
+      yield* h.ingest(production!.key, [customEvent("signup")], { ip: "198.51.100.1" })
+
+      const list = yield* listEvents(h, production!.id, { period: "today" })
+      assert.deepStrictEqual([list.previous.from, list.previous.to, list.previous.until], ["2026-01-10", "2026-01-10", "2026-01-10T09:15:00"])
+      assert.deepStrictEqual(list.events.map((e) => [e.name, e.count, e.previousCount]), [["signup", 1, 1]])
     }))
 
   it.effect("leaves Built-in events out", () =>

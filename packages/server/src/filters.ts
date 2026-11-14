@@ -9,7 +9,7 @@ import type { Fragment } from "effect/sql/Statement"
 type Sql = PgClient.PgClient
 
 /** The Event properties column to read: the row's own, or a named lateral's (`fp`, a Session's first Pageview). */
-type PropertiesColumn = "properties" | "fp.properties"
+type PropertiesColumn = "properties" | "fp.properties" | "lp.properties"
 
 /**
  * The path of a URL property (`/pricing`): no scheme, host, query or fragment; `/` when empty.

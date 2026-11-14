@@ -1,10 +1,14 @@
 // Property filters: every report narrowed to the Events that match, observed through the
 // reports and Custom events APIs.
 import { assert, layer } from "@effect/vitest"
-import type { EventPropertyFilter } from "@flock/shared"
+import type { EventPropertyFilter, TopRow } from "@flock/shared"
 import { Effect } from "effect"
 import { TestClock } from "effect/testing"
 import { customEvent, Harness, pageview } from "./harness.ts"
+
+/** A ranked-list row's counts, leaving its engagement columns to engagement.test.ts. */
+const counts = (rows: ReadonlyArray<TopRow>) =>
+  rows.map(({ pageviews, value, visitors }) => pageviews === undefined ? { value, visitors } : { value, visitors, pageviews })
 
 const at = (iso: string) => TestClock.setTime(Date.parse(iso))
 const DE = "203.0.113.7"
@@ -64,7 +68,10 @@ layer(Harness.layer({ geoIp }))("Filter operators", (it) => {
         customEvent("game_completed", { score: 12, won: false })
       ])
       const list = (filters: ReadonlyArray<EventPropertyFilter>) =>
-        h.client.customEvents.list({ params: { environmentId: production!.id }, query: day(filters) }).pipe(Effect.orDie)
+        h.client.customEvents.list({ params: { environmentId: production!.id }, query: day(filters) }).pipe(
+          Effect.map((l) => ({ events: l.events.map(({ name, count, visitors }) => ({ name, count, visitors })) })),
+          Effect.orDie
+        )
       assert.deepStrictEqual((yield* list([is("score", "34")])).events, [{ name: "game_completed", count: 1, visitors: 1 }])
       assert.deepStrictEqual((yield* list([is("won", "false")])).events, [{ name: "game_completed", count: 1, visitors: 1 }])
     }))
@@ -102,18 +109,18 @@ layer(Harness.layer({ geoIp }))("Pages, sources and audience with filters", (it)
       yield* h.ingest(production!.key, [pageview({ $url: url("/pricing") })], { ip: US })
       const de = day([is("$country", "DE")])
 
-      assert.deepStrictEqual((yield* h.top(production!.id, "pages", de)).rows, [
-        { value: "/", count: 1 },
-        { value: "/pricing", count: 1 }
+      assert.deepStrictEqual(counts((yield* h.top(production!.id, "pages", de)).rows), [
+        { value: "/", visitors: 1, pageviews: 1 },
+        { value: "/pricing", visitors: 1, pageviews: 1 }
       ])
-      assert.deepStrictEqual((yield* h.top(production!.id, "entryPages", de)).rows, [{ value: "/", count: 1 }])
-      assert.deepStrictEqual((yield* h.top(production!.id, "exitPages", de)).rows, [{ value: "/pricing", count: 1 }])
+      assert.deepStrictEqual(counts((yield* h.top(production!.id, "entryPages", de)).rows), [{ value: "/", visitors: 1 }])
+      assert.deepStrictEqual(counts((yield* h.top(production!.id, "exitPages", de)).rows), [{ value: "/pricing", visitors: 1 }])
       // Filtering by a page keeps only its Pageviews, so it is each Session's entry and exit.
       const pricing = day([is("$path", "/pricing")])
-      assert.deepStrictEqual((yield* h.top(production!.id, "entryPages", pricing)).rows, [{ value: "/pricing", count: 2 }])
+      assert.deepStrictEqual(counts((yield* h.top(production!.id, "entryPages", pricing)).rows), [{ value: "/pricing", visitors: 2 }])
     }))
 
-  it.effect("referrers and UTM tags count only matching Sessions", () =>
+  it.effect("referrers and UTM tags count only Visitors with a matching Session", () =>
     Effect.gen(function*() {
       const h = yield* Harness
       const { environments: [production] } = yield* h.createProject({})
@@ -122,15 +129,15 @@ layer(Harness.layer({ geoIp }))("Pages, sources and audience with filters", (it)
       yield* h.ingest(production!.key, [pageview({ $url: url("/?utm_source=twitter"), $referrer: "https://www.google.com/" })], { ip: US })
       const de = day([is("$country", "DE")])
 
-      assert.deepStrictEqual((yield* h.top(production!.id, "referrers", de)).rows, [{ value: "news.ycombinator.com", count: 1 }])
-      assert.deepStrictEqual((yield* h.top(production!.id, "utmSources", de)).rows, [{ value: "newsletter", count: 1 }])
+      assert.deepStrictEqual(counts((yield* h.top(production!.id, "referrers", de)).rows), [{ value: "news.ycombinator.com", visitors: 1 }])
+      assert.deepStrictEqual(counts((yield* h.top(production!.id, "utmSources", de)).rows), [{ value: "newsletter", visitors: 1 }])
       const google = day([is("$referring_domain", "google.com")])
-      assert.deepStrictEqual((yield* h.top(production!.id, "countries", google)).rows, [{ value: "US", count: 1 }])
+      assert.deepStrictEqual(counts((yield* h.top(production!.id, "countries", google)).rows), [{ value: "US", visitors: 1 }])
       const twitter = day([is("$utm_source", "twitter")])
-      assert.deepStrictEqual((yield* h.top(production!.id, "referrers", twitter)).rows, [{ value: "google.com", count: 1 }])
+      assert.deepStrictEqual(counts((yield* h.top(production!.id, "referrers", twitter)).rows), [{ value: "google.com", visitors: 1 }])
     }))
 
-  it.effect("audience reports count only matching Pageviews", () =>
+  it.effect("audience reports count only Visitors with a matching Pageview", () =>
     Effect.gen(function*() {
       const h = yield* Harness
       const { environments: [production] } = yield* h.createProject({})
@@ -141,11 +148,12 @@ layer(Harness.layer({ geoIp }))("Pages, sources and audience with filters", (it)
       yield* h.ingest(production!.key, [pageview({ $url: url("/pricing") })], { ip: US, userAgent: firefox })
 
       const pricing = day([is("$path", "/pricing")])
-      assert.deepStrictEqual((yield* h.top(production!.id, "countries", pricing)).rows, [
-        { value: "DE", count: 1 },
-        { value: "US", count: 1 }
+      assert.deepStrictEqual(counts((yield* h.top(production!.id, "countries", pricing)).rows), [
+        { value: "DE", visitors: 1 },
+        { value: "US", visitors: 1 }
       ])
-      assert.deepStrictEqual((yield* h.top(production!.id, "browsers", day([is("$country", "US")]))).rows, [{ value: "Firefox", count: 2 }])
+      // The US Visitor's two Pageviews count once.
+      assert.deepStrictEqual(counts((yield* h.top(production!.id, "browsers", day([is("$country", "US")]))).rows), [{ value: "Firefox", visitors: 1 }])
       // The exact-range breakdown endpoint takes filters too.
       const range = { from: "2026-03-01T00:00:00Z", to: "2026-03-02T00:00:00Z" }
       assert.deepStrictEqual(yield* h.breakdown(production!.id, "$country", range, undefined, [is("$path", "/")]), [{ value: "US", count: 1 }])
@@ -181,7 +189,12 @@ layer(Harness.layer({ geoIp }))("Custom events with filters", (it) => {
       const api = h.client.customEvents
 
       const list = yield* api.list({ params: { environmentId }, query: day([is("level", "hard")]) }).pipe(Effect.orDie)
-      assert.deepStrictEqual(list.events, [{ name: "game_completed", count: 2, visitors: 2 }])
+      assert.deepStrictEqual(list.events.map(({ name, count, visitors }) => ({ name, count, visitors })), [
+        { name: "game_completed", count: 2, visitors: 2 }
+      ])
+      assert.deepStrictEqual(list.events[0]!.series.filter((b) => b.count > 0), [{ bucket: "2026-03-01T09:00", count: 2 }])
+
+      assert.strictEqual(list.events[0]!.previousCount, 0)
 
       const detail = yield* api.detail({ params: { environmentId }, query: { ...de, name: "game_completed" } }).pipe(Effect.orDie)
       assert.deepStrictEqual(detail.totals, { count: 2, visitors: 1 })
@@ -195,5 +208,24 @@ layer(Harness.layer({ geoIp }))("Custom events with filters", (it) => {
         query: { ...day([is("level", "hard")]), name: "game_completed", eventProperty: "score" }
       }).pipe(Effect.orDie)
       assert.deepStrictEqual(stats.totals, { count: 2, average: 65, sum: 130, min: 30, max: 100, median: 65 })
+    }))
+
+  it.effect("the list's previous-period count matches the same Filters", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* h.createProject({})
+      yield* at("2026-02-28T09:00:00Z") // the previous period of 2026-03-01
+      yield* h.ingest(production!.key, [
+        customEvent("game_completed", { level: "hard" }),
+        customEvent("game_completed", { level: "easy" }),
+        customEvent("game_completed", { level: "hard" })
+      ], { ip: DE })
+      yield* at("2026-03-01T09:00:00Z")
+      yield* h.ingest(production!.key, [customEvent("game_completed", { level: "hard" })], { ip: DE })
+      yield* at("2026-03-02T09:00:00Z") // after the range, so its previous period is the whole of 2026-02-28
+
+      const list = yield* h.client.customEvents.list({ params: { environmentId: production!.id }, query: day([is("level", "hard")]) })
+        .pipe(Effect.orDie)
+      assert.deepStrictEqual(list.events.map((e) => [e.name, e.count, e.previousCount]), [["game_completed", 1, 2]])
     }))
 })

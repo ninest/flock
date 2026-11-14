@@ -1,25 +1,44 @@
-// A breakdown: one `top` report as rows with a faint bar behind each, sized by the row's count
-// against the largest. Its title can switch between related reports (Pages, Entry pages, Exit
+// A breakdown: one `top` report as rows with a faint bar behind each, sized by the row's unique
+// Visitors against the largest. Its title can switch between related reports (Pages, Entry pages, Exit
 // pages). Clicking a row adds its value as a Filter.
-import type { Environment, EventPropertyFilter, ReportRangeQuery, TopReport } from "@flock/shared"
+import type { Environment, EventPropertyFilter, ReportRangeQuery, TopReport, TopRow } from "@flock/shared"
 import { useState } from "react"
 import { request } from "./api.ts"
-import { barWidth, capitalize, countryName, formatCount } from "./format.ts"
+import { barWidth, capitalize, countryName, formatCount, formatDuration, formatShare } from "./format.ts"
 import { isComplete, queryDeps } from "./project-search.ts"
-import { barStyle, Dropdown, Notice, pending, Rows } from "./ui.tsx"
+import { barStyle, Dropdown, Notice, pending, Rows, wide } from "./ui.tsx"
 import { usePoll } from "./use-poll.ts"
 
 export interface BreakdownReport {
   readonly report: TopReport
   readonly title: string
-  /** What the counts are, e.g. "Pageviews" or "Sessions". */
-  readonly unit: "Pageviews" | "Sessions"
+  /** Columns after Visitors, from the row's optional fields, e.g. Pageviews for pages. */
+  readonly columns?: ReadonlyArray<BreakdownColumn>
   /** Display text for a value. */
   readonly label?: (value: string) => string
   /** What a `null` value means. */
   readonly nullLabel: string
   /** The Event property a row's value filters by, e.g. `$path` for pages. */
   readonly filterKey: string
+}
+
+/** A column after Visitors, showing one of the optional fields a report fills in. */
+export interface BreakdownColumn {
+  readonly label: string
+  readonly cell: (row: TopRow) => string
+  readonly width?: number
+  /** Dropped on a phone, where tables keep three columns. */
+  readonly wide?: boolean
+}
+
+const pageviews: BreakdownColumn = { label: "Pageviews", cell: (row) => formatCount(row.pageviews ?? 0), width: 88 }
+const bounceRate: BreakdownColumn = { label: "Bounce rate", cell: (row) => formatShare(row.bounceRate), width: 88 }
+const exitRate: BreakdownColumn = { label: "Left from here", cell: (row) => formatShare(row.exitRate), width: 104, wide: true }
+const timeOnPage: BreakdownColumn = {
+  label: "Time on page",
+  cell: (row) => row.timeOnPage == null ? "–" : formatDuration(row.timeOnPage),
+  width: 96,
+  wide: true
 }
 
 /** `DE` as a flag and a name. */
@@ -31,21 +50,21 @@ const country = (code: string) => {
 /** The four breakdowns on the Dashboard, each with the reports its title switches between. */
 export const BREAKDOWNS: ReadonlyArray<ReadonlyArray<BreakdownReport>> = [
   [
-    { report: "pages", title: "Pages", unit: "Pageviews", nullLabel: "Unknown", filterKey: "$path" },
-    { report: "entryPages", title: "Entry pages", unit: "Sessions", nullLabel: "Unknown", filterKey: "$path" },
-    { report: "exitPages", title: "Exit pages", unit: "Sessions", nullLabel: "Unknown", filterKey: "$path" }
+    { report: "pages", title: "Pages", columns: [pageviews, { ...bounceRate, wide: true }, exitRate, timeOnPage], nullLabel: "Unknown", filterKey: "$path" },
+    { report: "entryPages", title: "Entry pages", columns: [bounceRate], nullLabel: "Unknown", filterKey: "$path" },
+    { report: "exitPages", title: "Exit pages", columns: [bounceRate], nullLabel: "Unknown", filterKey: "$path" }
   ],
   [
-    { report: "referrers", title: "Sources", unit: "Sessions", nullLabel: "Direct", filterKey: "$referring_domain" },
-    { report: "utmSources", title: "UTM sources", unit: "Sessions", nullLabel: "None", filterKey: "$utm_source" },
-    { report: "utmMediums", title: "UTM mediums", unit: "Sessions", nullLabel: "None", filterKey: "$utm_medium" },
-    { report: "utmCampaigns", title: "UTM campaigns", unit: "Sessions", nullLabel: "None", filterKey: "$utm_campaign" }
+    { report: "referrers", title: "Sources", columns: [bounceRate], nullLabel: "Direct", filterKey: "$referring_domain" },
+    { report: "utmSources", title: "UTM sources", columns: [bounceRate], nullLabel: "None", filterKey: "$utm_source" },
+    { report: "utmMediums", title: "UTM mediums", columns: [bounceRate], nullLabel: "None", filterKey: "$utm_medium" },
+    { report: "utmCampaigns", title: "UTM campaigns", columns: [bounceRate], nullLabel: "None", filterKey: "$utm_campaign" }
   ],
-  [{ report: "countries", title: "Countries", unit: "Pageviews", label: country, nullLabel: "Unknown", filterKey: "$country" }],
+  [{ report: "countries", title: "Countries", label: country, nullLabel: "Unknown", filterKey: "$country" }],
   [
-    { report: "devices", title: "Devices", unit: "Pageviews", label: capitalize, nullLabel: "Unknown", filterKey: "$device" },
-    { report: "browsers", title: "Browsers", unit: "Pageviews", nullLabel: "Unknown", filterKey: "$browser" },
-    { report: "oses", title: "Operating systems", unit: "Pageviews", nullLabel: "Unknown", filterKey: "$os" }
+    { report: "devices", title: "Devices", columns: [bounceRate], label: capitalize, nullLabel: "Unknown", filterKey: "$device" },
+    { report: "browsers", title: "Browsers", columns: [bounceRate], nullLabel: "Unknown", filterKey: "$browser" },
+    { report: "oses", title: "Operating systems", columns: [bounceRate], nullLabel: "Unknown", filterKey: "$os" }
   ]
 ]
 
@@ -65,7 +84,7 @@ export const Breakdown = ({ environment, query, reports, onAddFilter }: {
     [environment.id, report.report, ...queryDeps(query)]
   )
   const rows = data?.report === report.report ? data.rows.slice(0, ROWS) : undefined
-  const max = Math.max(0, ...(rows ?? []).map((r) => r.count))
+  const max = Math.max(0, ...(rows ?? []).map((r) => r.visitors))
   const title = reports.length === 1 ? report.title : (
     <Dropdown label={<span>{report.title}</span>}>
       {reports.map((r, i) => (
@@ -76,24 +95,25 @@ export const Breakdown = ({ environment, query, reports, onAddFilter }: {
     </Dropdown>
   )
   return (
-    <section>
-      <Rows variant="bars" title={title} columns={[{ label: report.title }, { label: report.unit, width: 96 }]} testId={`top-${report.report}`}>
+    <section className={reports.some((r) => (r.columns?.length ?? 0) > 1) ? "breakdown-full" : undefined}>
+      <Rows variant="bars" title={title} columns={[{ label: report.title }, { label: "Visitors", width: 96 }, ...(report.columns ?? [])]} testId={`top-${report.report}`}>
         {!complete ? null : !rows ? pending(error, report.title) : rows.length === 0 ? <Notice>Nothing in this range.</Notice> : rows.map((row) => {
           const cells = (
             <>
               <span className={row.value === null ? "muted" : undefined}>{row.value === null ? report.nullLabel : report.label ? report.label(row.value) : row.value}</span>
-              <span>{formatCount(row.count)}</span>
+              <span>{formatCount(row.visitors)}</span>
+              {report.columns?.map((c) => <span key={c.label} {...(c.wide ? wide : {})}>{c.cell(row)}</span>)}
             </>
           )
           return row.value === null
-            ? <div key="\u0000" className="row" role="row" style={barStyle(barWidth(row.count, max))}>{cells}</div>
+            ? <div key="\u0000" className="row" role="row" style={barStyle(barWidth(row.visitors, max))}>{cells}</div>
             : (
               <button
                 key={row.value}
                 type="button"
                 role="row"
                 className="row"
-                style={barStyle(barWidth(row.count, max))}
+                style={barStyle(barWidth(row.visitors, max))}
                 title={`Filter by ${report.filterKey} is ${row.value}`}
                 onClick={() => onAddFilter({ eventProperty: report.filterKey, op: "is", value: row.value! })}
               >
