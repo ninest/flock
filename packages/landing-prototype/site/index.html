@@ -8,9 +8,18 @@
      on a route of their own (there is no landing page yet to host them). Question: what should the landing page
      look like, and how should the hero tell the "Sam is being tracked" joke? -->
 <link rel="stylesheet" href="/shared.css">
+<!-- Flock tracking this page (dogfooding): the owner's production Instance, cookieless. -->
+<script defer src="https://emotionalsupport.misc.page/flock.js" data-key="pk_production_AbgCjy3Xokcw1Azame9lTmkd" data-mode="cookieless"></script>
 </head>
 <body>
 <div id="root"></div>
 <script type="module" src="/main.js"></script>
+<script>
+  // A Custom event per GitHub link click; `where` says which of the page's GitHub links it was.
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest('a[href*="github.com"]');
+    if (a) window.flock?.track('github_click', { where: a.closest('footer') ? 'footer' : a.classList.contains('gh') ? 'header' : 'hero' });
+  });
+</script>
 </body>
 </html>
