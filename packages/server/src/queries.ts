@@ -39,7 +39,7 @@ import type { Fragment } from "effect/sql/Statement"
 import { matchesFilters, pathOf, referringDomainOf } from "./filters.ts"
 import { Annotations } from "./annotations.ts"
 import { Projects } from "./projects.ts"
-import { addDays, localDate, type ReportRange, resolvePreviousRange, resolveRange } from "./report-range.ts"
+import { addDays, localDate, type ReportRange, type ReportScope, resolvePreviousRange, resolveRange } from "./report-range.ts"
 import { SESSION_TIMEOUT_MINUTES } from "./sessions.ts"
 
 /** An exact `[from, to)` time range, for the reports that don't work on local days. */
@@ -233,7 +233,7 @@ export class Queries extends Context.Service<Queries, {
           timeZone: range.timeZone,
           interval: range.interval,
           ...current,
-          annotations: yield* annotations.inRange(scope.projectId, scope.environmentId, range),
+          annotations: yield* annotations.inRange(scope),
           previous: { from: previousRange.from, to: previousRange.to, until: previousRange.until, ...previous }
         }
       }))
@@ -502,7 +502,7 @@ export class Queries extends Context.Service<Queries, {
           totals: { count: totals?.count ?? 0, visitors: totals?.visitors ?? 0 },
           series,
           properties,
-          annotations: yield* annotations.inRange(scope.projectId, scope.environmentId, range)
+          annotations: yield* annotations.inRange(scope)
         }
       }))
 
@@ -876,14 +876,6 @@ export class Queries extends Context.Service<Queries, {
 }
 
 type VisitorErrors = EnvironmentNotFound | VisitorsNeedPersistentMode | VisitorNotFound
-
-/** A report after the access check: the Environment, its resolved local range and the filters. */
-interface ReportScope {
-  readonly environmentId: EnvironmentId
-  readonly projectId: ProjectId
-  readonly range: ReportRange
-  readonly filters: EventPropertyFilters | undefined
-}
 
 /**
  * The UTM reports read `$utm_source` and friends, which Enrichment derives from the Pageview's

@@ -1,6 +1,6 @@
 // Turns the date range picker (today, 7 days, 30 days, custom) into local dates and a
 // bucket interval in the Project's time zone. Shared by every dashboard report.
-import type { ReportInterval, ReportRangeQuery } from "@flock/shared"
+import type { EnvironmentId, EventPropertyFilters, ProjectId, ReportInterval, ReportRangeQuery } from "@flock/shared"
 import { DateTime } from "effect"
 
 export interface ReportRange {
@@ -14,6 +14,14 @@ export interface ReportRange {
    * Only the previous period of a range of only today has one: yesterday up to the current time of day.
    */
   readonly until: string | null
+}
+
+/** A report after the access check: the Environment, its resolved local range and the filters. */
+export interface ReportScope {
+  readonly environmentId: EnvironmentId
+  readonly projectId: ProjectId
+  readonly range: ReportRange
+  readonly filters: EventPropertyFilters | undefined
 }
 
 /** The local calendar day of an instant in a time zone. */

@@ -91,6 +91,8 @@ export interface NewProject {
 export class Projects extends Context.Service<Projects, {
   readonly list: (member: MemberId) => Effect.Effect<Array<Project>>
   readonly get: (member: MemberId, id: ProjectId) => Effect.Effect<Project, ProjectNotFound>
+  /** The Project, if the Member owns it: the check before every owner-only action on a Project. */
+  readonly ownProject: (member: MemberId, id: ProjectId) => Effect.Effect<Project, ProjectNotFound | ProjectOwnerRequired>
   readonly create: (project: NewProject) => Effect.Effect<ProjectId>
   readonly update: (
     member: MemberId,
@@ -294,6 +296,7 @@ export class Projects extends Context.Service<Projects, {
       return Projects.of({
         list: (member) => select(member, undefined).pipe(orDie),
         get,
+        ownProject,
 
         create: ({ environments, name, owner, timeZone }) =>
           sql.withTransaction(Effect.gen(function*() {

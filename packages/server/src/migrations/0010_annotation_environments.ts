@@ -1,5 +1,5 @@
-// Annotations narrowed to some Environments (spec #22). Expand only: a new table, so the
-// previous release keeps working (it reads only `annotation.all_environments`).
+// Annotations narrowed to some Environments (spec #22). Expand only: a new table, which the
+// previous release never reads (Annotations, with `annotation.all_environments` from 0009, ship in this release).
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 

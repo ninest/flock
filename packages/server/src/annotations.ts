@@ -14,13 +14,13 @@ import {
   type NewAnnotation,
   type ProjectId,
   type ProjectNotFound,
-  ProjectOwnerRequired
+  type ProjectOwnerRequired
 } from "@flock/shared"
 import { Context, DateTime, Effect, Layer } from "effect"
 import type { Fragment } from "effect/sql/Statement"
 import { makeId } from "./keys.ts"
 import { Projects } from "./projects.ts"
-import type { ReportRange } from "./report-range.ts"
+import type { ReportScope } from "./report-range.ts"
 
 interface Row {
   readonly id: string
@@ -35,12 +35,13 @@ interface Row {
   readonly createdAt: Date
 }
 
+/** `select` leaves out a narrowed Annotation without Environments, so a narrowed row has at least one. */
 const toAnnotation = (row: Row): Annotation => ({
   id: AnnotationId.make(row.id),
   label: row.label,
   description: row.description,
   at: DateTime.makeUnsafe(row.at),
-  environments: row.allEnvironments || row.environmentIds.length === 0
+  environments: row.allEnvironments
     ? "all"
     : [EnvironmentId.make(row.environmentIds[0]!), ...row.environmentIds.slice(1).map((id) => EnvironmentId.make(id))],
   createdBy: row.createdById === null
@@ -72,23 +73,16 @@ export class Annotations extends Context.Service<Annotations, {
   /** All of a Project's Annotations, newest first. Any Member of the Project may look. */
   readonly list: (member: MemberId, project: ProjectId) => Effect.Effect<Array<Annotation>, ProjectNotFound>
   /**
-   * The Annotations that apply to an Environment and fall in a report's local range, oldest
+   * The Annotations that apply to a report's Environment and fall in its local range, oldest
    * first. The caller has checked access.
    */
-  readonly inRange: (project: ProjectId, environment: EnvironmentId, range: ReportRange) => Effect.Effect<Array<Annotation>>
+  readonly inRange: (scope: ReportScope) => Effect.Effect<Array<Annotation>>
 }>()("flock/Annotations") {
   static readonly layer = Layer.effect(
     Annotations,
     Effect.gen(function*() {
       const sql = yield* PgClient.PgClient
       const projects = yield* Projects
-
-      const ownProject = (member: MemberId, id: ProjectId) =>
-        projects.get(member, id).pipe(
-          Effect.flatMap((project) =>
-            project.role === "owner" ? Effect.void : Effect.fail(new ProjectOwnerRequired({ message: "Only a Project owner can do this" }))
-          )
-        )
 
       const select = (where: Fragment, order: "oldest" | "newest" = "oldest") =>
         sql<Row>`
@@ -100,6 +94,8 @@ export class Annotations extends Context.Service<Annotations, {
                  ) AS environment_ids
           FROM annotation a LEFT JOIN member m ON m.id = a.created_by
           WHERE ${where}
+            -- A narrowed Annotation left without Environments applies to none, as in inRange.
+            AND (a.all_environments OR EXISTS (SELECT 1 FROM annotation_environment ae WHERE ae.annotation_id = a.id))
           ORDER BY ${
           order === "oldest" ? sql`a.at, a.created_at, a.id` : sql`a.at DESC, a.created_at DESC, a.id DESC`
         }`.pipe(Effect.map((rows) => rows.map(toAnnotation)), Effect.orDie)
@@ -130,7 +126,7 @@ export class Annotations extends Context.Service<Annotations, {
       return Annotations.of({
         create: (member, project, input) =>
           Effect.gen(function*() {
-            yield* ownProject(member, project)
+            yield* projects.ownProject(member, project)
             const environments = yield* checkEnvironments(project, input.environments ?? "all")
             const now = yield* DateTime.now
             const id = AnnotationId.make(makeId("ann"))
@@ -153,7 +149,7 @@ export class Annotations extends Context.Service<Annotations, {
 
         update: (member, project, id, changes) =>
           Effect.gen(function*() {
-            yield* ownProject(member, project)
+            yield* projects.ownProject(member, project)
             const environments = changes.environments === undefined
               ? undefined
               : yield* checkEnvironments(project, changes.environments)
@@ -175,7 +171,7 @@ export class Annotations extends Context.Service<Annotations, {
 
         delete: (member, project, id) =>
           Effect.gen(function*() {
-            yield* ownProject(member, project)
+            yield* projects.ownProject(member, project)
             const deleted = yield* sql`DELETE FROM annotation WHERE id = ${id} AND project_id = ${project} RETURNING id`.pipe(Effect.orDie)
             if (deleted.length === 0) return yield* new AnnotationNotFound({ id })
           }),
@@ -183,11 +179,11 @@ export class Annotations extends Context.Service<Annotations, {
         list: (member, project) =>
           projects.get(member, project).pipe(Effect.andThen(select(sql`a.project_id = ${project}`, "newest"))),
 
-        inRange: (project, environment, range) =>
+        inRange: ({ environmentId, projectId, range }) =>
           select(sql`
-            a.project_id = ${project}
+            a.project_id = ${projectId}
             AND (a.all_environments OR EXISTS (
-              SELECT 1 FROM annotation_environment ae WHERE ae.annotation_id = a.id AND ae.environment_id = ${environment}
+              SELECT 1 FROM annotation_environment ae WHERE ae.annotation_id = a.id AND ae.environment_id = ${environmentId}
             ))
             AND a.at >= (${range.from}::date::timestamp AT TIME ZONE ${range.timeZone})
             AND a.at < ((${range.to}::date + 1)::timestamp AT TIME ZONE ${range.timeZone})`)
