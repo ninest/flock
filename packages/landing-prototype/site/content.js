@@ -7,7 +7,7 @@ export const VISITOR = 'Sam';
 export const BEATS = [
   { key: 'home', time: '8:02:14', event: 'left_home', props: { door_open_s: 14 },
     line: 'Sam left his house.', aside: 'The front door was open for 14 seconds. He went back for something.',
-    feature: 'Pageview', maps: 'The moment someone arrives. The script sends a Pageview by itself, with the page, the referrer and the screen it was on.' },
+    feature: 'Pageview', maps: 'The moment someone arrives. The script sends a Pageview by itself, with the page, the referrer, and the screen it was on.' },
   { key: 'street', time: '8:03:40', event: '$pageview', props: { path: '/maple-street', mph: 31 },
     line: 'Sam is on Maple Street.', aside: '31 in a 25. We are not the police. We just know.',
     feature: 'Session', maps: 'Everything one Visitor does in a row is a Session. It ends after 30 minutes of quiet, the way a drive ends when the car stops.' },
@@ -19,7 +19,7 @@ export const BEATS = [
     feature: 'Custom events', maps: 'Not everything is a page. Send your own Events, like signup_clicked or game_completed, with any properties you want to count by.' },
   { key: 'highway', time: '8:19:30', event: '$pageview', props: { path: '/i-90-east', referrer: 'route-9' },
     line: 'Sam merged onto the highway.', aside: 'He came from Route 9. They usually do.',
-    feature: 'Sources', maps: 'Where Visitors come from: referrers and utm tags, and the pages they enter on, read most and leave from.' },
+    feature: 'Sources', maps: 'Where Visitors come from: referrers and utm tags, and the pages they enter on, read most, and leave from.' },
   { key: 'work', time: '8:31:07', event: 'parked', props: { lane: 'bus' },
     line: 'Sam parked in the bus lane.', aside: 'Outside his office, one minute later than yesterday.',
     feature: 'Session timeline', maps: 'Open any Session and read it in order, from the first Event to the last. This page is one.' },
