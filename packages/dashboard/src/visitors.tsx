@@ -14,7 +14,7 @@ import { useEffect, useState } from "react"
 import { request } from "./api.ts"
 import { barWidth, capitalize, countryName, formatCount, formatDuration } from "./format.ts"
 import { isComplete, type ProjectSearch, reportQuery, sharedSearch } from "./project-search.ts"
-import { formatStart, sourceOf } from "./sessions.tsx"
+import { formatStart, fromOf, SESSION_COLUMNS } from "./sessions.tsx"
 import { barStyle, Notice, pending, Rows, StatusDot, useNow, wide } from "./ui.tsx"
 import { usePoll } from "./use-poll.ts"
 import { activityWeeks } from "./visitor-activity.ts"
@@ -88,7 +88,7 @@ const VisitorRows = ({ projectId, environment, search, timeZone }: {
           { label: "Events", width: 64 },
           { label: "Country", width: 132, wide: true },
           { label: "Device", width: 140, wide: true },
-          { label: "From", width: 160, wide: true }
+          { label: "From", width: 260, wide: true }
         ]}
       >
         {!complete ? <Notice>Pick both dates.</Notice> : !data ? (
@@ -108,7 +108,7 @@ const VisitorRows = ({ projectId, environment, search, timeZone }: {
             <span>{formatCount(v.events)}</span>
             <span {...wide}>{v.country === null ? "Unknown" : countryName(v.country)}</span>
             <span {...wide}>{deviceOf(v)}</span>
-            <span {...wide}>{v.referringDomain ?? "Direct"}</span>
+            <span {...wide}>{fromOf(v)}</span>
           </Link>
         ))}
       </Rows>
@@ -265,15 +265,15 @@ const VisitorSessions = ({ projectId, environment, visitorId, search, timeZone }
       <Rows
         variant="end"
         testId="visitor-sessions"
-        columns={[{ label: "Entered on" }, { label: "Started", width: 132 }, { label: "From", width: 180, wide: true }, { label: "Events", width: 64, wide: true }, { label: "Duration", width: 84 }]}
+        columns={SESSION_COLUMNS}
       >
         {!data ? pending(error, "Sessions") : sessions.map((s) => (
           <Link key={s.id} role="row" className="row" to="/projects/$projectId/sessions/$sessionId" params={{ projectId, sessionId: s.id }} search={sharedSearch(search)}>
             <span><StatusDot status={s.status} />{s.entryPage ?? "No Pageview"}</span>
             <span>{formatStart(s.startedAt, timeZone, now)}</span>
-            <span {...wide}>{sourceOf(s)}</span>
+            <span>{fromOf(s)}</span>
             <span {...wide}>{formatCount(s.events)}</span>
-            <span>{formatDuration(s.duration)}</span>
+            <span {...wide}>{formatDuration(s.duration)}</span>
           </Link>
         ))}
       </Rows>

@@ -700,7 +700,6 @@ export class Queries extends Context.Service<Queries, {
         return {
           ...toSummary(row, now),
           referrer: row.referringDomain === null ? null : row.referrer,
-          utmSource: row.utmSource,
           utmMedium: row.utmMedium,
           utmCampaign: row.utmCampaign,
           browser: row.browser,
@@ -775,7 +774,8 @@ export class Queries extends Context.Service<Queries, {
                  EXISTS (SELECT 1 FROM identified_visitor i WHERE i.project_id = ${projectId} AND i.visitor_id = p.visitor_id) AS identified,
                  fe.properties ->> '$country' AS country, fe.properties ->> '$device' AS device,
                  fe.properties ->> '$browser' AS browser,
-                 ${referringDomainOf(sql, "fp.properties")} AS referring_domain
+                 ${referringDomainOf(sql, "fp.properties")} AS referring_domain,
+                 coalesce(fp.properties ->> '$utm_source', fp.properties ->> 'utm_source') AS utm_source
           FROM page p
           -- The latest Session: the one holding the Visitor's last Event.
           LEFT JOIN LATERAL (
@@ -807,7 +807,8 @@ export class Queries extends Context.Service<Queries, {
             country: row.country,
             device: row.device,
             browser: row.browser,
-            referringDomain: row.referringDomain
+            referringDomain: row.referringDomain,
+            utmSource: row.utmSource
           })),
           nextCursor: rows.length > VISITORS_PAGE_SIZE && last ? `${last.lastSeenAt.toISOString()}_${last.visitorId}` : null
         } satisfies VisitorList
@@ -963,6 +964,7 @@ interface VisitorRow {
   readonly device: string | null
   readonly browser: string | null
   readonly referringDomain: string | null
+  readonly utmSource: string | null
 }
 
 /** Under this many minutes since the last Event, the Visitor counts as active. */
@@ -983,6 +985,7 @@ const toSummary = (row: SessionRow, now: DateTime.Utc): SessionSummary => ({
   entryPage: row.entryPage,
   lastPage: row.lastPage,
   referringDomain: row.referringDomain,
+  utmSource: row.utmSource,
   country: row.country,
   device: row.device,
   status: sessionStatus(row.lastSeenAt, now)

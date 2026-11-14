@@ -30,7 +30,9 @@ export const VisitorListRow = Schema.Struct({
   device: Schema.NullOr(Schema.String),
   browser: Schema.NullOr(Schema.String),
   /** The referring domain of the latest Session's first Pageview, as in Recent sessions; null for direct traffic. */
-  referringDomain: Schema.NullOr(Schema.String)
+  referringDomain: Schema.NullOr(Schema.String),
+  /** The `utm_source` UTM tag of the latest Session's first Pageview; null without one. */
+  utmSource: Schema.NullOr(Schema.String)
 })
 export type VisitorListRow = typeof VisitorListRow.Type
 

@@ -5,10 +5,10 @@ import type { Environment, EventPropertyFilters, ProjectId, SessionSummary } fro
 import { Link, useNavigate } from "@tanstack/react-router"
 import { DateTime } from "effect"
 import { request } from "./api.ts"
-import { capitalize, countryName, formatCount, formatDuration } from "./format.ts"
+import { capitalize, countryName, formatCount, formatDuration, formatFrom } from "./format.ts"
 import { isLive, needsNextPage } from "./live-sessions.ts"
 import { type ProjectSearch, sharedSearch } from "./project-search.ts"
-import { formatStart, sourceOf, Timeline, useSession } from "./sessions.tsx"
+import { formatStart, fromOf, Timeline, useSession } from "./sessions.tsx"
 import { Detail, Notice, pending, Rows, StatusDot, useNow, wide } from "./ui.tsx"
 import { usePoll } from "./use-poll.ts"
 
@@ -51,12 +51,12 @@ export const Live = ({ projectId, environment, search, timeZone }: {
       <section className="split-list">
         <Rows
           variant="select"
-          columns={[{ label: "Now on" }, { label: "From", width: 150 }, { label: "Events", width: 64, wide: true }, { label: "On site", width: 84 }]}
+          columns={[{ label: "Now on" }, { label: "From", width: 260, phoneWidth: 150 }, { label: "Events", width: 64, wide: true }, { label: "On site", width: 84 }]}
         >
           {!sessions ? pending(error, "live Sessions") : sessions.length === 0 ? <Notice>Nobody is here right now.</Notice> : sessions.map((s) => (
             <button key={s.id} type="button" role="row" className="row" aria-current={s.id === selectedId} onClick={() => select(s.id)}>
               <span><StatusDot status={s.status} />{s.lastPage ?? "No Pageview"}</span>
-              <span>{sourceOf(s)}</span>
+              <span>{fromOf(s)}</span>
               <span {...wide}>{formatCount(s.events)}</span>
               <span>{formatDuration((now - DateTime.toEpochMillis(s.startedAt)) / 1000)}</span>
             </button>
@@ -85,7 +85,7 @@ const LiveSession = ({ projectId, environment, sessionId, search, timeZone }: {
   return (
     <>
       <h2>{session.lastPage ?? "No Pageview"}</h2>
-      <p className="dim">{session.entryPage === null ? "From" : `Entered on ${session.entryPage} from`} {sourceOf(session)}{where.length > 0 ? `, ${where.join(", ")}` : ""}</p>
+      <p className="dim">{session.entryPage === null ? "From" : `Entered on ${session.entryPage} from`} {formatFrom(session.referringDomain, [session.utmSource, session.utmMedium, session.utmCampaign])}{where.length > 0 ? `, ${where.join(", ")}` : ""}</p>
       {session.visitorId !== null && <p className="dim">Identified as <code>{session.visitorId}</code></p>}
       <Timeline
         session={session}

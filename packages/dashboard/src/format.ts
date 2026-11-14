@@ -17,6 +17,16 @@ export const formatDuration = (seconds: number) => {
   return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`
 }
 
+/**
+ * Where a Session came from: its Source (the referring domain, or Direct), then its UTM tags in
+ * brackets, as in `Direct (fnf)`.
+ */
+export const formatFrom = (referringDomain: string | null, utmTags: ReadonlyArray<string | null>) => {
+  const tags = utmTags.filter((tag) => tag !== null && tag !== "")
+  const source = referringDomain ?? "Direct"
+  return tags.length > 0 ? `${source} (${tags.join(", ")})` : source
+}
+
 /** A time offset in a Session timeline: `0:42`, `4:02` or `1:05:09`. */
 export const formatClock = (seconds: number) => {
   const s = whole(seconds)

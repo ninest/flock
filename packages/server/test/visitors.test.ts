@@ -296,11 +296,11 @@ layer(Harness.layer({ geoIp: { "198.51.100.1": "DE", "198.51.100.2": "FR" } }))(
     Effect.gen(function*() {
       const h = yield* Harness
       const { environments: [production, dev] } = yield* persistentProject({ environments: ["dev"] })
-      // device-1: an old Session from Germany, then one on Mar 2 from France on an iPhone via Hacker News.
+      // device-1: an old Session from Germany, then one on Mar 2 from France on an iPhone via Hacker News, from a link carrying a UTM tag.
       yield* at("2026-02-20T09:00:00Z")
       yield* h.ingest(production!.key, [as("device-1", pageview()), as("device-1", customEvent("signup"))], { ip: "198.51.100.1", userAgent: CHROME_WINDOWS })
       yield* at("2026-03-02T09:00:00Z")
-      yield* h.ingest(production!.key, [as("device-1", pageview({ $referrer: "https://news.ycombinator.com/item" }))], { ip: "198.51.100.2", userAgent: SAFARI_IPHONE })
+      yield* h.ingest(production!.key, [as("device-1", pageview({ $url: "https://example.com/?utm_source=fnf", $referrer: "https://news.ycombinator.com/item" }))], { ip: "198.51.100.2", userAgent: SAFARI_IPHONE })
       // device-2: on Mar 2, earlier, and again after the range on Mar 5.
       yield* at("2026-03-02T08:00:00Z")
       yield* h.ingest(production!.key, [as("device-2", pageview())], { ip: "198.51.100.1", userAgent: CHROME_WINDOWS })
@@ -329,7 +329,8 @@ layer(Harness.layer({ geoIp: { "198.51.100.1": "DE", "198.51.100.2": "FR" } }))(
             country: "DE",
             device: "desktop",
             browser: "Chrome",
-            referringDomain: null
+            referringDomain: null,
+            utmSource: null
           },
           {
             firstSeenAt: "2026-02-20T09:00:00.000Z",
@@ -341,7 +342,8 @@ layer(Harness.layer({ geoIp: { "198.51.100.1": "DE", "198.51.100.2": "FR" } }))(
             country: "FR",
             device: "mobile",
             browser: "Safari",
-            referringDomain: "news.ycombinator.com"
+            referringDomain: "news.ycombinator.com",
+            utmSource: "fnf"
           }
         ]
       )

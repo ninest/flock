@@ -26,7 +26,8 @@ const row = (visitorId: string, identified: boolean) => ({
   country: "DE",
   device: "desktop",
   browser: "Firefox",
-  referringDomain: null
+  referringDomain: null,
+  utmSource: null
 })
 
 /** The Visitors list's rows, as text. */

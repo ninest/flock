@@ -21,9 +21,9 @@ layer(Harness.layer({ geoIp: { "198.51.100.1": "DE", "198.51.100.2": "FR" } }))(
       yield* h.ingest(production!.key, [visit("https://example.com/pricing")], { ip: "198.51.100.1" })
       yield* at("2026-03-01T09:03:30Z")
       yield* h.ingest(production!.key, [customEvent("signup_completed", { plan: "pro" })], { ip: "198.51.100.1" })
-      // Visitor 2: a single direct Pageview, later.
+      // Visitor 2: a single direct Pageview, later, from a link carrying a UTM tag.
       yield* at("2026-03-01T10:00:00Z")
-      yield* h.ingest(production!.key, [visit("https://example.com/blog")], { ip: "198.51.100.2" })
+      yield* h.ingest(production!.key, [visit("https://example.com/blog?utm_source=fnf&utm_medium=chat")], { ip: "198.51.100.2" })
 
       yield* at("2026-03-01T12:00:00Z")
       const { nextCursor, sessions } = yield* h.sessions(production!.id, day)
@@ -40,6 +40,7 @@ layer(Harness.layer({ geoIp: { "198.51.100.1": "DE", "198.51.100.2": "FR" } }))(
             entryPage: "/blog",
             lastPage: "/blog",
             referringDomain: null,
+            utmSource: "fnf",
             country: "FR",
             device: null,
             status: "ended"
@@ -53,6 +54,7 @@ layer(Harness.layer({ geoIp: { "198.51.100.1": "DE", "198.51.100.2": "FR" } }))(
             entryPage: "/",
             lastPage: "/pricing",
             referringDomain: "news.ycombinator.com",
+            utmSource: null,
             country: "DE",
             device: null,
             status: "ended"

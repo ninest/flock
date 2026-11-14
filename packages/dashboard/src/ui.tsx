@@ -98,12 +98,14 @@ export const Dropdown = ({ label, children, buttonClass = "dropdown-button", che
 export interface Column {
   readonly label: ReactNode
   readonly width?: number
+  /** Its width on a phone, when narrower than `width`. */
+  readonly phoneWidth?: number
   /** Dropped on a phone, where tables keep three columns. */
   readonly wide?: boolean
 }
 
-const template = (columns: ReadonlyArray<Column>) =>
-  ["minmax(0, 1fr)", ...columns.slice(1).map((c) => `${c.width ?? 88}px`)].join(" ")
+const template = (columns: ReadonlyArray<Column>, phone = false) =>
+  ["minmax(0, 1fr)", ...columns.slice(1).map((c) => `${(phone ? c.phoneWidth : undefined) ?? c.width ?? 88}px`)].join(" ")
 
 /** Marks a cell that is dropped on a phone; spread it on the cell of a `wide` column. */
 export const wide = { "data-wide": true } as const
@@ -124,7 +126,7 @@ export const Rows = ({ columns, title, variant, children, testId }: {
 }) => {
   const style = {
     "--cols": template(columns),
-    "--cols-phone": template(columns.filter((c) => !c.wide))
+    "--cols-phone": template(columns.filter((c) => !c.wide), true)
   } as CSSProperties
   return (
     <div className={variant ? `rows rows-${variant}` : "rows"} style={style} data-testid={testId} role="table">

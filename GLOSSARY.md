@@ -72,11 +72,19 @@ _Avoid_: Journey, session replay, clickstream
 **Bounce**:
 A Session with a single Event. The bounce rate is the share of Sessions that are bounces, and the visit duration is the average time from a Session's first Event to its last. A page's bounce rate counts only the Sessions that entered on it.
 
+**Source**:
+Where a Session came from as the browser reports it: the referring domain of its first Pageview, or Direct when there is none.
+_Avoid_: Referrer (that is the full URL the Source is taken from), channel
+
+**UTM tag**:
+A label the author of a link put on it (source, medium, or campaign), read from a Session's first Pageview. It is shown beside the Source and never replaces it.
+_Avoid_: UTM parameter, campaign tag
+
 **Tracking mode**:
 A per-Project choice of how Visitors are recognised: cookieless (an anonymous ID that resets daily) or persistent (an ID that is stored on the device and can be identified).
 
 **Filter**:
-A condition on one top-level Event property (is, is not, contains) that narrows every report to the Events that match. Several Filters combine with AND. Filters choose which Sessions a report covers (those with a matching Event) without changing what a Session is: its entry page, exit page and source still come from its first or last Pageview, and whether it is a Bounce from all its Events.
+A condition on one top-level Event property (is, is not, contains) that narrows every report to the Events that match. Several Filters combine with AND. Filters choose which Sessions a report covers (those with a matching Event) without changing what a Session is: its entry page, exit page and Source still come from its first or last Pageview, and whether it is a Bounce from all its Events.
 _Avoid_: Segment, query
 
 **Identify**:

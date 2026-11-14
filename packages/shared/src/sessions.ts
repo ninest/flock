@@ -28,6 +28,8 @@ export const SessionSummary = Schema.Struct({
   lastPage: Schema.NullOr(Schema.String),
   /** The referring domain of the first Pageview, as in the Referrers report; null for direct traffic. */
   referringDomain: Schema.NullOr(Schema.String),
+  /** The `utm_source` UTM tag of the first Pageview; null without one. */
+  utmSource: Schema.NullOr(Schema.String),
   /** `$country` and `$device` of the first Event; null when unknown. */
   country: Schema.NullOr(Schema.String),
   device: Schema.NullOr(Schema.String),
@@ -76,8 +78,7 @@ export const SessionDetail = Schema.Struct({
   ...SessionSummary.fields,
   /** The first Pageview's referrer URL (as stored, cleaned); null for direct traffic. */
   referrer: Schema.NullOr(Schema.String),
-  /** UTM tags of the first Pageview. */
-  utmSource: Schema.NullOr(Schema.String),
+  /** The first Pageview's other UTM tags. */
   utmMedium: Schema.NullOr(Schema.String),
   utmCampaign: Schema.NullOr(Schema.String),
   /** `$browser` and `$os` of the first Event. */

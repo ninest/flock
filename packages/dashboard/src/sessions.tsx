@@ -6,9 +6,9 @@ import { Link } from "@tanstack/react-router"
 import { DateTime } from "effect"
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { request } from "./api.ts"
-import { capitalize, countryName, formatClock, formatCount, formatDuration } from "./format.ts"
+import { capitalize, countryName, formatClock, formatCount, formatDuration, formatFrom } from "./format.ts"
 import { isComplete, type ProjectSearch, sharedSearch } from "./project-search.ts"
-import { Notice, pending, Rows, StatusDot, useNow, wide } from "./ui.tsx"
+import { type Column, Notice, pending, Rows, StatusDot, useNow, wide } from "./ui.tsx"
 import { usePoll } from "./use-poll.ts"
 
 const millis = (t: DateTime.Utc) => DateTime.toEpochMillis(t)
@@ -29,8 +29,20 @@ export const formatStart = (t: DateTime.Utc, timeZone: string, now = Date.now())
 
 const minutesAgo = (t: DateTime.Utc, now: number) => Math.max(0, Math.floor((now - millis(t)) / 60_000))
 
-/** Where a Session came from: its referring domain, or Direct. */
-export const sourceOf = (session: SessionSummary) => session.referringDomain ?? "Direct"
+/** A Session's Source: its referring domain, or Direct. */
+export const sourceOf = (session: SessionSummary) => formatFrom(session.referringDomain, [])
+
+/** A Session's Source as lists show it, with its `utm_source` UTM tag in brackets: `Direct (fnf)`. */
+export const fromOf = (session: Pick<SessionSummary, "referringDomain" | "utmSource">) => formatFrom(session.referringDomain, [session.utmSource])
+
+/** The columns of a list of Sessions. A phone keeps where each came from and drops how long it lasted. */
+export const SESSION_COLUMNS: ReadonlyArray<Column> = [
+  { label: "Entered on" },
+  { label: "Started", width: 132 },
+  { label: "From", width: 260, phoneWidth: 120 },
+  { label: "Events", width: 64, wide: true },
+  { label: "Duration", width: 84, wide: true }
+]
 
 // Recent Sessions.
 
@@ -85,16 +97,16 @@ export const RecentSessions = ({ projectId, environment, query, search, timeZone
       <Rows
         variant="end"
         testId="recent-sessions"
-        columns={[{ label: "Entered on" }, { label: "Started", width: 132 }, { label: "From", width: 180, wide: true }, { label: "Events", width: 64, wide: true }, { label: "Duration", width: 84 }]}
+        columns={SESSION_COLUMNS}
       >
         {!complete ? null : !data ? pending(error, "Sessions") : sessions.length === 0 ? <Notice>No Sessions in this range.</Notice> : (
           sessions.slice(0, shown).map((s) => (
             <Link key={s.id} role="row" className="row" to="/projects/$projectId/sessions/$sessionId" params={{ projectId, sessionId: s.id }} search={back}>
               <span><StatusDot status={s.status} />{s.entryPage ?? "No Pageview"}</span>
               <span>{formatStart(s.startedAt, timeZone, now)}</span>
-              <span {...wide}>{sourceOf(s)}</span>
+              <span>{fromOf(s)}</span>
               <span {...wide}>{formatCount(s.events)}</span>
-              <span>{formatDuration(s.duration)}</span>
+              <span {...wide}>{formatDuration(s.duration)}</span>
             </Link>
           ))
         )}

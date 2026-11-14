@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { barWidth, formatClock, formatDuration, formatPercent, formatShare } from "./format.ts"
+import { barWidth, formatClock, formatDuration, formatFrom, formatPercent, formatShare } from "./format.ts"
 
 describe("formatDuration", () => {
   it("shows seconds under a minute", () => expect(formatDuration(42.4)).toBe("42s"))
@@ -29,4 +29,18 @@ describe("barWidth", () => {
   it("sizes a row against the largest", () => expect(barWidth(25, 100)).toBe("25%"))
   it("keeps a sliver for tiny rows", () => expect(barWidth(1, 10_000)).toBe("1%"))
   it("copes with an empty report", () => expect(barWidth(0, 0)).toBe("1%"))
+})
+
+describe("formatFrom", () => {
+  it("is the Source alone without UTM tags", () => {
+    expect(formatFrom("news.ycombinator.com", [null])).toBe("news.ycombinator.com")
+    expect(formatFrom(null, [null, null, null])).toBe("Direct")
+    expect(formatFrom(null, [""])).toBe("Direct")
+  })
+
+  it("puts UTM tags in brackets after the Source, never instead of it", () => {
+    expect(formatFrom(null, ["fnf"])).toBe("Direct (fnf)")
+    expect(formatFrom("mail.google.com", ["newsletter", "email", "launch"])).toBe("mail.google.com (newsletter, email, launch)")
+    expect(formatFrom(null, [null, null, "launch"])).toBe("Direct (launch)")
+  })
 })
