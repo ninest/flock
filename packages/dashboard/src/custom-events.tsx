@@ -11,13 +11,25 @@ import { request } from "./api.ts"
 import { AnnotationDetails, useChartAnnotations } from "./chart-annotations.tsx"
 import { formatChange } from "./change.ts"
 import { bucketLabel } from "./chart-scale.ts"
-import { chartedProperty, EVENT_MEASURES, eventSeries, STATISTICS, statisticSeries } from "./custom-event-charts.ts"
+import {
+  chartedProperty,
+  DEFAULT_MEASURE,
+  DEFAULT_STATISTIC,
+  EVENT_MEASURES,
+  eventSeries,
+  type Statistic,
+  STATISTICS,
+  statisticSeries
+} from "./custom-event-charts.ts"
 import { barWidth, formatCount, formatNumber, formatPercent } from "./format.ts"
 import { isComplete, type ProjectSearch, queryDeps, reportQuery } from "./project-search.ts"
 import { Sparkline } from "./sparkline-chart.tsx"
 import { TrendChart } from "./trend-chart.tsx"
 import { barStyle, Detail, Notice, pending, Rows, wide } from "./ui.tsx"
 import { usePoll } from "./use-poll.ts"
+
+/** The chart choices kept in the URL; an absent one is its default. */
+type ChartChoice = Pick<ProjectSearch, "measure" | "number" | "stat">
 
 /** A list row's sparkline: narrower than the Projects page's, to leave room for the name. */
 const SPARK_LIST_WIDTH = 72
@@ -43,7 +55,7 @@ export const CustomEvents = ({ projectId, environment, environments, search, tim
   const select = (event: string | undefined) =>
     void navigate({ to: "/projects/$projectId", params: { projectId }, search: { ...search, event }, replace: event === undefined })
   /** Changes a chart choice in place, without a history entry per click. */
-  const choose = (choice: Pick<ProjectSearch, "measure" | "number" | "stat">) =>
+  const choose = (choice: ChartChoice) =>
     void navigate({ to: "/projects/$projectId", params: { projectId }, search: { ...search, ...choice }, replace: true })
   return (
     <div className="page split">
@@ -99,8 +111,6 @@ export const CustomEvents = ({ projectId, environment, environments, search, tim
   )
 }
 
-type ChartChoice = Pick<ProjectSearch, "measure" | "number" | "stat">
-
 const Drilldown = ({ projectId, environment, environments, name, query, search, timeZone, isOwner, onAddFilter, onChoose }: {
   projectId: ProjectId
   environment: Environment
@@ -125,7 +135,7 @@ const Drilldown = ({ projectId, environment, environments, name, query, search, 
   const own = data.properties.filter((p) => !p.key.startsWith("$"))
   const categorical = own.filter((p) => p.types.includes("string") || p.types.includes("boolean")).map((p) => p.key)
   const numeric = own.filter((p) => p.types.includes("number")).map((p) => p.key)
-  const measure = search.measure ?? "events"
+  const measure = search.measure ?? DEFAULT_MEASURE
   const chart = eventSeries(data.series, measure)
   return (
     <>
@@ -136,7 +146,7 @@ const Drilldown = ({ projectId, environment, environments, name, query, search, 
       </p>
       <div className="seg chart-choice" role="group" aria-label="Chart" data-testid="custom-event-measure">
         {EVENT_MEASURES.map((m) => (
-          <button key={m.key} type="button" aria-pressed={m.key === measure} onClick={() => onChoose({ measure: m.key === "events" ? undefined : m.key })}>
+          <button key={m.key} type="button" aria-pressed={m.key === measure} onClick={() => onChoose({ measure: m.key === DEFAULT_MEASURE ? undefined : m.key })}>
             {m.label}
           </button>
         ))}
@@ -241,7 +251,7 @@ const PropertyStats = ({ environment, detail, query, keys, search, onChoose }: {
     [environment.id, detail.name, keys.join("\n"), ...queryDeps(query)]
   )
   const charted = chartedProperty(keys, search.number)!
-  const stat = search.stat ?? "average"
+  const stat = search.stat ?? DEFAULT_STATISTIC
   const chartedStats = stats?.get(charted)
   return (
     <div className="detail-block" data-testid="custom-event-stats">
@@ -279,7 +289,7 @@ const PropertyStats = ({ environment, detail, query, keys, search, onChoose }: {
       <p className="dim" style={{ marginTop: 8 }}>Only numeric values count.</p>
       <div className="seg chart-choice" role="group" aria-label="Statistic" data-testid="custom-event-statistic">
         {STATISTICS.map((s) => (
-          <button key={s.key} type="button" aria-pressed={s.key === stat} onClick={() => onChoose({ stat: s.key === "average" ? undefined : s.key })}>
+          <button key={s.key} type="button" aria-pressed={s.key === stat} onClick={() => onChoose({ stat: s.key === DEFAULT_STATISTIC ? undefined : s.key })}>
             {s.label}
           </button>
         ))}
@@ -292,7 +302,7 @@ const PropertyStats = ({ environment, detail, query, keys, search, onChoose }: {
 const StatisticChart = ({ stats, eventProperty, statistic }: {
   stats: CustomEventStats
   eventProperty: string
-  statistic: NonNullable<ProjectSearch["stat"]>
+  statistic: Statistic
 }) => {
   const chart = statisticSeries(stats.series, eventProperty, statistic)
   return (
