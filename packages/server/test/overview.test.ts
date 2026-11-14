@@ -280,6 +280,21 @@ layer(Harness.layer())("Overview previous period", (it) => {
       assert.deepStrictEqual(previous.series.filter((b) => b.pageviews > 0).map((b) => [b.bucket, b.pageviews]), [["2026-01-10T08:00", 2]])
     }))
 
+  it.effect("a custom range of only today compares with yesterday up to the current local time of day, like today", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* h.createProject({ timeZone: "Europe/Berlin" }) // UTC+1 in January
+      yield* at("2026-01-10T07:10:00Z") // yesterday 08:10, before now's time of day
+      yield* h.ingest(production!.key, [pageview()], { ip: "198.51.100.2" })
+      yield* at("2026-01-10T15:00:00Z") // yesterday 16:00, after it
+      yield* h.ingest(production!.key, [pageview()], { ip: "198.51.100.3" })
+      yield* at("2026-01-11T08:15:00Z") // today, 09:15 in Berlin
+
+      const { previous } = yield* h.overview(production!.id, custom("2026-01-11", "2026-01-11"))
+      assert.deepStrictEqual([previous.from, previous.to, previous.until], ["2026-01-10", "2026-01-10", "2026-01-10T09:15:00"])
+      assert.strictEqual(previous.totals.pageviews, 1)
+    }))
+
   it.effect("a custom range compares with the same number of days before from", () =>
     Effect.gen(function*() {
       const h = yield* Harness

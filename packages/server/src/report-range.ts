@@ -11,7 +11,7 @@ export interface ReportRange {
   readonly interval: ReportInterval
   /**
    * Local wall-clock end (exclusive, `2026-02-28T09:15:00`) within `to`, or null for the whole day.
-   * Only the previous period of `today` has one: yesterday up to the current time of day.
+   * Only the previous period of a range of only today has one: yesterday up to the current time of day.
    */
   readonly until: string | null
 }
@@ -50,16 +50,16 @@ export const resolveRange = (query: ReportRangeQuery, timeZone: string, now: Dat
 }
 
 /**
- * The previous period of the picker: the same number of local days, ending the day before the
- * resolved range starts, with the same interval so its buckets line up one for one. For `today`
- * it is yesterday from local midnight up to the current local time of day, so a morning compares
- * with yesterday morning.
+ * The previous period of a resolved range: the same number of local days, ending the day before
+ * it starts, with the same interval so its buckets line up one for one. For a range of only today
+ * (`today`, or a custom range from today to today) it is yesterday from local midnight up to the
+ * current local time of day, so a morning compares with yesterday morning.
  */
-export const resolvePreviousRange = (query: ReportRangeQuery, timeZone: string, now: DateTime.Utc): ReportRange => {
-  const current = resolveRange(query, timeZone, now)
+export const resolvePreviousRange = (current: ReportRange, now: DateTime.Utc): ReportRange => {
   const days = daysBetween(current.from, current.to) + 1
   const from = addDays(current.from, -days)
   const to = addDays(current.from, -1)
-  const until = query.period === "today" ? `${to}T${localTime(now, timeZone)}` : null
+  const today = localDate(now, current.timeZone)
+  const until = current.from === today && current.to === today ? `${to}T${localTime(now, current.timeZone)}` : null
   return { ...current, from, to, until }
 }

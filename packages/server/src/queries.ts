@@ -222,7 +222,7 @@ export class Queries extends Context.Service<Queries, {
       Effect.gen(function*() {
         const scope = yield* checkAccessAndResolveRange(request)
         const { range } = scope
-        const previousRange = resolvePreviousRange(request.query, range.timeZone, yield* DateTime.now)
+        const previousRange = resolvePreviousRange(range, yield* DateTime.now)
         const [current, previous] = yield* Effect.all(
           [overviewNumbers(scope), overviewNumbers({ ...scope, range: previousRange })],
           { concurrency: 2 }
@@ -459,7 +459,7 @@ export class Queries extends Context.Service<Queries, {
                   FROM buckets b LEFT JOIN per_bucket p ON p.name = n.name AND p.bucket = b.bucket) AS series
           FROM names n
           ORDER BY n.count DESC, n.name ASC`
-        const previousRange = resolvePreviousRange(request.query, range.timeZone, yield* DateTime.now)
+        const previousRange = resolvePreviousRange(range, yield* DateTime.now)
         const previous = yield* sql<{ name: string; count: number }>`
           WITH ${scopedEvents({ ...scope, range: previousRange }, { customOnly: true })}
           SELECT name, count(*)::int AS count FROM scoped GROUP BY name`
