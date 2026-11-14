@@ -160,7 +160,8 @@ const InstanceHandlers = HttpApiBuilder.group(FlockApi, "instance", Effect.fn(fu
       asAdmin(Effect.gen(function*() {
         const { id } = yield* CurrentMember
         if (id === memberId) return yield* new Forbidden({ message: "You can't remove yourself" })
-        if (!(yield* access.removeMember(memberId).pipe(Effect.orDie))) return yield* new MemberNotFound({ id: memberId })
+        const removed = yield* access.removeMember(memberId).pipe(Effect.catchTag("SqlError", Effect.die))
+        if (!removed) return yield* new MemberNotFound({ id: memberId })
       })))
     .handle("invites", () => asAdmin(access.invites.pipe(Effect.orDie)))
     .handle("createInvite", ({ payload }) =>

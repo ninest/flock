@@ -163,3 +163,13 @@ export class LastProjectOwner extends Schema.TaggedError<LastProjectOwner>()(
   { message: Schema.String },
   { httpApiStatus: 409 }
 ) {}
+
+/**
+ * Refused: removing this Member from the Instance would leave Projects they solely own without an owner.
+ * Make another Member an owner of `projects` first.
+ */
+export class SoleProjectOwner extends Schema.TaggedError<SoleProjectOwner>()(
+  "SoleProjectOwner",
+  { message: Schema.String, projects: Schema.Array(ProjectId) },
+  { httpApiStatus: 409 }
+) {}
