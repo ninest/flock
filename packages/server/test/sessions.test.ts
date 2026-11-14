@@ -377,3 +377,140 @@ layer(Harness.layer())("Earlier and Later Session", (it) => {
       for (const id of chain) assert.deepStrictEqual(yield* neighbours(id), [null, null])
     }))
 })
+
+layer(Harness.layer())("A late Event that bridges two Sessions", (it) => {
+  const as = (distinctId: string, event: IngestEvent): IngestEvent => ({ ...event, distinct_id: distinctId })
+  const stamped = (time: string, event: IngestEvent): IngestEvent => ({ ...event, timestamp: `2026-03-01T${time}:00Z` })
+  const request = { ip: "198.51.100.1" }
+
+  /** What the reports say about the day's Sessions, without the Session IDs. */
+  const reported = (h: Harness["Service"], environmentId: Parameters<Harness["Service"]["sessions"]>[0]) =>
+    Effect.gen(function*() {
+      const { sessions } = yield* h.sessions(environmentId, day)
+      const details = yield* Effect.forEach(sessions, (s) => h.session(environmentId, s.id))
+      const { totals } = yield* h.overview(environmentId, day)
+      return {
+        sessions: sessions.map(({ id: _, startedAt, lastSeenAt, ...rest }) => ({ startedAt: iso(startedAt), lastSeenAt: iso(lastSeenAt), ...rest })),
+        timelines: details.map((d) => d.timeline.map((e) => [iso(e.timestamp), e.properties.$url])),
+        linked: details.map((d) => [d.earlierSessionId !== null, d.laterSessionId !== null]),
+        totals: { sessions: totals.sessions, bounceRate: totals.bounceRate, visitDuration: totals.visitDuration }
+      }
+    })
+
+  it.effect("joins them into one Session, as if its Events had arrived in order", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [late] } = yield* h.createProject({})
+      const { environments: [inOrder] } = yield* h.createProject({})
+      // In order: 10:00, 10:30, 11:00. Late: 10:00 and 11:00 (two Sessions), then the 10:30 one.
+      yield* at("2026-03-01T10:00:00Z")
+      yield* h.ingest(late!.key, [visit("https://example.com/")], request)
+      yield* h.ingest(inOrder!.key, [visit("https://example.com/")], request)
+      yield* at("2026-03-01T10:30:00Z")
+      yield* h.ingest(inOrder!.key, [visit("https://example.com/pricing")], request)
+      yield* at("2026-03-01T11:00:00Z")
+      yield* h.ingest(late!.key, [visit("https://example.com/signup")], request)
+      yield* h.ingest(inOrder!.key, [visit("https://example.com/signup")], request)
+      yield* at("2026-03-01T11:01:00Z")
+      assert.deepStrictEqual((yield* reported(h, late!.id)).sessions.map((s) => s.events), [1, 1])
+      yield* h.ingest(late!.key, [stamped("10:30", visit("https://example.com/pricing"))], request)
+
+      const joined = yield* reported(h, late!.id)
+      assert.deepStrictEqual(joined.sessions.map((s) => [s.startedAt, s.lastSeenAt, s.duration, s.events, s.bounce, s.entryPage, s.lastPage]), [
+        ["2026-03-01T10:00:00.000Z", "2026-03-01T11:00:00.000Z", 3600, 3, false, "/", "/signup"]
+      ])
+      assert.deepStrictEqual(joined.timelines, [[
+        ["2026-03-01T10:00:00.000Z", "https://example.com/"],
+        ["2026-03-01T10:30:00.000Z", "https://example.com/pricing"],
+        ["2026-03-01T11:00:00.000Z", "https://example.com/signup"]
+      ]])
+      assert.deepStrictEqual(joined.totals, { sessions: 1, bounceRate: 0, visitDuration: 3600 })
+      assert.deepStrictEqual(joined, yield* reported(h, inOrder!.id))
+    }))
+
+  it.effect("joins them when the Events arrive out of order in one batch", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* h.createProject({})
+      yield* at("2026-03-01T11:01:00Z")
+      yield* h.ingest(production!.key, [
+        stamped("10:00", visit("https://example.com/")),
+        stamped("11:00", visit("https://example.com/signup")),
+        stamped("10:30", visit("https://example.com/pricing")),
+        stamped("10:45", visit("https://example.com/docs"))
+      ], request)
+
+      const { sessions, timelines, totals } = yield* reported(h, production!.id)
+      assert.deepStrictEqual(sessions.map((s) => [s.events, s.duration]), [[4, 3600]])
+      assert.deepStrictEqual(timelines.map((t) => t.map(([, url]) => url)), [[
+        "https://example.com/",
+        "https://example.com/pricing",
+        "https://example.com/docs",
+        "https://example.com/signup"
+      ]])
+      assert.deepStrictEqual(totals, { sessions: 1, bounceRate: 0, visitDuration: 3600 })
+    }))
+
+  it.effect("leaves no trace of the Session it absorbed among the Visitor's Earlier and Later Sessions", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const project = yield* h.createProject({})
+      yield* h.client.projects.update({ params: { projectId: project.id }, payload: { trackingMode: "persistent" } })
+      const production = project.environments[0]!
+      // Sessions at 08:00, 10:00 and 11:00; the late 10:30 Event joins the last two.
+      for (const time of ["08:00", "10:00", "11:00"]) {
+        yield* at(`2026-03-01T${time}:00Z`)
+        yield* h.ingest(production.key, [as("device-1", visit(`https://example.com/${time}`))])
+      }
+      yield* at("2026-03-01T11:01:00Z")
+      yield* h.ingest(production.key, [as("device-1", stamped("10:30", visit("https://example.com/late")))])
+
+      const { sessions } = yield* h.sessions(production.id, day)
+      assert.deepStrictEqual(sessions.map((s) => [s.entryPage, s.events]), [["/10:00", 3], ["/08:00", 1]])
+      const [joined, first] = sessions
+      const neighbours = (id: string) =>
+        h.session(production.id, id).pipe(Effect.map((d) => [d.earlierSessionId, d.laterSessionId]))
+      assert.deepStrictEqual(yield* neighbours(joined!.id), [first!.id, null])
+      assert.deepStrictEqual(yield* neighbours(first!.id), [null, joined!.id])
+    }))
+
+  it.effect("does not join another Visitor's Sessions, or the same Visitor's in another Environment", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production, dev] } = yield* h.createProject({ environments: ["production", "dev"] })
+      // In production, one Visitor at 10:00 and another at 11:00; the first is also in dev at 11:00.
+      yield* at("2026-03-01T10:00:00Z")
+      yield* h.ingest(production!.key, [visit("https://example.com/")], request)
+      yield* at("2026-03-01T11:00:00Z")
+      yield* h.ingest(production!.key, [visit("https://example.com/other")], { ip: "198.51.100.2" })
+      yield* h.ingest(dev!.key, [visit("https://example.com/dev")], request)
+      yield* at("2026-03-01T11:01:00Z")
+      yield* h.ingest(production!.key, [stamped("10:30", visit("https://example.com/pricing"))], request)
+
+      const { sessions } = yield* h.sessions(production!.id, day)
+      assert.deepStrictEqual(sessions.map((s) => [s.entryPage, s.events]), [["/other", 1], ["/", 2]])
+      assert.deepStrictEqual((yield* h.sessions(dev!.id, day)).sessions.map((s) => [s.entryPage, s.events]), [["/dev", 1]])
+    }))
+
+  it.effect("that bridges nothing joins the one Session within 30 minutes of it, or starts its own", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* h.createProject({})
+      yield* at("2026-03-01T10:00:00Z")
+      yield* h.ingest(production!.key, [visit("https://example.com/")], request)
+      yield* at("2026-03-01T12:00:00Z")
+      yield* h.ingest(production!.key, [visit("https://example.com/back")], request)
+      yield* at("2026-03-01T12:01:00Z")
+      // 10:20 is near the first Session only; 11:00 is more than 30 minutes from both.
+      yield* h.ingest(production!.key, [stamped("10:20", visit("https://example.com/pricing"))], request)
+      yield* h.ingest(production!.key, [stamped("11:00", visit("https://example.com/alone"))], request)
+
+      const { sessions, totals } = yield* reported(h, production!.id)
+      assert.deepStrictEqual(sessions.map((s) => [s.entryPage, s.events, s.duration]), [
+        ["/back", 1, 0],
+        ["/alone", 1, 0],
+        ["/", 2, 1200]
+      ])
+      assert.deepStrictEqual(totals, { sessions: 3, bounceRate: 2 / 3, visitDuration: 400 })
+    }))
+})
