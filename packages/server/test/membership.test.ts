@@ -1,6 +1,7 @@
 import { assert, layer } from "@effect/vitest"
-import { DateTime, Effect } from "effect"
+import { DateTime, Effect, Fiber, Result } from "effect"
 import { TestClock } from "effect/testing"
+import pg from "pg"
 import { Harness } from "./harness.ts"
 
 const json = <A>(response: Response) => Effect.promise(() => response.json() as Promise<A>)
@@ -217,5 +218,47 @@ layer(Harness.layer())("Removing a Member who owns Projects", (it) => {
       yield* h.client.instance.removeMember({ params: { memberId: viewer.id } })
       const left = (yield* first.browser.client.projects.members({ params: { projectId } })).map((m) => m.email)
       assert.deepStrictEqual(left, ["first@example.com"])
+    }))
+
+  /**
+   * Pauses a request that is about to change or delete this Member's row, by holding the lock a new
+   * Project membership of theirs would take, on a second connection, until `release` is called.
+   */
+  const holdMember = (memberId: string) =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const connection = new pg.Client({ connectionString: h.databaseUrl })
+      yield* Effect.promise(async () => {
+        await connection.connect()
+        await connection.query("BEGIN")
+        await connection.query(`SELECT 1 FROM member WHERE id = $1 FOR KEY SHARE`, [memberId])
+      })
+      yield* Effect.addFinalizer(() => Effect.promise(() => connection.end()))
+      return { release: Effect.promise(() => connection.query("COMMIT")) }
+    })
+  /** Real time for a paused request to reach the lock it waits on (requests run on the TestClock). */
+  const settle = Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 300)))
+
+  it.effect("is refused when they become the only owner of a Project while the removal is under way", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const founder = yield* signedIn("founder@example.com")
+      const leaving = yield* signedIn("leaving@example.com")
+      const { id: projectId } = yield* h.createProject({ name: "Handed over", environments: ["dev"], as: founder.browser })
+      yield* founder.browser.client.projects.addMember({ params: { projectId }, payload: { email: "leaving@example.com", role: "viewer" } })
+
+      const hold = yield* holdMember(leaving.id)
+      const removal = yield* Effect.forkChild(Effect.result(h.client.instance.removeMember({ params: { memberId: leaving.id } })))
+      yield* settle
+      // The founder hands the Project over and steps down while the removal waits.
+      yield* founder.browser.client.projects.changeMemberRole({ params: { projectId, memberId: leaving.id }, payload: { role: "owner" } })
+      yield* founder.browser.client.projects.changeMemberRole({ params: { projectId, memberId: founder.id }, payload: { role: "viewer" } })
+      yield* hold.release
+
+      const result = yield* Fiber.join(removal)
+      assert.isTrue(Result.isFailure(result), "the removal went through")
+      assert.strictEqual(Result.isFailure(result) && result.failure._tag, "SoleProjectOwner")
+      const roles = (yield* founder.browser.client.projects.members({ params: { projectId } })).map((m) => [m.email, m.role] as const)
+      assert.deepStrictEqual(new Map(roles), new Map([["leaving@example.com", "owner"], ["founder@example.com", "viewer"]]))
     }))
 })

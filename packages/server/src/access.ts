@@ -6,6 +6,7 @@ import { Context, DateTime, Effect, Layer, Option, type Redacted } from "effect"
 import { createHash } from "node:crypto"
 import type { SqlError } from "effect/sql/SqlError"
 import { makeId } from "./keys.ts"
+import { lockMemberships, ownerless } from "./project-membership.ts"
 
 export interface AuthSettings {
   /**
@@ -188,16 +189,15 @@ export class Access extends Context.Service<Access, {
         members: selectMembers(sql.and([])),
         removeMember: (memberId) =>
           sql.withTransaction(Effect.gen(function*() {
-            // Locks the memberships of every Project they own, as Project membership changes do, so a
-            // concurrent demotion or removal of a co-owner can't leave a Project without an owner.
-            const owned = yield* sql<{ projectId: string; memberId: string; role: string }>`
-              SELECT project_id, member_id, role FROM project_member
-              WHERE project_id IN (SELECT project_id FROM project_member WHERE member_id = ${memberId} AND role = 'owner')
-              ORDER BY project_id, member_id
-              FOR UPDATE`
-            const soleOwned = [...new Set(owned.map((row) => row.projectId))].filter((project) =>
-              owned.every((row) => row.projectId !== project || row.role !== "owner" || row.memberId === memberId)
-            )
+            // Locking the Member first holds off new Project memberships of theirs (creating a Project,
+            // being added to one), so the Projects read next are all they can belong to. Locking those
+            // Projects' memberships, as Project membership changes do, then settles who owns each: a
+            // concurrent promotion of this Member or demotion of a co-owner has either landed or waits.
+            const [found] = yield* sql`SELECT id FROM member WHERE id = ${memberId} FOR UPDATE`
+            if (!found) return false
+            const projects = yield* sql<{ projectId: string }>`SELECT project_id FROM project_member WHERE member_id = ${memberId}`
+            const memberships = yield* lockMemberships(sql, projects.map((p) => p.projectId))
+            const soleOwned = ownerless(memberships, [...new Set(memberships.map((m) => m.projectId))], memberId)
             if (soleOwned.length > 0) {
               const names = yield* sql<{ name: string }>`
                 SELECT name FROM project WHERE id IN ${sql.in(soleOwned)} ORDER BY name, id`
@@ -207,8 +207,8 @@ export class Access extends Context.Service<Access, {
                 projects: soleOwned.map((project) => ProjectId.make(project))
               })
             }
-            const deleted = yield* sql`DELETE FROM member WHERE id = ${memberId} RETURNING id`
-            return deleted.length > 0
+            yield* sql`DELETE FROM member WHERE id = ${memberId}`
+            return true
           })),
         invites: sql<InviteRow>`
           SELECT id, note, created_at, used_at, used_by FROM invite ORDER BY created_at DESC, id`.pipe(
