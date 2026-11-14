@@ -1,9 +1,13 @@
 // Pages, sources and the live counter, observed through the reports API.
 import { assert, layer } from "@effect/vitest"
-import type { IngestEvent } from "@flock/shared"
+import type { IngestEvent, TopRow } from "@flock/shared"
 import { Effect } from "effect"
 import { TestClock } from "effect/testing"
 import { customEvent, Harness, pageview } from "./harness.ts"
+
+/** A ranked-list row's counts, leaving its engagement columns to engagement.test.ts. */
+const counts = (rows: ReadonlyArray<TopRow>) =>
+  rows.map(({ pageviews, value, visitors }) => pageviews === undefined ? { value, visitors } : { value, visitors, pageviews })
 
 const at = (iso: string) => TestClock.setTime(Date.parse(iso))
 const day = { period: "custom" as const, from: "2026-03-01", to: "2026-03-01" }
@@ -33,7 +37,7 @@ layer(Harness.layer())("Top pages", (it) => {
 
       const top = yield* h.top(production!.id, "pages", day)
       // Ranked by Visitors, not Pageviews: /pricing has the most Pageviews but one Visitor.
-      assert.deepStrictEqual(top.rows, [
+      assert.deepStrictEqual(counts(top.rows), [
         { value: "/", visitors: 2, pageviews: 3 },
         { value: "/blog/first-post", visitors: 2, pageviews: 2 },
         { value: "/pricing", visitors: 1, pageviews: 3 }
@@ -67,13 +71,13 @@ layer(Harness.layer())("Entry and exit pages", (it) => {
       yield* h.ingest(production!.key, [visit("https://example.com/pricing")], { ip: "198.51.100.1" })
 
       const entries = yield* h.top(production!.id, "entryPages", day)
-      assert.deepStrictEqual(entries.rows, [
+      assert.deepStrictEqual(counts(entries.rows), [
         { value: "/", visitors: 1 },
         { value: "/blog", visitors: 1 },
         { value: "/pricing", visitors: 1 }
       ])
       const exits = yield* h.top(production!.id, "exitPages", day)
-      assert.deepStrictEqual(exits.rows, [
+      assert.deepStrictEqual(counts(exits.rows), [
         { value: "/", visitors: 1 },
         { value: "/pricing", visitors: 1 },
         { value: "/signup", visitors: 1 }
@@ -111,7 +115,7 @@ layer(Harness.layer())("Referrers", (it) => {
 
       const referrers = yield* h.top(production!.id, "referrers", day)
       // `null` is direct traffic, ranked by its count like any other row.
-      assert.deepStrictEqual(referrers.rows, [
+      assert.deepStrictEqual(counts(referrers.rows), [
         { value: null, visitors: 3 },
         { value: "google.com", visitors: 2 },
         { value: "news.ycombinator.com", visitors: 2 },
@@ -145,16 +149,16 @@ layer(Harness.layer())("UTM sources", (it) => {
       yield* at("2026-03-01T11:00:00Z")
       yield* h.ingest(production!.key, [visit(`${landing}?utm_source=newsletter&utm_medium=email&utm_campaign=spring%20sale`)], { ip: "198.51.100.1" })
 
-      assert.deepStrictEqual((yield* h.top(production!.id, "utmSources", day)).rows, [
+      assert.deepStrictEqual(counts((yield* h.top(production!.id, "utmSources", day)).rows), [
         { value: "newsletter", visitors: 2 },
         { value: "app-store", visitors: 1 },
         { value: "twitter", visitors: 1 }
       ])
-      assert.deepStrictEqual((yield* h.top(production!.id, "utmMediums", day)).rows, [
+      assert.deepStrictEqual(counts((yield* h.top(production!.id, "utmMediums", day)).rows), [
         { value: "email", visitors: 2 },
         { value: "social", visitors: 1 }
       ])
-      assert.deepStrictEqual((yield* h.top(production!.id, "utmCampaigns", day)).rows, [
+      assert.deepStrictEqual(counts((yield* h.top(production!.id, "utmCampaigns", day)).rows), [
         { value: "launch", visitors: 3 },
         { value: "spring sale", visitors: 1 }
       ])
@@ -183,7 +187,7 @@ layer(Harness.layer({ geoIp: { "203.0.113.7": "DE", "198.51.100.23": "US" } }))(
       yield* h.ingest(production!.key, [pageview()], {})
 
       const rows = (report: "countries" | "browsers" | "oses" | "devices") =>
-        h.top(production!.id, report, day).pipe(Effect.map((top) => top.rows))
+        h.top(production!.id, report, day).pipe(Effect.map((top) => counts(top.rows)))
       assert.deepStrictEqual(yield* rows("countries"), [
         { value: "DE", visitors: 2 },
         { value: "US", visitors: 1 },

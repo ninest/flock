@@ -24,6 +24,7 @@ import type {
   SessionSummary,
   Top,
   TopQuery,
+  TopReport,
   TopRow,
   VisitorList,
   VisitorProfile,
@@ -221,57 +222,94 @@ export class Queries extends Context.Service<Queries, {
         }
       }))
 
-    /** The first (or last) Pageview of each Session in the range, as `properties` and `visitor_id`. */
+    /** The first (or last) Pageview of each Session in the range, as `properties`, `visitor_id` and `session_id`. */
     const sessionPageview = (which: "first" | "last") => sql`
-      SELECT DISTINCT ON (session_id) properties, visitor_id FROM scoped
+      SELECT DISTINCT ON (session_id) properties, visitor_id, session_id FROM scoped
       WHERE name = '$pageview' AND session_id IS NOT NULL
       ORDER BY session_id, ${which === "first" ? sql`ts ASC, received_at ASC` : sql`ts DESC, received_at DESC`}`
 
     const visitors = sql`count(DISTINCT visitor_id)::int AS visitors`
+    /** Over rows joined to `sessions` (as `se`): the share of them that are a Bounce. */
+    const bounceRate = sql`avg(se.bounce::int)::float8`
 
     /**
-     * One SELECT per ranked-list report, over the `scoped` CTE, yielding `value` and `visitors` rows,
-     * plus the optional columns that report fills in (`NULL` elsewhere).
+     * One SELECT per ranked-list report, over the `scoped` and `sessions` CTEs, yielding `value`,
+     * `visitors` and every optional column, `NULL` where the report doesn't fill it in.
      */
     const topRows = (kind: TopQuery["report"]) => {
       switch (kind) {
         case "pages":
-          return sql`SELECT ${pathOf(sql)} AS value, ${visitors}, count(*)::int AS pageviews
-            FROM scoped WHERE name = '$pageview' GROUP BY 1`
+          // Each Pageview with the next Pageview's time in its Session (Session-ordered, on the
+          // Environment, Session and timestamp index); bounce rate by the path Sessions entered on.
+          return sql`
+            SELECT p.value, count(DISTINCT p.visitor_id)::int AS visitors, count(*)::int AS pageviews,
+                   e.bounce_rate,
+                   (count(*) FILTER (WHERE p.last))::float8 / count(*) AS exit_rate,
+                   avg(extract(epoch FROM p.next_ts - p.ts))::float8 AS time_on_page
+            FROM (
+              SELECT value, visitor_id, ts, next_ts, session_id IS NOT NULL AND next_ts IS NULL AS last
+              FROM (
+                SELECT ${pathOf(sql)} AS value, visitor_id, session_id, ts,
+                       CASE WHEN session_id IS NOT NULL
+                         THEN lead(ts) OVER (PARTITION BY session_id ORDER BY ts, received_at) END AS next_ts
+                FROM scoped WHERE name = '$pageview'
+              ) w
+            ) p
+            LEFT JOIN (
+              SELECT ${pathOf(sql)} AS value, ${bounceRate} AS bounce_rate
+              FROM (${sessionPageview("first")}) s JOIN sessions se USING (session_id) GROUP BY 1
+            ) e ON e.value IS NOT DISTINCT FROM p.value
+            GROUP BY p.value, e.bounce_rate`
         case "entryPages":
         case "exitPages":
-          return sql`SELECT ${pathOf(sql)} AS value, ${visitors}, NULL::int AS pageviews
-            FROM (${sessionPageview(kind === "entryPages" ? "first" : "last")}) s GROUP BY 1`
+          return sessionRows(pathOf(sql), sessionPageview(kind === "entryPages" ? "first" : "last"))
         case "referrers":
-          return sql`SELECT ${referringDomainOf(sql)} AS value, ${visitors}, NULL::int AS pageviews
-            FROM (${sessionPageview("first")}) s GROUP BY 1`
+          return sessionRows(referringDomainOf(sql), sessionPageview("first"))
         case "utmSources":
         case "utmMediums":
         case "utmCampaigns": {
           const tag = UTM_TAGS[kind]
           const value = sql`coalesce(properties ->> ${"$" + tag}, properties ->> ${tag})`
-          return sql`SELECT ${value} AS value, ${visitors}, NULL::int AS pageviews
-            FROM (${sessionPageview("first")}) s WHERE ${value} IS NOT NULL AND ${value} <> '' GROUP BY 1`
+          return sql`SELECT * FROM (${sessionRows(value, sessionPageview("first"))}) u WHERE value IS NOT NULL AND value <> ''`
         }
         case "countries":
         case "browsers":
         case "oses":
-        case "devices":
-          return sql`SELECT properties ->> ${AUDIENCE[kind]} AS value, ${visitors}, NULL::int AS pageviews
-            FROM scoped WHERE name = '$pageview' GROUP BY 1`
+        case "devices": {
+          // Visitors by their Pageviews' value; bounce rate over the Sessions with a Pageview of it.
+          const value = sql`properties ->> ${AUDIENCE[kind]}`
+          return sql`
+            SELECT v.value, count(DISTINCT v.visitor_id)::int AS visitors, NULL::int AS pageviews,
+                   b.bounce_rate, NULL::float8 AS exit_rate, NULL::float8 AS time_on_page
+            FROM (SELECT ${value} AS value, visitor_id FROM scoped WHERE name = '$pageview') v
+            LEFT JOIN (
+              SELECT d.value, ${bounceRate} AS bounce_rate
+              FROM (SELECT DISTINCT ${value} AS value, session_id FROM scoped
+                    WHERE name = '$pageview' AND session_id IS NOT NULL) d
+              JOIN sessions se USING (session_id) GROUP BY 1
+            ) b ON b.value IS NOT DISTINCT FROM v.value
+            GROUP BY v.value, b.bounce_rate`
+        }
       }
     }
+
+    /** Rows grouped by `value` over one Pageview per Session (`sessionPageview`), with the Sessions' bounce rate. */
+    const sessionRows = (value: Fragment, pageviews: Fragment) => sql`
+      SELECT ${value} AS value, ${visitors}, NULL::int AS pageviews, ${bounceRate} AS bounce_rate,
+             NULL::float8 AS exit_rate, NULL::float8 AS time_on_page
+      FROM (${pageviews}) s JOIN sessions se USING (session_id) GROUP BY 1`
 
     const top = report("top", (request: ReportRequest<TopQuery>) =>
       Effect.gen(function*() {
         const scope = yield* checkAccessAndResolveRange(request)
         const { range } = scope
+        const { report: kind } = request.query
         const rows = yield* sql<TopRowRow>`
           WITH ${scopedEvents(scope)}, ${scopedSessions}
-          SELECT value, visitors, pageviews FROM (${topRows(request.query.report)}) t
+          SELECT value, visitors, pageviews, bounce_rate, exit_rate, time_on_page FROM (${topRows(kind)}) t
           ORDER BY visitors DESC, value ASC NULLS LAST
           LIMIT ${TOP_LIMIT}`
-        return { from: range.from, to: range.to, timeZone: range.timeZone, report: request.query.report, rows: rows.map(toTopRow) }
+        return { from: range.from, to: range.to, timeZone: range.timeZone, report: kind, rows: rows.map((row) => toTopRow(kind, row)) }
       }))
 
     const liveVisitors = report("liveVisitors", (request: ReportRequest<{}>) =>
@@ -832,10 +870,16 @@ interface TopRowRow {
   readonly value: string | null
   readonly visitors: number
   readonly pageviews: number | null
+  readonly bounceRate: number | null
+  readonly exitRate: number | null
+  readonly timeOnPage: number | null
 }
 
 /** A ranked-list row, with only the optional columns its report fills in. */
-const toTopRow = ({ pageviews, ...row }: TopRowRow): TopRow => pageviews === null ? row : { ...row, pageviews }
+const toTopRow = (kind: TopReport, { value, visitors, pageviews, bounceRate, exitRate, timeOnPage }: TopRowRow): TopRow =>
+  kind === "pages"
+    ? { value, visitors, pageviews: pageviews ?? 0, bounceRate, exitRate: exitRate ?? 0, timeOnPage }
+    : { value, visitors, bounceRate }
 
 /** A Session's summary row, as `sessionSummary` selects it. */
 interface SessionRow {
