@@ -3,12 +3,10 @@ import { assert, layer } from "@effect/vitest"
 import type { IngestEvent } from "@flock/shared"
 import { DateTime, Effect } from "effect"
 import { TestClock } from "effect/testing"
-import { customEvent, Harness, pageview } from "./harness.ts"
+import { customEvent, Harness, visit } from "./harness.ts"
 
 const at = (iso: string) => TestClock.setTime(Date.parse(iso))
 const day = { period: "custom" as const, from: "2026-03-01", to: "2026-03-01" }
-const visit = (url: string, referrer?: string): IngestEvent =>
-  pageview(referrer === undefined ? { $url: url } : { $url: url, $referrer: referrer })
 const iso = (t: DateTime.Utc) => DateTime.formatIso(t)
 
 layer(Harness.layer({ geoIp: { "198.51.100.1": "DE", "198.51.100.2": "FR" } }))("Recent sessions", (it) => {

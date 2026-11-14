@@ -3,7 +3,7 @@ import { assert, layer } from "@effect/vitest"
 import type { EventPropertyFilter, IngestEvent } from "@flock/shared"
 import { Effect } from "effect"
 import { TestClock } from "effect/testing"
-import { customEvent, Harness, pageview } from "./harness.ts"
+import { customEvent, Harness, visit } from "./harness.ts"
 
 const at = (iso: string) => TestClock.setTime(Date.parse(iso))
 const day = (filters?: ReadonlyArray<EventPropertyFilter>) => ({
@@ -12,8 +12,6 @@ const day = (filters?: ReadonlyArray<EventPropertyFilter>) => ({
   to: "2026-03-01",
   ...(filters ? { filters } : {})
 })
-const visit = (path: string, referrer?: string): IngestEvent =>
-  pageview(referrer === undefined ? { $url: `https://example.com${path}` } : { $url: `https://example.com${path}`, $referrer: referrer })
 
 const DE = "203.0.113.7"
 const US = "198.51.100.23"
@@ -124,6 +122,7 @@ layer(Harness.layer({ geoIp }))("Engagement on pages", (it) => {
         yield* at(`${date}T09:01:00Z`)
         yield* send("198.51.100.1", visit("/pricing"))
       }
+      yield* at("2026-03-02T12:00:00Z")
 
       const onPricing = day([{ eventProperty: "$path", op: "is", value: "/pricing" }])
       const overview = yield* h.overview(production!.id, onPricing)

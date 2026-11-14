@@ -413,6 +413,12 @@ export const pageview = (properties: IngestEvent["properties"] = {}): IngestEven
   properties: { $url: "https://example.com/", ...properties }
 })
 
+/** A Pageview of `url` (a bare path is on `https://example.com`), with a `$referrer` if given. */
+export const visit = (url: string, referrer?: string): IngestEvent => {
+  const $url = url.startsWith("/") ? `https://example.com${url}` : url
+  return pageview(referrer === undefined ? { $url } : { $url, $referrer: referrer })
+}
+
 /** A Custom event with a fresh UUID. */
 export const customEvent = (name: string, properties: IngestEvent["properties"] = {}): IngestEvent => ({
   uuid: crypto.randomUUID(),

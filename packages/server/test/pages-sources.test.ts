@@ -3,7 +3,7 @@ import { assert, layer } from "@effect/vitest"
 import type { IngestEvent, TopRow } from "@flock/shared"
 import { Effect } from "effect"
 import { TestClock } from "effect/testing"
-import { customEvent, Harness, pageview } from "./harness.ts"
+import { customEvent, Harness, pageview, visit } from "./harness.ts"
 
 /** A ranked-list row's counts, leaving its engagement columns to engagement.test.ts. */
 const counts = (rows: ReadonlyArray<TopRow>) =>
@@ -11,8 +11,6 @@ const counts = (rows: ReadonlyArray<TopRow>) =>
 
 const at = (iso: string) => TestClock.setTime(Date.parse(iso))
 const day = { period: "custom" as const, from: "2026-03-01", to: "2026-03-01" }
-const visit = (url: string, referrer?: string): IngestEvent =>
-  pageview(referrer === undefined ? { $url: url } : { $url: url, $referrer: referrer })
 
 layer(Harness.layer())("Top pages", (it) => {
   it.effect("counts unique Visitors per cleaned URL path, with their Pageviews", () =>
