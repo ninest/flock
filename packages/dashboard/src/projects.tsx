@@ -12,30 +12,13 @@ import { Live } from "./live.tsx"
 import { type ProjectSearch, reportQuery, withFilter, withQuery } from "./project-search.ts"
 import { SessionPage } from "./sessions.tsx"
 import { environmentOf, type ProjectChrome, Shell } from "./shell.tsx"
-import { sparklinePoints } from "./sparkline.ts"
+import { SPARK_WIDTH, Sparkline } from "./sparkline-chart.tsx"
 import { Notice, Rows, useAction, wide } from "./ui.tsx"
 import { VisitorPage, VisitorsList } from "./visitors.tsx"
 import { usePoll } from "./use-poll.ts"
 
 /** The browser's time zone, the default for a new Project. */
 const browserTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone
-
-const SPARK_WIDTH = 96
-const SPARK_HEIGHT = 22
-
-/** Visitors per day over the last 7 days, without axes. */
-const Sparkline = ({ numbers }: { numbers: ProductionNumbers }) => (
-  <svg
-    className="sparkline"
-    width={SPARK_WIDTH}
-    height={SPARK_HEIGHT}
-    viewBox={`0 0 ${SPARK_WIDTH} ${SPARK_HEIGHT}`}
-    role="img"
-    aria-label={`Visitors per day: ${numbers.series.map((d) => d.visitors).join(", ")}`}
-  >
-    <polyline points={sparklinePoints(numbers.series.map((d) => d.visitors), SPARK_WIDTH, SPARK_HEIGHT)} />
-  </svg>
-)
 
 /**
  * A Project row's four number cells, for its `production` Environment: live Visitors, Visitors over
@@ -59,7 +42,7 @@ const NumberCells = ({ numbers }: { numbers: ProductionNumbers | null | undefine
       <span className={numbers.live > 0 ? "live-count" : "muted"} {...wide}>{formatCount(numbers.live)}</span>
       <span>{formatCount(numbers.visitors)}</span>
       <span className="kpi-change" data-tone={change.tone} title="Against the 7 days before" {...wide}>{change.label}</span>
-      <span className="spark-cell"><Sparkline numbers={numbers} /></span>
+      <span className="spark-cell"><Sparkline values={numbers.series.map((d) => d.visitors)} label="Visitors per day" /></span>
     </>
   )
 }

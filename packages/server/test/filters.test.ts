@@ -64,7 +64,10 @@ layer(Harness.layer({ geoIp }))("Filter operators", (it) => {
         customEvent("game_completed", { score: 12, won: false })
       ])
       const list = (filters: ReadonlyArray<EventPropertyFilter>) =>
-        h.client.customEvents.list({ params: { environmentId: production!.id }, query: day(filters) }).pipe(Effect.orDie)
+        h.client.customEvents.list({ params: { environmentId: production!.id }, query: day(filters) }).pipe(
+          Effect.map((l) => ({ events: l.events.map(({ name, count, visitors }) => ({ name, count, visitors })) })),
+          Effect.orDie
+        )
       assert.deepStrictEqual((yield* list([is("score", "34")])).events, [{ name: "game_completed", count: 1, visitors: 1 }])
       assert.deepStrictEqual((yield* list([is("won", "false")])).events, [{ name: "game_completed", count: 1, visitors: 1 }])
     }))
@@ -182,7 +185,12 @@ layer(Harness.layer({ geoIp }))("Custom events with filters", (it) => {
       const api = h.client.customEvents
 
       const list = yield* api.list({ params: { environmentId }, query: day([is("level", "hard")]) }).pipe(Effect.orDie)
-      assert.deepStrictEqual(list.events, [{ name: "game_completed", count: 2, visitors: 2 }])
+      assert.deepStrictEqual(list.events.map(({ name, count, visitors }) => ({ name, count, visitors })), [
+        { name: "game_completed", count: 2, visitors: 2 }
+      ])
+      assert.deepStrictEqual(list.events[0]!.series.filter((b) => b.count > 0), [{ bucket: "2026-03-01T09:00", count: 2 }])
+
+      assert.strictEqual(list.events[0]!.previousCount, 0)
 
       const detail = yield* api.detail({ params: { environmentId }, query: { ...de, name: "game_completed" } }).pipe(Effect.orDie)
       assert.deepStrictEqual(detail.totals, { count: 2, visitors: 1 })
@@ -196,5 +204,23 @@ layer(Harness.layer({ geoIp }))("Custom events with filters", (it) => {
         query: { ...day([is("level", "hard")]), name: "game_completed", eventProperty: "score" }
       }).pipe(Effect.orDie)
       assert.deepStrictEqual(stats.totals, { count: 2, average: 65, sum: 130, min: 30, max: 100, median: 65 })
+    }))
+
+  it.effect("the list's previous-period count matches the same Filters", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* h.createProject({})
+      yield* at("2026-02-28T09:00:00Z") // the previous period of 2026-03-01
+      yield* h.ingest(production!.key, [
+        customEvent("game_completed", { level: "hard" }),
+        customEvent("game_completed", { level: "easy" }),
+        customEvent("game_completed", { level: "hard" })
+      ], { ip: DE })
+      yield* at("2026-03-01T09:00:00Z")
+      yield* h.ingest(production!.key, [customEvent("game_completed", { level: "hard" })], { ip: DE })
+
+      const list = yield* h.client.customEvents.list({ params: { environmentId: production!.id }, query: day([is("level", "hard")]) })
+        .pipe(Effect.orDie)
+      assert.deepStrictEqual(list.events.map((e) => [e.name, e.count, e.previousCount]), [["game_completed", 1, 2]])
     }))
 })

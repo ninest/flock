@@ -19,11 +19,23 @@ const ResolvedRange = {
 export const CustomEventNumbers = Schema.Struct({ count: Schema.Number, visitors: Schema.Number })
 export type CustomEventNumbers = typeof CustomEventNumbers.Type
 
-export const CustomEventSummary = Schema.Struct({ name: Schema.String, ...CustomEventNumbers.fields })
+export const CustomEventSummary = Schema.Struct({
+  name: Schema.String,
+  ...CustomEventNumbers.fields,
+  /** Its count in every bucket of the range, including empty ones, for a sparkline. */
+  series: Schema.Array(Schema.Struct({ bucket: Schema.String, count: Schema.Number })),
+  /** Its count in the previous period, with the same Filters; 0 when it wasn't sent then. */
+  previousCount: Schema.Number
+})
 export type CustomEventSummary = typeof CustomEventSummary.Type
 
 export const CustomEventList = Schema.Struct({
   ...ResolvedRange,
+  /**
+   * The previous period, as for the overview: the same number of local days ending the day before
+   * `from`; for `today`, yesterday up to the current local time of day (`until`, exclusive).
+   */
+  previous: Schema.Struct({ from: Schema.String, to: Schema.String, until: Schema.NullOr(Schema.String) }),
   /** Every Custom event name sent in the range, most sent first. Built-in events are left out. */
   events: Schema.Array(CustomEventSummary)
 })

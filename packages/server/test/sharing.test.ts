@@ -129,7 +129,7 @@ layer(Harness.layer())("Project sharing", (it) => {
       assert.strictEqual(overview.totals.visitors, 1)
       assert.strictEqual(breakdown.reduce((sum, row) => sum + row.count, 0), 2)
       assert.isTrue(keys.keys.length > 0)
-      assert.deepStrictEqual(customEvents.events, [{ name: "game_completed", count: 1, visitors: 1 }])
+      assert.deepStrictEqual(customEvents.events.map(({ name, count, visitors }) => ({ name, count, visitors })), [{ name: "game_completed", count: 1, visitors: 1 }])
       assert.strictEqual(detail.totals.count, 1)
       assert.deepStrictEqual(byLevel.rows, [{ value: "hard", count: 1 }])
       assert.strictEqual(score.totals.sum, 42)

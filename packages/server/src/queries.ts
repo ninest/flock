@@ -376,12 +376,36 @@ export class Queries extends Context.Service<Queries, {
     const customEvents = report("customEvents", (request: ReportRequest<ReportRangeQuery>) =>
       Effect.gen(function*() {
         const scope = yield* checkAccessAndResolveRange(request)
-        const events = yield* sql<{ name: string; count: number; visitors: number }>`
-          WITH ${scopedEvents(scope, { customOnly: true })}
-          SELECT name, count(*)::int AS count, count(DISTINCT visitor_id)::int AS visitors
-          FROM scoped GROUP BY name
-          ORDER BY count DESC, name ASC`
-        return { ...scope.range, events }
+        const { range } = scope
+        // One grouped query: every name's totals, and its count in every bucket (empty ones too).
+        const events = yield* sql<{
+          name: string
+          count: number
+          visitors: number
+          series: Array<{ bucket: string; count: number }>
+        }>`
+          WITH ${scopedEvents(scope, { customOnly: true })}, ${buckets(range)},
+          names AS (
+            SELECT name, count(*)::int AS count, count(DISTINCT visitor_id)::int AS visitors
+            FROM scoped GROUP BY name
+          ),
+          per_bucket AS (SELECT name, bucket, count(*)::int AS count FROM scoped GROUP BY name, bucket)
+          SELECT n.name, n.count, n.visitors,
+                 (SELECT json_agg(json_build_object('bucket', to_char(b.bucket, ${bucketLabel(range)}), 'count', coalesce(p.count, 0))
+                                  ORDER BY b.bucket)
+                  FROM buckets b LEFT JOIN per_bucket p ON p.name = n.name AND p.bucket = b.bucket) AS series
+          FROM names n
+          ORDER BY n.count DESC, n.name ASC`
+        const previousRange = resolvePreviousRange(request.query, range.timeZone, yield* DateTime.now)
+        const previous = yield* sql<{ name: string; count: number }>`
+          WITH ${scopedEvents({ ...scope, range: previousRange }, { customOnly: true })}
+          SELECT name, count(*)::int AS count FROM scoped GROUP BY name`
+        const previousCounts = new Map(previous.map((row) => [row.name, row.count]))
+        return {
+          ...range,
+          previous: { from: previousRange.from, to: previousRange.to, until: previousRange.until },
+          events: events.map((event) => ({ ...event, previousCount: previousCounts.get(event.name) ?? 0 }))
+        }
       }))
 
     const customEvent = report("customEvent", (request: ReportRequest<ReportRangeQuery & { readonly name: string }>) =>
