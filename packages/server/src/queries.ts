@@ -255,13 +255,12 @@ export class Queries extends Context.Service<Queries, {
       }))
 
     /**
-     * The first (or last) Pageview of each Session in the range, as `properties`, `visitor_id` and
-     * `session_id`: of its Pageviews in `scoped`, or with `whole` of all its Pageviews in the Environment.
+     * The first (or last) Pageview of each Session in scope, as `properties`, `visitor_id` and
+     * `session_id`: of all the Session's Pageviews in the Environment, not only those in `scoped`.
      */
-    const sessionPageview = (which: "first" | "last", whole?: EnvironmentId) => sql`
+    const sessionPageview = (which: "first" | "last", environmentId: EnvironmentId) => sql`
       SELECT DISTINCT ON (session_id) properties, visitor_id, session_id
-      FROM ${whole === undefined ? sql`scoped WHERE session_id IS NOT NULL` : sql`event WHERE ${ofScopedSessions(whole)}`}
-        AND name = '$pageview'
+      FROM event WHERE ${ofScopedSessions(environmentId)} AND name = '$pageview'
       ORDER BY session_id, ${which === "first" ? sql`ts ASC, received_at ASC` : sql`ts DESC, received_at DESC`}`
 
     const visitors = sql`count(DISTINCT visitor_id)::int AS visitors`
@@ -303,15 +302,15 @@ export class Queries extends Context.Service<Queries, {
             GROUP BY p.value, e.bounce_rate`
         case "entryPages":
         case "exitPages":
-          return sessionRows(pathOf(sql), sessionPageview(kind === "entryPages" ? "first" : "last"))
+          return sessionRows(pathOf(sql), sessionPageview(kind === "entryPages" ? "first" : "last", environmentId))
         case "referrers":
-          return sessionRows(referringDomainOf(sql), sessionPageview("first"))
+          return sessionRows(referringDomainOf(sql), sessionPageview("first", environmentId))
         case "utmSources":
         case "utmMediums":
         case "utmCampaigns": {
           const tag = UTM_TAGS[kind]
           const value = sql`coalesce(properties ->> ${"$" + tag}, properties ->> ${tag})`
-          return sql`SELECT * FROM (${sessionRows(value, sessionPageview("first"))}) u WHERE value IS NOT NULL AND value <> ''`
+          return sql`SELECT * FROM (${sessionRows(value, sessionPageview("first", environmentId))}) u WHERE value IS NOT NULL AND value <> ''`
         }
         case "countries":
         case "browsers":
