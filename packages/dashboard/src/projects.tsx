@@ -14,7 +14,7 @@ import { SessionPage } from "./sessions.tsx"
 import { environmentOf, type ProjectChrome, Shell } from "./shell.tsx"
 import { sparklinePoints } from "./sparkline.ts"
 import { Notice, Rows, useAction, wide } from "./ui.tsx"
-import { VisitorPage } from "./visitors.tsx"
+import { VisitorPage, VisitorsList } from "./visitors.tsx"
 import { usePoll } from "./use-poll.ts"
 
 /** The browser's time zone, the default for a new Project. */
@@ -152,13 +152,25 @@ export const ProjectPage = ({ projectId, search }: { projectId: ProjectId; searc
   const onSearch = (next: ProjectSearch) => void navigate({ to: "/projects/$projectId", params: { projectId }, search: next })
   const addFilter = (filter: EventPropertyFilter) => onSearch(withQuery(search, withFilter(reportQuery(search), filter)))
   const chrome: ProjectChrome = { project, search, onSearch, reports: true }
-  const section = search.tab ?? "dashboard"
+  // The Visitors tab exists only in persistent Tracking mode; a stale link falls back to the Dashboard.
+  const persistent = project.trackingMode === "persistent"
+  const section = search.tab === "visitors" && !persistent ? "dashboard" : search.tab ?? "dashboard"
   return (
     <Shell section={section} chrome={chrome}>
       {section === "dashboard" && (
         <Dashboard key={environment.id} projectId={projectId} environment={environment} search={search} timeZone={project.timeZone} isOwner={project.role === "owner"} onAddFilter={addFilter} />
       )}
       {section === "live" && <Live key={environment.id} projectId={projectId} environment={environment} search={search} timeZone={project.timeZone} />}
+      {section === "visitors" && persistent && (
+        <VisitorsList
+          key={environment.id}
+          projectId={projectId}
+          environment={environment}
+          search={search}
+          timeZone={project.timeZone}
+          onSearch={(q) => void navigate({ to: "/projects/$projectId", params: { projectId }, search: { ...search, q }, replace: true })}
+        />
+      )}
       {section === "events" && <CustomEvents key={environment.id} projectId={projectId} environment={environment} search={search} onAddFilter={addFilter} />}
     </Shell>
   )

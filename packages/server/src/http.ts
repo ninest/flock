@@ -115,6 +115,8 @@ const CustomEventsHandlers = HttpApiBuilder.group(FlockApi, "customEvents", Effe
 const VisitorsHandlers = HttpApiBuilder.group(FlockApi, "visitors", Effect.fn(function*(handlers) {
   const queries = yield* Queries
   return handlers
+    .handle("list", ({ params: { environmentId }, query }) =>
+      CurrentMember.use(({ id: member }) => queries.visitors({ member, environmentId, query })))
     .handle("profile", ({ params: { environmentId, visitorId } }) =>
       CurrentMember.use(({ id: member }) => queries.visitorProfile({ member, environmentId, query: { visitorId } })))
     .handle("sessions", ({ params: { environmentId, visitorId }, query }) =>

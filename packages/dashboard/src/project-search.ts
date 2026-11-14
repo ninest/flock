@@ -10,10 +10,10 @@ import {
 import { Option, Schema } from "effect"
 
 /** The Project page's tabs after the Dashboard (the default, kept out of the URL). */
-export const PROJECT_TABS = ["live", "events"] as const
+export const PROJECT_TABS = ["live", "events", "visitors"] as const
 export type ProjectTab = (typeof PROJECT_TABS)[number]
 
-/** `?env=dev&tab=events&event=signup&period=custom&from=…&to=…&filters=[…]`. */
+/** `?env=dev&tab=events&event=signup&q=user_&period=custom&from=…&to=…&filters=[…]`. */
 export interface ProjectSearch {
   /** The Environment's name; `production` when absent. */
   readonly env?: string | undefined
@@ -22,6 +22,8 @@ export interface ProjectSearch {
   readonly event?: string | undefined
   /** The Session open on the Live tab. */
   readonly live?: string | undefined
+  /** The start of an identified Visitor ID searched for on the Visitors tab. */
+  readonly q?: string | undefined
   readonly period?: ReportRangeQuery["period"]
   readonly from?: string | undefined
   readonly to?: string | undefined
@@ -43,6 +45,8 @@ export const validateProjectSearch = (search: Record<string, unknown>): ProjectS
   if (event !== undefined) result.event = event
   const live = text(search.live)
   if (live !== undefined) result.live = live
+  const q = text(search.q)
+  if (q !== undefined) result.q = q
   const period = decode(ReportPeriod, search.period)
   if (period !== undefined) result.period = period
   const from = decode(LocalDate, search.from)

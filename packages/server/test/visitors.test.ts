@@ -1,6 +1,6 @@
-// The Visitor profile and a Visitor's Sessions (persistent Tracking mode), observed through the Visitors API.
+// The Visitors list, the Visitor profile and a Visitor's Sessions (persistent Tracking mode), observed through the Visitors API.
 import { assert, layer } from "@effect/vitest"
-import type { EnvironmentId, IngestEvent } from "@flock/shared"
+import type { EnvironmentId, IngestEvent, VisitorsQuery } from "@flock/shared"
 import { DateTime, Effect } from "effect"
 import { TestClock } from "effect/testing"
 import { customEvent, Harness, pageview } from "./harness.ts"
@@ -190,5 +190,149 @@ layer(Harness.layer())("Visitor profile and Identify (ADR 0005)", (it) => {
       assert.strictEqual(two.identified, true)
       assert.strictEqual(one.events, 3)
       assert.strictEqual(two.events, 3)
+    }))
+})
+
+const CHROME_WINDOWS =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+const SAFARI_IPHONE =
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1"
+
+const visitors = (environmentId: EnvironmentId, query: VisitorsQuery) =>
+  Effect.gen(function*() {
+    const h = yield* Harness
+    return yield* h.client.visitors.list({ params: { environmentId }, query })
+  })
+
+const march = (from: string, to = from) => ({ period: "custom" as const, from: `2026-03-${from}`, to: `2026-03-${to}` })
+
+layer(Harness.layer({ geoIp: { "198.51.100.1": "DE", "198.51.100.2": "FR" } }))("Visitors list", (it) => {
+  it.effect("lists the Visitors active in the range, last seen first, with all-time numbers and their latest Session's audience", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production, dev] } = yield* persistentProject({ environments: ["dev"] })
+      // device-1: an old Session from Germany, then one on Mar 2 from France on an iPhone via Hacker News.
+      yield* at("2026-02-20T09:00:00Z")
+      yield* h.ingest(production!.key, [as("device-1", pageview()), as("device-1", customEvent("signup"))], { ip: "198.51.100.1", userAgent: CHROME_WINDOWS })
+      yield* at("2026-03-02T09:00:00Z")
+      yield* h.ingest(production!.key, [as("device-1", pageview({ $referrer: "https://news.ycombinator.com/item" }))], { ip: "198.51.100.2", userAgent: SAFARI_IPHONE })
+      // device-2: on Mar 2, earlier, and again after the range on Mar 5.
+      yield* at("2026-03-02T08:00:00Z")
+      yield* h.ingest(production!.key, [as("device-2", pageview())], { ip: "198.51.100.1", userAgent: CHROME_WINDOWS })
+      yield* at("2026-03-05T08:00:00Z")
+      yield* h.ingest(production!.key, [as("device-2", pageview())], { ip: "198.51.100.1", userAgent: CHROME_WINDOWS })
+      // device-3: only before the range. device-4: only on `dev`.
+      yield* at("2026-02-25T08:00:00Z")
+      yield* h.ingest(production!.key, [as("device-3", pageview())])
+      yield* at("2026-03-02T10:00:00Z")
+      yield* h.ingest(dev!.key, [as("device-4", pageview())])
+
+      yield* at("2026-03-06T12:00:00Z")
+      const { visitors: rows, nextCursor } = yield* visitors(production!.id, march("01", "03"))
+      assert.isNull(nextCursor)
+      assert.deepStrictEqual(
+        rows.map(({ firstSeenAt, lastSeenAt, ...rest }) => ({ firstSeenAt: iso(firstSeenAt), lastSeenAt: iso(lastSeenAt), ...rest })),
+        [
+          {
+            // Last seen after the range: the numbers are all-time, the order is by last seen.
+            firstSeenAt: "2026-03-02T08:00:00.000Z",
+            lastSeenAt: "2026-03-05T08:00:00.000Z",
+            visitorId: "device-2",
+            identified: false,
+            sessions: 2,
+            events: 2,
+            country: "DE",
+            device: "desktop",
+            browser: "Chrome",
+            referringDomain: null
+          },
+          {
+            firstSeenAt: "2026-02-20T09:00:00.000Z",
+            lastSeenAt: "2026-03-02T09:00:00.000Z",
+            visitorId: "device-1",
+            identified: false,
+            sessions: 2,
+            events: 3,
+            country: "FR",
+            device: "mobile",
+            browser: "Safari",
+            referringDomain: "news.ycombinator.com"
+          }
+        ]
+      )
+    }))
+
+  it.effect("keeps only Visitors with an Event in the range that matches every Filter", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* persistentProject()
+      yield* at("2026-03-01T09:00:00Z")
+      yield* h.ingest(production!.key, [as("from-hn", pageview({ $referrer: "https://news.ycombinator.com/" }))])
+      yield* h.ingest(production!.key, [as("direct", pageview())])
+      // Came from Hacker News, but outside the range.
+      yield* at("2026-02-27T09:00:00Z")
+      yield* h.ingest(production!.key, [as("hn-earlier", pageview({ $referrer: "https://news.ycombinator.com/" }))])
+      yield* at("2026-03-01T10:00:00Z")
+      yield* h.ingest(production!.key, [as("hn-earlier", pageview())])
+
+      const filters = [{ eventProperty: "$referring_domain", op: "is" as const, value: "news.ycombinator.com" }]
+      const { visitors: rows } = yield* visitors(production!.id, { ...march("01"), filters })
+      assert.deepStrictEqual(rows.map((v) => v.visitorId), ["from-hn"])
+    }))
+
+  it.effect("pages 50 at a time with a cursor, Visitor ID breaking ties", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* persistentProject()
+      yield* at("2026-03-01T09:00:00Z")
+      // Two Visitors seen at the same moment, then 50 more a minute apart.
+      yield* h.ingest(production!.key, [as("tie-a", pageview()), as("tie-b", pageview())])
+      for (let i = 1; i <= 50; i++) {
+        yield* at(new Date(Date.parse("2026-03-01T09:00:00Z") + i * 60_000).toISOString())
+        yield* h.ingest(production!.key, [as(`device-${String(i).padStart(2, "0")}`, pageview())])
+      }
+
+      const first = yield* visitors(production!.id, march("01"))
+      assert.strictEqual(first.visitors.length, 50)
+      assert.strictEqual(first.visitors[0]!.visitorId, "device-50")
+      assert.strictEqual(first.visitors[49]!.visitorId, "device-01")
+      assert.isNotNull(first.nextCursor)
+      const second = yield* visitors(production!.id, { ...march("01"), cursor: first.nextCursor! })
+      assert.deepStrictEqual(second.visitors.map((v) => v.visitorId), ["tie-b", "tie-a"])
+      assert.isNull(second.nextCursor)
+    }))
+
+  it.effect("searches identified Visitor IDs by prefix", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* persistentProject()
+      yield* at("2026-03-01T09:00:00Z")
+      yield* h.ingest(production!.key, [identify("user_20418", "laptop"), as("user_20418", pageview())])
+      yield* h.ingest(production!.key, [identify("user_7", "phone"), as("user_7", pageview())], { ip: "203.0.113.9" })
+      yield* h.ingest(production!.key, [identify("priya@example.com", "tablet"), as("priya@example.com", pageview())], { ip: "203.0.113.10" })
+      // An anonymous Visitor whose ID happens to start the same way.
+      yield* h.ingest(production!.key, [as("user_anon", pageview())], { ip: "203.0.113.11" })
+
+      const users = yield* visitors(production!.id, { ...march("01"), search: "user_" })
+      assert.deepStrictEqual(users.visitors.map((v) => [v.visitorId, v.identified]), [["user_7", true], ["user_20418", true]])
+      const one = yield* visitors(production!.id, { ...march("01"), search: "user_2" })
+      assert.deepStrictEqual(one.visitors.map((v) => v.visitorId), ["user_20418"])
+      const wildcard = yield* visitors(production!.id, { ...march("01"), search: "%" })
+      assert.deepStrictEqual(wildcard.visitors, [])
+    }))
+
+  it.effect("is refused for a cookieless Project, and hides other Members' Environments as not found", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [cookieless] } = yield* h.createProject({})
+      const error = yield* visitors(cookieless!.id, march("01")).pipe(Effect.flip)
+      assert.strictEqual(error._tag, "VisitorsNeedPersistentMode")
+
+      const { environments: [production] } = yield* persistentProject()
+      yield* h.seedMember({ email: "list-outsider@example.com", password: "outsider-password" })
+      const outsider = yield* h.browser()
+      yield* outsider.signIn({ email: "list-outsider@example.com", password: "outsider-password" })
+      const hidden = yield* outsider.client.visitors.list({ params: { environmentId: production!.id }, query: march("01") }).pipe(Effect.flip)
+      assert.strictEqual(hidden._tag, "EnvironmentNotFound")
     }))
 })
