@@ -222,6 +222,7 @@ layer(Harness.layer({ geoIp }))("Custom events with filters", (it) => {
       ], { ip: DE })
       yield* at("2026-03-01T09:00:00Z")
       yield* h.ingest(production!.key, [customEvent("game_completed", { level: "hard" })], { ip: DE })
+      yield* at("2026-03-02T09:00:00Z") // after the range, so its previous period is the whole of 2026-02-28
 
       const list = yield* h.client.customEvents.list({ params: { environmentId: production!.id }, query: day([is("level", "hard")]) })
         .pipe(Effect.orDie)
