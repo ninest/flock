@@ -163,6 +163,36 @@ layer(Harness.layer())("UTM sources", (it) => {
     }))
 })
 
+layer(Harness.layer())("A date range that cuts through a Session", (it) => {
+  it.effect("still reports the Session's true entry page, exit page and source", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* h.createProject({ timeZone: "America/New_York" })
+      // One Session across New York's midnight (05:00Z): /landing (tagged, from Hacker News) on 02-28,
+      // /pricing and /signup on 03-01.
+      yield* at("2026-03-01T04:50:00Z")
+      yield* h.ingest(production!.key, [
+        visit("https://example.com/landing?utm_source=newsletter&utm_medium=email&utm_campaign=launch", "https://news.ycombinator.com/")
+      ], { ip: "198.51.100.1" })
+      yield* at("2026-03-01T05:05:00Z")
+      yield* h.ingest(production!.key, [visit("https://example.com/pricing?utm_source=banner", "https://example.com/landing")], { ip: "198.51.100.1" })
+      yield* at("2026-03-01T05:10:00Z")
+      yield* h.ingest(production!.key, [visit("https://example.com/signup")], { ip: "198.51.100.1" })
+
+      const before = { period: "custom" as const, from: "2026-02-28", to: "2026-02-28" }
+      for (const range of [before, day]) {
+        const rows = (report: "entryPages" | "exitPages" | "referrers" | "utmSources" | "utmMediums" | "utmCampaigns") =>
+          h.top(production!.id, report, range).pipe(Effect.map((top) => counts(top.rows)))
+        assert.deepStrictEqual(yield* rows("entryPages"), [{ value: "/landing", visitors: 1 }])
+        assert.deepStrictEqual(yield* rows("exitPages"), [{ value: "/signup", visitors: 1 }])
+        assert.deepStrictEqual(yield* rows("referrers"), [{ value: "news.ycombinator.com", visitors: 1 }])
+        assert.deepStrictEqual(yield* rows("utmSources"), [{ value: "newsletter", visitors: 1 }])
+        assert.deepStrictEqual(yield* rows("utmMediums"), [{ value: "email", visitors: 1 }])
+        assert.deepStrictEqual(yield* rows("utmCampaigns"), [{ value: "launch", visitors: 1 }])
+      }
+    }))
+})
+
 const CHROME_WINDOWS =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 const SAFARI_IPHONE =

@@ -129,8 +129,9 @@ layer(Harness.layer({ geoIp }))("Engagement on pages", (it) => {
       assert.deepStrictEqual([overview.totals.sessions, overview.totals.bounceRate], [1, 0])
       assert.deepStrictEqual([overview.previous.totals.sessions, overview.previous.totals.bounceRate], [1, 0])
       assert.deepStrictEqual(overview.series.find((b) => b.sessions > 0)?.bounceRate, 0)
+      // The Session entered on /, not on the Pageview the Filter matched.
       assert.deepStrictEqual((yield* h.top(production!.id, "entryPages", onPricing)).rows, [
-        { value: "/pricing", visitors: 1, bounceRate: 0 }
+        { value: "/", visitors: 1, bounceRate: 0 }
       ])
     }))
 })
