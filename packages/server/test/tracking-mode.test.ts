@@ -105,7 +105,9 @@ layer(Harness.layer())("Persistent Tracking mode", (it) => {
 
       const { events } = yield* h.client.customEvents.list({ params: { environmentId: production.id }, query: day("2026-03-01") })
         .pipe(Effect.orDie)
-      assert.deepStrictEqual(events, [{ name: "game_completed", count: 3, visitors: 2 }])
+      assert.deepStrictEqual(events.map(({ name, count, visitors }) => ({ name, count, visitors })), [
+        { name: "game_completed", count: 3, visitors: 2 }
+      ])
       assert.strictEqual(yield* h.live(production.id), 2)
     }))
 
