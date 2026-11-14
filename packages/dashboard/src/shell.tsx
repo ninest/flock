@@ -13,7 +13,7 @@ import { Dropdown, useIsPhone, useMember } from "./ui.tsx"
 import { usePoll } from "./use-poll.ts"
 
 /** Which page is showing, so the right tab and menu item are marked. */
-export type Section = "dashboard" | ProjectTab | "session" | "settings" | "projects" | "new-project" | "instance"
+export type Section = "dashboard" | ProjectTab | "session" | "visitor" | "settings" | "projects" | "new-project" | "instance"
 
 /** The Environment the search params pick: `?env=dev`, or `production`. */
 export const environmentOf = (project: Project, env: string | undefined): Environment =>

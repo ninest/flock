@@ -1,7 +1,7 @@
 // Sessions: Recent Sessions on the Dashboard, the Session timeline (shared with the Live tab), and
 // the Session page. A live Session (active or idle) refreshes itself; on its page the timeline
 // follows new Events at the bottom while you stay there, like a chat.
-import type { Environment, EventPropertyFilters, ProjectId, ReportRangeQuery, SessionDetail, SessionEvent, SessionSummary } from "@flock/shared"
+import { type Environment, type EventPropertyFilters, type ProjectId, type ReportRangeQuery, type SessionDetail, type SessionEvent, type SessionSummary, visitorLabel } from "@flock/shared"
 import { Link } from "@tanstack/react-router"
 import { DateTime } from "effect"
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
@@ -264,7 +264,14 @@ export const SessionPage = ({ projectId, environment, sessionId, search, timeZon
     ["Operating system", session.os ?? "Unknown"],
     ["Country", country(session.country)],
     ...(utm.length > 0 ? [["UTM", utm.join(", ")] as [string, string]] : []),
-    ...(session.visitorId !== null ? [["Identified as", <code key="id">{session.visitorId}</code>] as [string, React.ReactNode]] : [])
+    ...(session.visitorId !== null
+      ? [[
+        "Visitor",
+        <Link key="visitor" to="/projects/$projectId/visitors/$visitorId" params={{ projectId, visitorId: session.visitorId }} search={sharedSearch(search)} data-testid="session-visitor">
+          {visitorLabel({ visitorId: session.visitorId, identified: session.visitorIdentified === true })}
+        </Link>
+      ] as [string, React.ReactNode]]
+      : [])
   ]
   return (
     <div className="page session">

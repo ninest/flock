@@ -187,6 +187,7 @@ layer(Harness.layer({ geoIp: { "198.51.100.1": "DE" } }))("Session timeline", (i
           browser: "Chrome",
           os: "Windows",
           visitorId: null,
+          visitorIdentified: null,
           status: "active",
           truncated: false
         }
@@ -257,7 +258,7 @@ layer(Harness.layer({ geoIp: { "198.51.100.1": "DE" } }))("Session timeline", (i
 layer(Harness.layer())("Identified Visitors in a Session", (it) => {
   const as = (distinctId: string, event: IngestEvent): IngestEvent => ({ ...event, distinct_id: distinctId })
 
-  it.effect("shows the Visitor ID only once the Visitor is identified", () =>
+  it.effect("carries every persistent Visitor's ID and whether they are identified; neither in cookieless mode", () =>
     Effect.gen(function*() {
       const h = yield* Harness
       const project = yield* h.createProject({})
@@ -270,12 +271,14 @@ layer(Harness.layer())("Identified Visitors in a Session", (it) => {
       yield* h.ingest(production.key, [as("user_123", customEvent("$identify", { $anon_distinct_id: "device-1" }))])
 
       const { sessions } = yield* h.sessions(production.id, day)
-      const visitorIds = yield* Effect.forEach(sessions, (s) => h.session(production.id, s.id).pipe(Effect.map((d) => d.visitorId)))
-      assert.deepStrictEqual(visitorIds, ["user_123", null])
+      const visitors = yield* Effect.forEach(sessions, (s) =>
+        h.session(production.id, s.id).pipe(Effect.map((d) => [d.visitorId, d.visitorIdentified])))
+      assert.deepStrictEqual(visitors, [["user_123", true], ["device-2", false]])
 
       yield* h.client.projects.update({ params: { projectId: project.id }, payload: { trackingMode: "cookieless" } })
       const afterSwitch = yield* h.session(production.id, sessions[0]!.id)
       assert.strictEqual(afterSwitch.visitorId, null)
+      assert.strictEqual(afterSwitch.visitorIdentified, null)
     }))
 })
 

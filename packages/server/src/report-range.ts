@@ -29,7 +29,8 @@ const localTime = (at: DateTime.Utc, timeZone: string): string =>
 const daysBetween = (from: string, to: string) =>
   Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000)
 
-const addDays = (date: string, days: number) => {
+/** The local day `days` after `date` (`2026-03-01`). */
+export const addDays = (date: string, days: number) => {
   const d = new Date(`${date}T00:00:00Z`)
   d.setUTCDate(d.getUTCDate() + days)
   return d.toISOString().slice(0, 10)
