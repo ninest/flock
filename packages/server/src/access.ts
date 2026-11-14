@@ -1,7 +1,7 @@
 // Access: who may become a Member (Open sign-up, Invites and the FLOCK_ADMIN_EMAIL
 // bootstrap), who is an Instance admin, and removing Members.
 import { PgClient } from "@effect/sql-pg"
-import { CreatedInvite, type InstanceSettings, Invite, InviteId, Member, MemberId } from "@flock/shared"
+import { CreatedInvite, type InstanceSettings, Invite, InviteId, Member, MemberId, ProjectId, SoleProjectOwner } from "@flock/shared"
 import { Context, DateTime, Effect, Layer, Option, type Redacted } from "effect"
 import { createHash } from "node:crypto"
 import type { SqlError } from "effect/sql/SqlError"
@@ -109,8 +109,11 @@ export class Access extends Context.Service<Access, {
   readonly settings: Effect.Effect<InstanceSettings, SqlError>
   readonly updateSettings: (settings: InstanceSettings) => Effect.Effect<InstanceSettings, SqlError>
   readonly members: Effect.Effect<Array<Member>, SqlError>
-  /** Deletes the Member with their sessions and logins. False when there was no such Member. */
-  readonly removeMember: (memberId: MemberId) => Effect.Effect<boolean, SqlError>
+  /**
+   * Deletes the Member with their sessions, logins and Project memberships. False when there was no such Member.
+   * Refused while they are the only owner of a Project, which always keeps at least one owner.
+   */
+  readonly removeMember: (memberId: MemberId) => Effect.Effect<boolean, SqlError | SoleProjectOwner>
   readonly invites: Effect.Effect<Array<Invite>, SqlError>
   readonly createInvite: (input: { readonly note: string; readonly createdBy: MemberId }) => Effect.Effect<CreatedInvite, SqlError>
   /** Deletes an unused Invite. False when there was no such unused Invite. */
@@ -184,7 +187,29 @@ export class Access extends Context.Service<Access, {
           sql`UPDATE instance_settings SET open_sign_up = ${openSignUp}`.pipe(Effect.andThen(settings)),
         members: selectMembers(sql.and([])),
         removeMember: (memberId) =>
-          sql`DELETE FROM member WHERE id = ${memberId} RETURNING id`.pipe(Effect.map((rows) => rows.length > 0)),
+          sql.withTransaction(Effect.gen(function*() {
+            // Locks the memberships of every Project they own, as Project membership changes do, so a
+            // concurrent demotion or removal of a co-owner can't leave a Project without an owner.
+            const owned = yield* sql<{ projectId: string; memberId: string; role: string }>`
+              SELECT project_id, member_id, role FROM project_member
+              WHERE project_id IN (SELECT project_id FROM project_member WHERE member_id = ${memberId} AND role = 'owner')
+              ORDER BY project_id, member_id
+              FOR UPDATE`
+            const soleOwned = [...new Set(owned.map((row) => row.projectId))].filter((project) =>
+              owned.every((row) => row.projectId !== project || row.role !== "owner" || row.memberId === memberId)
+            )
+            if (soleOwned.length > 0) {
+              const names = yield* sql<{ name: string }>`
+                SELECT name FROM project WHERE id IN ${sql.in(soleOwned)} ORDER BY name, id`
+              return yield* new SoleProjectOwner({
+                message: `This Member is the only owner of ${names.map((p) => `"${p.name}"`).join(", ")}. ` +
+                  "Make another Member an owner of each of those Projects first.",
+                projects: soleOwned.map((project) => ProjectId.make(project))
+              })
+            }
+            const deleted = yield* sql`DELETE FROM member WHERE id = ${memberId} RETURNING id`
+            return deleted.length > 0
+          })),
         invites: sql<InviteRow>`
           SELECT id, note, created_at, used_at, used_by FROM invite ORDER BY created_at DESC, id`.pipe(
           Effect.map((rows) => rows.map(toInvite))

@@ -19,6 +19,7 @@ import {
   ProjectNotFound,
   ProjectOwnerRequired,
   ProjectRole,
+  SoleProjectOwner,
   TimeZone,
   TrackingMode
 } from "./domain.ts"
@@ -252,7 +253,7 @@ export class InstanceGroup extends HttpApiGroup.make("instance")
   .add(
     HttpApiEndpoint.delete("removeMember", "/members/:memberId", {
       params: { memberId: MemberId },
-      error: [Forbidden, MemberNotFound]
+      error: [Forbidden, MemberNotFound, SoleProjectOwner]
     })
   )
   .add(HttpApiEndpoint.get("invites", "/invites", { success: Schema.Array(Invite), error: Forbidden }))

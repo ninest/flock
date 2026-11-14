@@ -29,7 +29,7 @@ One thing being tracked (a website, mobile app or backend), with its own key and
 _Avoid_: Site, property, app
 
 **Project owner**:
-A Member who manages a Project: its settings, keys, Environments and who it is shared with. A Project always has at least one.
+A Member who manages a Project: its settings, keys, Environments and who it is shared with. A Project always has at least one, so a Member who is the only owner of a Project can't be removed from the Instance until another Member owns it.
 
 **Project viewer**:
 A Member a Project is shared with read-only: they see its reports for every Environment but can't change or delete anything.
