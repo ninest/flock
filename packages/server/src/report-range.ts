@@ -16,7 +16,8 @@ export const localDate = (at: DateTime.Utc, timeZone: string): string =>
   new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" })
     .format(DateTime.toDateUtc(at))
 
-const addDays = (date: string, days: number) => {
+/** The local day `days` after `date` (`2026-03-01`). */
+export const addDays = (date: string, days: number) => {
   const d = new Date(`${date}T00:00:00Z`)
   d.setUTCDate(d.getUTCDate() + days)
   return d.toISOString().slice(0, 10)

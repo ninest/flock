@@ -110,6 +110,15 @@ const CustomEventsHandlers = HttpApiBuilder.group(FlockApi, "customEvents", Effe
       CurrentMember.use(({ id: member }) => queries.customEventStats({ member, environmentId, query })))
 }))
 
+const VisitorsHandlers = HttpApiBuilder.group(FlockApi, "visitors", Effect.fn(function*(handlers) {
+  const queries = yield* Queries
+  return handlers
+    .handle("profile", ({ params: { environmentId, visitorId } }) =>
+      CurrentMember.use(({ id: member }) => queries.visitorProfile({ member, environmentId, query: { visitorId } })))
+    .handle("sessions", ({ params: { environmentId, visitorId }, query }) =>
+      CurrentMember.use(({ id: member }) => queries.visitorSessions({ member, environmentId, query: { ...query, visitorId } })))
+}))
+
 const AnnotationsHandlers = HttpApiBuilder.group(FlockApi, "annotations", Effect.fn(function*(handlers) {
   const annotations = yield* Annotations
   return handlers
@@ -159,7 +168,7 @@ const InstanceHandlers = HttpApiBuilder.group(FlockApi, "instance", Effect.fn(fu
 }))
 
 const ApiRoutes = (trusted: TrustedProxies) => HttpApiBuilder.layer(FlockApi, { openapiPath: "/api/openapi.json" }).pipe(
-  Layer.provide([HealthHandlers, IngestHandlers(trusted), ProjectsHandlers, EnvironmentsHandlers, ReportsHandlers, CustomEventsHandlers, AnnotationsHandlers, SignInHandlers, MembersHandlers, InstanceHandlers]),
+  Layer.provide([HealthHandlers, IngestHandlers(trusted), ProjectsHandlers, EnvironmentsHandlers, ReportsHandlers, CustomEventsHandlers, VisitorsHandlers, AnnotationsHandlers, SignInHandlers, MembersHandlers, InstanceHandlers]),
   Layer.provide(MemberAuthLive),
   Layer.provide(HttpApiMiddleware.layerProblemDetails({ includeDetails: true }))
 )

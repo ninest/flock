@@ -25,16 +25,19 @@ import type {
   SessionSummary,
   Top,
   TopQuery,
-  TopRow
+  TopRow,
+  VisitorProfile,
+  VisitorSessionsQuery,
+  VisitorsNeedPersistentMode
 } from "@flock/shared"
-import { SESSION_EVENT_LIMIT, SessionNotFound, SESSIONS_PAGE_SIZE, TOP_LIMIT } from "@flock/shared"
+import { SESSION_EVENT_LIMIT, SessionNotFound, SESSIONS_PAGE_SIZE, TOP_LIMIT, VISITOR_ACTIVITY_DAYS, VisitorNotFound } from "@flock/shared"
 import { Context, DateTime, Effect, Layer } from "effect"
 import type { SqlError } from "effect/sql/SqlError"
 import type { Fragment } from "effect/sql/Statement"
 import { matchesFilters, pathOf, referringDomainOf } from "./filters.ts"
 import { Annotations } from "./annotations.ts"
 import { Projects } from "./projects.ts"
-import { type ReportRange, resolveRange } from "./report-range.ts"
+import { addDays, localDate, type ReportRange, resolveRange } from "./report-range.ts"
 import { SESSION_TIMEOUT_MINUTES } from "./sessions.ts"
 
 /** An exact `[from, to)` time range, for the reports that don't work on local days. */
@@ -80,6 +83,14 @@ export class Queries extends Context.Service<Queries, {
   readonly session: (
     request: ReportRequest<{ readonly sessionId: string }>
   ) => Effect.Effect<SessionDetail, EnvironmentNotFound | SessionNotFound>
+  /** One Visitor over all time in the Environment (persistent Tracking mode only); ignores any range. */
+  readonly visitorProfile: (
+    request: ReportRequest<{ readonly visitorId: string }>
+  ) => Effect.Effect<VisitorProfile, VisitorErrors>
+  /** One Visitor's Sessions in the Environment over all time, most recent activity first, paged like Recent sessions. */
+  readonly visitorSessions: (
+    request: ReportRequest<VisitorSessionsQuery & { readonly visitorId: string }>
+  ) => Effect.Effect<SessionList, VisitorErrors>
 }>()("flock/Queries") {
   static readonly layer = Layer.effect(Queries, Effect.gen(function*() {
     const sql = yield* PgClient.PgClient
@@ -428,28 +439,42 @@ export class Queries extends Context.Service<Queries, {
         GROUP BY session_id
       )`
 
-    const sessions = report("sessions", (request: ReportRequest<SessionsQuery>) =>
+    /**
+     * One page of Sessions (rows of `sessionBounds` over the Session IDs `ids`), most recent activity first,
+     * starting after `cursor`.
+     */
+    const pageOfSessions = (environmentId: EnvironmentId, ctes: Fragment, ids: Fragment, cursor: string | undefined) =>
       Effect.gen(function*() {
-        const scope = yield* checkAccessAndResolveRange(request)
         const now = yield* DateTime.now
-        const cursor = request.query.cursor === undefined ? undefined : parseCursor(request.query.cursor)
+        const after = cursor === undefined ? undefined : parseCursor(cursor)
         const rows = yield* sql<SessionRow>`
-          WITH ${scopedEvents(scope)},
-          ${sessionBounds(scope.environmentId, sql`SELECT DISTINCT session_id FROM scoped WHERE session_id IS NOT NULL`)},
+          WITH ${ctes}
+          ${sessionBounds(environmentId, ids)},
           page AS (
             SELECT * FROM s
-            ${cursor === undefined ? sql`` : sql`WHERE (last_seen_at, session_id) < (${cursor.lastSeenAt}, ${cursor.id})`}
+            ${after === undefined ? sql`` : sql`WHERE (last_seen_at, session_id) < (${after.lastSeenAt}, ${after.id})`}
             ORDER BY last_seen_at DESC, session_id DESC
             LIMIT ${SESSIONS_PAGE_SIZE + 1}
           )
-          SELECT ${sessionSummary(scope.environmentId, sql`page`)}
+          SELECT ${sessionSummary(environmentId, sql`page`)}
           ORDER BY s.last_seen_at DESC, s.session_id DESC`
         const page = rows.slice(0, SESSIONS_PAGE_SIZE)
         const last = page.at(-1)
         return {
           sessions: page.map((row) => toSummary(row, now)),
           nextCursor: rows.length > SESSIONS_PAGE_SIZE && last ? formatCursor(last) : null
-        }
+        } satisfies SessionList
+      })
+
+    const sessions = report("sessions", (request: ReportRequest<SessionsQuery>) =>
+      Effect.gen(function*() {
+        const scope = yield* checkAccessAndResolveRange(request)
+        return yield* pageOfSessions(
+          scope.environmentId,
+          sql`${scopedEvents(scope)},`,
+          sql`SELECT DISTINCT session_id FROM scoped WHERE session_id IS NOT NULL`,
+          request.query.cursor
+        )
       }))
 
     const session = report<{ readonly sessionId: string }, SessionDetail, SessionNotFound>("session", (request: ReportRequest<{ readonly sessionId: string }>) =>
@@ -497,6 +522,79 @@ export class Queries extends Context.Service<Queries, {
         }
       }))
 
+    // Visitors (persistent Tracking mode).
+
+    /** The persistent-mode access check, then VisitorNotFound unless the Visitor has an Event in the Environment. */
+    const checkVisitor = (request: ReportRequest<{ readonly visitorId: string }>) =>
+      Effect.gen(function*() {
+        const environment = yield* projects.persistentEnvironment(request.member, request.environmentId)
+        const { visitorId } = request.query
+        const [row] = yield* sql<{ readonly firstSeenAt: Date; readonly lastSeenAt: Date; readonly sessions: number; readonly events: number }>`
+          SELECT min(ts) AS first_seen_at, max(ts) AS last_seen_at,
+                 count(DISTINCT session_id)::int AS sessions, count(*)::int AS events
+          FROM event
+          WHERE environment_id = ${environment.id} AND visitor_id = ${visitorId}
+          HAVING count(*) > 0`
+        if (!row) return yield* Effect.fail(new VisitorNotFound({ visitorId }))
+        return { environment, totals: row }
+      })
+
+    const visitorReport = <Q, A>(
+      name: string,
+      run: (request: ReportRequest<Q>) => Effect.Effect<A, VisitorErrors | SqlError>
+    ): (request: ReportRequest<Q>) => Effect.Effect<A, VisitorErrors> =>
+      (request) => run(request).pipe(Effect.catchTag("SqlError", Effect.die), Effect.withSpan(`Queries.${name}`))
+
+    const visitorProfile = visitorReport("visitorProfile", (request: ReportRequest<{ readonly visitorId: string }>) =>
+      Effect.gen(function*() {
+        const { environment, totals } = yield* checkVisitor(request)
+        const { visitorId } = request.query
+        const { timeZone } = environment
+        const today = localDate(yield* DateTime.now, timeZone)
+        const firstDay = addDays(today, -(VISITOR_ACTIVITY_DAYS - 1))
+        const activity = yield* sql<{ readonly date: string; readonly events: number }>`
+          SELECT to_char(d.day, 'YYYY-MM-DD') AS date, coalesce(c.events, 0)::int AS events
+          FROM generate_series(${firstDay}::date, ${today}::date, interval '1 day') AS d(day)
+          LEFT JOIN (
+            SELECT (ts AT TIME ZONE ${timeZone})::date AS day, count(*) AS events
+            FROM event
+            WHERE environment_id = ${environment.id} AND visitor_id = ${visitorId}
+              AND ts >= (${firstDay}::date::timestamp AT TIME ZONE ${timeZone})
+            GROUP BY 1
+          ) c ON c.day = d.day::date
+          ORDER BY d.day`
+        const eventNames = yield* sql<{ readonly name: string; readonly count: number }>`
+          SELECT name, count(*)::int AS count FROM event
+          WHERE environment_id = ${environment.id} AND visitor_id = ${visitorId}
+          GROUP BY name
+          ORDER BY count DESC, name`
+        return {
+          visitorId,
+          identified: yield* isIdentified(environment.projectId, visitorId),
+          firstSeenAt: DateTime.fromDateUnsafe(totals.firstSeenAt),
+          lastSeenAt: DateTime.fromDateUnsafe(totals.lastSeenAt),
+          sessions: totals.sessions,
+          events: totals.events,
+          activity,
+          eventNames
+        }
+      }))
+
+    const visitorSessions = visitorReport(
+      "visitorSessions",
+      (request: ReportRequest<VisitorSessionsQuery & { readonly visitorId: string }>) =>
+        Effect.gen(function*() {
+          const { environment } = yield* checkVisitor(request)
+          return yield* pageOfSessions(
+            environment.id,
+            sql``,
+            sql`SELECT DISTINCT session_id FROM event
+                WHERE environment_id = ${environment.id} AND visitor_id = ${request.query.visitorId} AND session_id IS NOT NULL`,
+            request.query.cursor
+          )
+        })
+    )
+
     return Queries.of({
       overview,
       top,
@@ -509,10 +607,14 @@ export class Queries extends Context.Service<Queries, {
       customEventBreakdown,
       customEventStats,
       sessions,
-      session
+      session,
+      visitorProfile,
+      visitorSessions
     })
   }))
 }
+
+type VisitorErrors = EnvironmentNotFound | VisitorsNeedPersistentMode | VisitorNotFound
 
 /** A report after the access check: the Environment, its resolved local range and the filters. */
 interface ReportScope {
