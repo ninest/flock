@@ -283,6 +283,20 @@ export const SessionPage = ({ projectId, environment, sessionId, search, timeZon
       <dl className="facts">
         {facts.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
       </dl>
+      {(session.earlierSessionId !== null || session.laterSessionId !== null) && (
+        <nav className="session-steps" aria-label="The Visitor's other Sessions">
+          {session.earlierSessionId !== null && (
+            <Link to="/projects/$projectId/sessions/$sessionId" params={{ projectId, sessionId: session.earlierSessionId }} search={sharedSearch(search)} data-testid="earlier-session">
+              ← Earlier Session
+            </Link>
+          )}
+          {session.laterSessionId !== null && (
+            <Link className="later" to="/projects/$projectId/sessions/$sessionId" params={{ projectId, sessionId: session.laterSessionId }} search={sharedSearch(search)} data-testid="later-session">
+              Later Session →
+            </Link>
+          )}
+        </nav>
+      )}
       <Timeline session={session} timeZone={timeZone} highlight={(search.filters?.length ?? 0) > 0} />
       <p className="timeline-end"><StatusDot status={session.status} />{timelineEnd(session, now)}</p>
       {unseen > 0 && (

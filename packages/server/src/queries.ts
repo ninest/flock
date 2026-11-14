@@ -547,6 +547,21 @@ export class Queries extends Context.Service<Queries, {
         )
       }))
 
+    /**
+     * The Visitor's Sessions just before and after this one in the Environment, ordered by start time (id breaks
+     * ties), from the `session` table, which Identify keeps on the identified Visitor.
+     */
+    const sessionNeighbours = (environmentId: string, visitorId: string, sessionId: string) =>
+      sql<{ readonly earlier: string | null; readonly later: string | null }>`
+        WITH ordered AS (
+          SELECT id,
+                 lag(id) OVER (ORDER BY started_at, id) AS earlier,
+                 lead(id) OVER (ORDER BY started_at, id) AS later
+          FROM session
+          WHERE environment_id = ${environmentId} AND visitor_id = ${visitorId}
+        )
+        SELECT earlier, later FROM ordered WHERE id = ${sessionId}`.pipe(Effect.map(([row]) => row))
+
     const session = report<{ readonly sessionId: string }, SessionDetail, SessionNotFound>("session", (request: ReportRequest<{ readonly sessionId: string }>) =>
       Effect.gen(function*() {
         const environment = yield* checkAccess(request)
@@ -560,6 +575,7 @@ export class Queries extends Context.Service<Queries, {
         // Visitors start afresh).
         const visitorId = environment.trackingMode === "persistent" ? row.visitorId : null
         const visitorIdentified = visitorId === null ? null : yield* isIdentified(environment.projectId, visitorId)
+        const neighbours = visitorId === null ? undefined : yield* sessionNeighbours(environment.id, visitorId, sessionId)
         const events = yield* sql<{
           readonly uuid: string
           readonly name: string
@@ -581,6 +597,8 @@ export class Queries extends Context.Service<Queries, {
           os: row.os,
           visitorId,
           visitorIdentified,
+          earlierSessionId: neighbours?.earlier ?? null,
+          laterSessionId: neighbours?.later ?? null,
           timeline: events.map((e) => ({
             id: e.uuid,
             name: e.name,

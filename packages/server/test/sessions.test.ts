@@ -188,6 +188,8 @@ layer(Harness.layer({ geoIp: { "198.51.100.1": "DE" } }))("Session timeline", (i
           os: "Windows",
           visitorId: null,
           visitorIdentified: null,
+          earlierSessionId: null,
+          laterSessionId: null,
           status: "active",
           truncated: false
         }
@@ -325,5 +327,55 @@ layer(Harness.layer())("Last page", (it) => {
       assert.strictEqual(summary!.lastPage, null)
       const detail = yield* h.session(production!.id, summary!.id)
       assert.strictEqual(detail.lastPage, null)
+    }))
+})
+
+layer(Harness.layer())("Earlier and Later Session", (it) => {
+  const as = (distinctId: string, event: IngestEvent): IngestEvent => ({ ...event, distinct_id: distinctId })
+
+  it.effect("link a persistent Visitor's Sessions in the Environment by start time, also after an Identify; never in cookieless mode", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const project = yield* h.createProject({ environments: ["production", "dev"] })
+      yield* h.client.projects.update({ params: { projectId: project.id }, payload: { trackingMode: "persistent" } })
+      const [production, dev] = project.environments
+      // user_123 on a laptop at 08:00; device-1 at 09:00 and 11:00 (two Sessions); device-2 at 10:00;
+      // device-1 in dev at 10:00, which does not count for production.
+      yield* at("2026-03-01T08:00:00Z")
+      yield* h.ingest(production!.key, [as("user_123", visit("https://example.com/laptop"))])
+      yield* at("2026-03-01T09:00:00Z")
+      yield* h.ingest(production!.key, [as("device-1", visit("https://example.com/first"))])
+      yield* at("2026-03-01T10:00:00Z")
+      yield* h.ingest(production!.key, [as("device-2", visit("https://example.com/other"))])
+      yield* h.ingest(dev!.key, [as("device-1", visit("https://example.com/dev"))])
+      yield* at("2026-03-01T11:00:00Z")
+      yield* h.ingest(production!.key, [as("device-1", visit("https://example.com/second"))])
+      yield* at("2026-03-01T11:30:00Z")
+
+      const byEntry = Effect.gen(function*() {
+        const { sessions } = yield* h.sessions(production!.id, day)
+        return new Map(sessions.map((s) => [s.entryPage, s.id]))
+      })
+      const neighbours = (id: string) =>
+        h.session(production!.id, id).pipe(Effect.map((d) => [d.earlierSessionId, d.laterSessionId]))
+
+      let ids = yield* byEntry
+      assert.deepStrictEqual(yield* neighbours(ids.get("/first")!), [null, ids.get("/second")!])
+      assert.deepStrictEqual(yield* neighbours(ids.get("/second")!), [ids.get("/first")!, null])
+      assert.deepStrictEqual(yield* neighbours(ids.get("/other")!), [null, null])
+      assert.deepStrictEqual(yield* neighbours(ids.get("/laptop")!), [null, null])
+
+      // device-1 identifies as user_123 at 13:00: its Sessions join user_123's, and the Identify starts one.
+      yield* at("2026-03-01T13:00:00Z")
+      yield* h.ingest(production!.key, [as("user_123", customEvent("$identify", { $anon_distinct_id: "device-1" }))])
+      ids = yield* byEntry
+      const chain = [ids.get("/laptop")!, ids.get("/first")!, ids.get("/second")!, ids.get(null)!]
+      for (const [i, id] of chain.entries()) {
+        assert.deepStrictEqual(yield* neighbours(id), [chain[i - 1] ?? null, chain[i + 1] ?? null])
+      }
+      assert.deepStrictEqual(yield* neighbours(ids.get("/other")!), [null, null])
+
+      yield* h.client.projects.update({ params: { projectId: project.id }, payload: { trackingMode: "cookieless" } })
+      for (const id of chain) assert.deepStrictEqual(yield* neighbours(id), [null, null])
     }))
 })

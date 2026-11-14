@@ -90,6 +90,12 @@ export const SessionDetail = Schema.Struct({
   visitorId: Schema.NullOr(Schema.String),
   /** Whether that Visitor is identified (their ID is one Identify linked a device to); null in cookieless mode. */
   visitorIdentified: Schema.NullOr(Schema.Boolean),
+  /**
+   * The same Visitor's previous and next Session in the Environment, by start time (persistent Tracking mode);
+   * null at either end of their history, and always null in cookieless mode.
+   */
+  earlierSessionId: Schema.NullOr(Schema.String),
+  laterSessionId: Schema.NullOr(Schema.String),
   /** The Session timeline: the first `SESSION_EVENT_LIMIT` Events, oldest first. */
   timeline: Schema.Array(SessionEvent),
   /** More Events exist than the timeline holds. */
