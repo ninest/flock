@@ -119,7 +119,7 @@ const EnvironmentSwitcher = ({ section, chrome }: { section: Section; chrome: Pr
     const search = withQuery(name === PRODUCTION ? {} : { env: name }, reportQuery(chrome.search))
     if (section === "settings") return navigate({ to: "/projects/$projectId/settings", params: { projectId }, search })
     // A Session belongs to one Environment, so switching leaves the Session page for the Dashboard.
-    const tab = section === "live" || section === "events" ? { tab: section } : {}
+    const tab = section === "live" || section === "events" || section === "visitors" ? { tab: section } : {}
     return navigate({ to: "/projects/$projectId", params: { projectId }, search: { ...search, ...tab } })
   }
   return (
@@ -133,7 +133,7 @@ const EnvironmentSwitcher = ({ section, chrome }: { section: Section; chrome: Pr
   )
 }
 
-/** Dashboard, Live (with how many Visitors are here now) and Events. */
+/** Dashboard, Live (with how many Visitors are here now), Events, and Visitors in persistent Tracking mode. */
 const Tabs = ({ section, chrome, environment }: { section: Section; chrome: ProjectChrome; environment: Environment }) => {
   const filters = chrome.search.filters
   const { data: live } = usePoll(
@@ -157,6 +157,11 @@ const Tabs = ({ section, chrome, environment }: { section: Section; chrome: Proj
         )}
       </Link>
       <Link to="/projects/$projectId" params={params} activeOptions={exact} search={{ ...base, tab: "events" }} aria-current={section === "events" ? "page" : undefined}>Events</Link>
+      {chrome.project.trackingMode === "persistent" && (
+        <Link to="/projects/$projectId" params={params} activeOptions={exact} search={{ ...base, tab: "visitors" }} aria-current={section === "visitors" ? "page" : undefined}>
+          Visitors
+        </Link>
+      )}
     </nav>
   )
 }

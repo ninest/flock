@@ -244,8 +244,9 @@ const ProjectSettings = ({ project, onChange }: { project: Project; onChange: ()
           Tracking mode
           <select name="trackingMode" defaultValue={project.trackingMode}>
             <option value="cookieless">Cookieless: anonymous Visitors that reset daily, nothing stored on the device</option>
-            <option value="persistent">Persistent: a Visitor ID stored on the device, with identify()</option>
+            <option value="persistent">Persistent: a Visitor ID stored on the device, with identify() and Visitor profiles</option>
           </select>
+          <span className="dim">Persistent mode adds a Visitors tab and Visitor profiles: each Visitor's whole history across days and devices.</span>
         </label>
         <div><button type="submit" className="btn" disabled={action.busy}>Save</button></div>
       </form>

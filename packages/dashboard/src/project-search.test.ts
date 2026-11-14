@@ -14,8 +14,10 @@ describe("validateProjectSearch", () => {
     })
   })
   it("drops params a hand-edited URL broke", () => {
-    expect(validateProjectSearch({ tab: "visitors", period: "year", from: "2026-02-30", filters: [{ op: "is" }] })).toEqual({})
+    expect(validateProjectSearch({ tab: "people", period: "year", from: "2026-02-30", filters: [{ op: "is" }] })).toEqual({})
   })
+  it("keeps the Visitors tab and its ID search", () =>
+    expect(validateProjectSearch({ tab: "visitors", q: "user_" })).toEqual({ tab: "visitors", q: "user_" }))
   it("keeps the selected live Session", () => expect(validateProjectSearch({ tab: "live", live: "abc" })).toEqual({ tab: "live", live: "abc" }))
 })
 
