@@ -2,13 +2,11 @@
 // previous period (click one to chart it), the chart with the previous period as a grey line,
 // Recent Sessions, then Pages, Sources, Countries and Devices as a 2×2 grid.
 import type { Environment, EventPropertyFilter, OverviewNumbers, ProjectId, ReportRangeQuery } from "@flock/shared"
-import { DateTime } from "effect"
 import { useState } from "react"
-import { placeAnnotations } from "./annotations.ts"
 import { request } from "./api.ts"
 import { Breakdown, BREAKDOWNS } from "./breakdown.tsx"
 import { type ChangeUnit, formatChange } from "./change.ts"
-import { AddAnnotation, AnnotationDetails } from "./chart-annotations.tsx"
+import { AnnotationDetails, AnnotationForm, useChartAnnotations } from "./chart-annotations.tsx"
 import { bucketLabel } from "./chart-scale.ts"
 import { formatCount, formatDuration, formatPercent } from "./format.ts"
 import { isComplete, type ProjectSearch, queryDeps, reportQuery } from "./project-search.ts"
@@ -33,9 +31,11 @@ const METRICS: ReadonlyArray<{
   { key: "visitDuration", label: "Visit duration", format: formatDuration, unit: "percent" }
 ]
 
-export const Dashboard = ({ projectId, environment, search, timeZone, isOwner, onAddFilter }: {
+export const Dashboard = ({ projectId, environment, environments, search, timeZone, isOwner, onAddFilter }: {
   projectId: ProjectId
   environment: Environment
+  /** The Project's Environments, for the Annotation form's choice. */
+  environments: ReadonlyArray<Environment>
   search: ProjectSearch
   timeZone: string
   /** Owners add and delete Annotations. */
@@ -45,7 +45,7 @@ export const Dashboard = ({ projectId, environment, search, timeZone, isOwner, o
   const query = reportQuery(search)
   return (
     <div className="page">
-      <Overview projectId={projectId} environment={environment} query={query} timeZone={timeZone} isOwner={isOwner} />
+      <Overview projectId={projectId} environment={environment} environments={environments} query={query} timeZone={timeZone} isOwner={isOwner} />
       <RecentSessions key={`${environment.id}-${queryDeps(query).join("|")}`} projectId={projectId} environment={environment} query={query} search={search} timeZone={timeZone} />
       <div className="breakdowns">
         {BREAKDOWNS.map((reports) => (
@@ -59,16 +59,15 @@ export const Dashboard = ({ projectId, environment, search, timeZone, isOwner, o
   )
 }
 
-const Overview = ({ projectId, environment, query, timeZone, isOwner }: {
+const Overview = ({ projectId, environment, environments, query, timeZone, isOwner }: {
   projectId: ProjectId
   environment: Environment
+  environments: ReadonlyArray<Environment>
   query: ReportRangeQuery
   timeZone: string
   isOwner: boolean
 }) => {
   const [metricKey, setMetricKey] = useState<Metric>("visitors")
-  // The bucket whose Annotations are open, by name so it survives each poll.
-  const [openBucket, setOpenBucket] = useState<string>()
   const [adding, setAdding] = useState(false)
   const phone = useIsPhone()
   const complete = isComplete(query)
@@ -77,16 +76,9 @@ const Overview = ({ projectId, environment, query, timeZone, isOwner }: {
     [environment.id, ...queryDeps(query)]
   )
   const metric = METRICS.find((m) => m.key === metricKey)!
-  const buckets = data?.series.map((b) => b.bucket) ?? []
-  const placed = data
-    ? placeAnnotations(
-      data.annotations.map((a) => ({ annotation: a, at: DateTime.toEpochMillis(a.at) })),
-      buckets,
-      data.interval,
-      timeZone
-    )
-    : []
-  const open = placed.find((p) => buckets[p.index] === openBucket)
+  const pills = useChartAnnotations(
+    data && { annotations: data.annotations, buckets: data.series.map((b) => b.bucket), interval: data.interval, timeZone }
+  )
   return (
     <>
       <div className="kpis">
@@ -107,7 +99,7 @@ const Overview = ({ projectId, environment, query, timeZone, isOwner }: {
       <div className="chart-block">
         {isOwner && complete && !adding && (
           <div className="chart-head">
-            <button type="button" className="link" onClick={() => { setAdding(true); setOpenBucket(undefined) }}>+ Add Annotation</button>
+            <button type="button" className="link" onClick={() => { setAdding(true); pills.close() }}>+ Add Annotation</button>
           </div>
         )}
         {!complete
@@ -124,33 +116,34 @@ const Overview = ({ projectId, environment, query, timeZone, isOwner }: {
               }}
               format={metric.format}
               height={phone ? 210 : 300}
-              annotations={placed.map((p) => ({ index: p.index, label: p.annotations[0]!.annotation.label, count: p.annotations.length }))}
-              selectedAnnotation={open?.index}
+              {...pills.chart}
               onAnnotation={(index) => {
                 setAdding(false)
-                setOpenBucket((current) => (current === buckets[index] ? undefined : buckets[index]))
+                pills.chart.onAnnotation(index)
               }}
             />
           )
           : error
           ? <Notice alert>Could not load the overview.</Notice>
           : <div style={{ height: phone ? 210 : 300 }} />}
-        {open && (
+        {pills.open && (
           <AnnotationDetails
             projectId={projectId}
-            annotations={open.annotations.map((p) => p.annotation)}
+            annotations={pills.open}
+            environments={environments}
             timeZone={timeZone}
             isOwner={isOwner}
-            onClose={() => setOpenBucket(undefined)}
+            onClose={pills.close}
             onDeleted={reload}
           />
         )}
         {adding && (
-          <AddAnnotation
+          <AnnotationForm
             projectId={projectId}
             timeZone={timeZone}
+            environments={environments}
             onCancel={() => setAdding(false)}
-            onAdded={async () => {
+            onSaved={async () => {
               setAdding(false)
               await reload()
             }}

@@ -1,5 +1,6 @@
-// Where Annotations go on the overview chart, and the small conversions their form and details
-// need: local wall-clock times in the Project's time zone, and links in a plain-text description.
+// Where Annotations go on the time charts, and the small conversions their form and details
+// need: local wall-clock times in the Project's time zone, links in a plain-text description, and
+// the Environments an Annotation applies to.
 import type { ReportInterval } from "@flock/shared"
 
 const formatters = new Map<string, Intl.DateTimeFormat>()
@@ -93,3 +94,25 @@ export const linkParts = (text: string): Array<{ text: string; href?: string }> 
   if (last < text.length) parts.push({ text: text.slice(last) })
   return parts
 }
+
+/**
+ * The Environments an Annotation form sends: `all`, or the chosen ones. Undefined for an empty
+ * choice, which the server refuses.
+ */
+export const annotationEnvironments = <Id extends string>(
+  choice: "all" | "some",
+  chosen: ReadonlyArray<Id>
+): "all" | readonly [Id, ...Array<Id>] | undefined => {
+  if (choice === "all") return "all"
+  const [first, ...rest] = chosen
+  return first === undefined ? undefined : [first, ...rest]
+}
+
+/** `All Environments`, or the chosen Environments' names in the Project's order: `production, staging`. */
+export const environmentsLabel = (
+  environments: "all" | ReadonlyArray<string>,
+  projectEnvironments: ReadonlyArray<{ readonly id: string; readonly name: string }>
+) =>
+  environments === "all"
+    ? "All Environments"
+    : projectEnvironments.filter((e) => environments.includes(e.id)).map((e) => e.name).join(", ")
