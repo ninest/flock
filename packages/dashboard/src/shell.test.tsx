@@ -1,33 +1,15 @@
 // @vitest-environment happy-dom
 import type { ReportRangeQuery } from "@flock/shared"
 import { act } from "react"
-import { createRoot, type Root } from "react-dom/client"
-import { afterEach, describe, expect, it } from "vitest"
+import { describe, expect, it } from "vitest"
 import { CustomDates } from "./shell.tsx"
-
-// React only runs effects inside act() when told it is under test.
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
-let root: Root | undefined
-let container: HTMLElement | undefined
-
-afterEach(() => {
-  act(() => root?.unmount())
-  container?.remove()
-  root = undefined
-})
+import { render } from "./test-support.tsx"
 
 const custom = (from: string, to: string): ReportRangeQuery => ({ period: "custom", from, to })
 
 /** Renders the custom-date inputs for `query`, as the shell does on every navigation; reuses the mounted component. */
-const show = (query: ReportRangeQuery, onChange: (query: ReportRangeQuery) => void = () => {}) => {
-  if (!root) {
-    container = document.body.appendChild(document.createElement("div"))
-    root = createRoot(container)
-  }
-  act(() => root!.render(<CustomDates query={query} onChange={onChange} />))
-  return container!
-}
+const show = (query: ReportRangeQuery, onChange: (query: ReportRangeQuery) => void = () => {}) =>
+  render(<CustomDates query={query} onChange={onChange} />)
 
 const input = (page: HTMLElement, label: "From" | "To") => page.querySelector<HTMLInputElement>(`input[aria-label=${label}]`)!
 
