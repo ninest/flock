@@ -51,7 +51,9 @@ import { parseTrustedProxies } from "../src/client-ip.ts"
 import { PgLive } from "../src/db.ts"
 import { GeoIp } from "../src/geoip.ts"
 import { AppRoutes } from "../src/http.ts"
+import { makeEnvironmentKey } from "../src/keys.ts"
 import { MigratorLive } from "../src/migrations/index.ts"
+import { Projects } from "../src/projects.ts"
 import { Seed } from "../src/seed.ts"
 import { type OidcStub, startOidcStub } from "./oidc-stub.ts"
 import { TestDatabase } from "./test-database.ts"
@@ -190,12 +192,15 @@ export class Harness extends Context.Service<Harness, {
   /**
    * Creates a Project through the Projects API as `h.client` (or `as`), adds the other
    * Environments (`production` always exists), and returns it with their keys.
+   * `withoutProduction` instead creates exactly `environments`, owned by `h.client`, the way only
+   * seeding can (the API always adds `production` and never removes it).
    */
   readonly createProject: (options: {
     readonly name?: string
     readonly timeZone?: string
     readonly environments?: ReadonlyArray<string>
     readonly as?: Browser
+    readonly withoutProduction?: boolean
   }) => Effect.Effect<Project>
   /** Convenience: the Pageview count for an Environment in `[from, to)` (ISO strings). */
   readonly pageviewCount: (
@@ -317,6 +322,16 @@ export class Harness extends Context.Service<Harness, {
         const createProject: Harness["Service"]["createProject"] = (o) =>
           Effect.gen(function*() {
             const api = o.as?.client ?? client
+            if (o.withoutProduction) {
+              const owner = yield* Context.get(deps, Access).memberByEmail(admin.email)
+              const projectId = yield* Context.get(deps, Projects).create({
+                name: o.name ?? `Project ${++projects}`,
+                timeZone: o.timeZone ?? "UTC",
+                owner: Option.map(owner, (m) => m.id),
+                environments: (o.environments ?? []).map((name) => ({ name, key: makeEnvironmentKey(name) }))
+              })
+              return yield* client.projects.get({ params: { projectId } })
+            }
             const project = yield* api.projects.create({
               payload: { name: o.name ?? `Project ${++projects}`, timeZone: o.timeZone ?? "UTC" }
             })

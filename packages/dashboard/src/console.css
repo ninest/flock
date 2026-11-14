@@ -160,6 +160,11 @@ a.row:hover, button.row:hover { background: var(--hover); }
 .rows-select .row-head { padding-left: 12px; }
 .rows-end .row:last-child { border-bottom: 0; }
 .row .muted { color: var(--muted); }
+/* The Projects page: a live count in green, and a 7-day sparkline at the end of each row. */
+.row .live-count { color: var(--good); }
+.row .spark-cell { display: flex; justify-content: flex-end; overflow: visible; }
+.sparkline { display: block; overflow: visible; }
+.sparkline polyline { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
 /* Breakdown rows: a faint bar behind the whole row, as wide as the row's share. */
 .rows-bars .row { border-bottom: 0; padding: 9px 10px; margin: 6px 0; }
 .rows-bars .row::before { content: ""; position: absolute; z-index: -1; inset: 0 auto 0 0; width: var(--bar); border-radius: 6px; background: var(--accent-bar); }
