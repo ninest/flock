@@ -39,7 +39,7 @@ import type { SqlError } from "effect/sql/SqlError"
 import type { Fragment } from "effect/sql/Statement"
 import { matchesFilters, pathOf, referringDomainOf } from "./filters.ts"
 import { Annotations } from "./annotations.ts"
-import { Projects } from "./projects.ts"
+import { type EnvironmentAccess, Projects } from "./projects.ts"
 import { addDays, localDate, type ReportRange, type ReportScope, resolvePreviousRange, resolveRange } from "./report-range.ts"
 import { SESSION_TIMEOUT_MINUTES } from "./sessions.ts"
 
@@ -47,6 +47,11 @@ import { SESSION_TIMEOUT_MINUTES } from "./sessions.ts"
 export interface DateRange {
   readonly from: DateTime.Utc
   readonly to: DateTime.Utc
+}
+
+/** A Visitor report's request: the Visitor (from the URL path) besides the report's query. */
+export interface VisitorRequest<Q> extends ReportRequest<Q> {
+  readonly visitorId: string
 }
 
 /**
@@ -98,11 +103,11 @@ export class Queries extends Context.Service<Queries, {
   readonly visitors: (request: ReportRequest<VisitorsQuery>) => Effect.Effect<VisitorList, EnvironmentNotFound | VisitorsNeedPersistentMode>
   /** One Visitor over all time in the Environment (persistent Tracking mode only); ignores any range. */
   readonly visitorProfile: (
-    request: ReportRequest<{ readonly visitorId: string }>
+    request: VisitorRequest<{}>
   ) => Effect.Effect<VisitorProfile, VisitorErrors>
   /** One Visitor's Sessions in the Environment over all time, most recent activity first, paged like Recent sessions. */
   readonly visitorSessions: (
-    request: ReportRequest<VisitorSessionsQuery & { readonly visitorId: string }>
+    request: VisitorRequest<VisitorSessionsQuery>
   ) => Effect.Effect<SessionList, VisitorErrors>
 }>()("flock/Queries") {
   static readonly layer = Layer.effect(Queries, Effect.gen(function*() {
@@ -113,13 +118,16 @@ export class Queries extends Context.Service<Queries, {
     /** Fails with EnvironmentNotFound unless the Member may read the Environment; returns its time zone. */
     const checkAccess = (request: ReportRequest<unknown>) => projects.environment(request.member, request.environmentId)
 
-    /** The access check, then the query's date range picker resolved to local days in the Project's time zone. */
-    const checkAccessAndResolveRange = (request: ReportRequest<ReportRangeQuery>) =>
+    /** The access check `access`, then the query's date range picker resolved to local days in the Project's time zone. */
+    const resolveScope = <E>(request: ReportRequest<ReportRangeQuery>, access: Effect.Effect<EnvironmentAccess, E>) =>
       Effect.gen(function*() {
-        const environment = yield* checkAccess(request)
+        const environment = yield* access
         const range = resolveRange(request.query, environment.timeZone, yield* DateTime.now)
         return { environmentId: environment.id, projectId: environment.projectId, range, filters: request.query.filters } satisfies ReportScope
       })
+
+    /** The report access check (any role), then the query's range, as `resolveScope`. */
+    const checkAccessAndResolveRange = (request: ReportRequest<ReportRangeQuery>) => resolveScope(request, checkAccess(request))
 
     /** The condition on an Event row (`ts`, `properties`) for the scope's local range and filters. */
     const inScope = ({ filters, range }: ReportScope) => sql`
@@ -716,10 +724,10 @@ export class Queries extends Context.Service<Queries, {
     // Visitors (persistent Tracking mode).
 
     /** The persistent-mode access check, then VisitorNotFound unless the Visitor has an Event in the Environment. */
-    const checkVisitor = (request: ReportRequest<{ readonly visitorId: string }>) =>
+    const checkVisitor = (request: VisitorRequest<unknown>) =>
       Effect.gen(function*() {
         const environment = yield* projects.persistentEnvironment(request.member, request.environmentId)
-        const { visitorId } = request.query
+        const { visitorId } = request
         const [row] = yield* sql<{ readonly firstSeenAt: Date; readonly lastSeenAt: Date; readonly sessions: number; readonly events: number }>`
           SELECT min(ts) AS first_seen_at, max(ts) AS last_seen_at,
                  count(DISTINCT session_id)::int AS sessions, count(*)::int AS events
@@ -730,22 +738,16 @@ export class Queries extends Context.Service<Queries, {
         return { environment, totals: row }
       })
 
-    const visitorReport = <Q, A, E extends VisitorErrors>(
+    const visitorReport = <R extends ReportRequest<unknown>, A, E extends VisitorErrors>(
       name: string,
-      run: (request: ReportRequest<Q>) => Effect.Effect<A, E | SqlError>
-    ): (request: ReportRequest<Q>) => Effect.Effect<A, E> =>
+      run: (request: R) => Effect.Effect<A, E | SqlError>
+    ): (request: R) => Effect.Effect<A, E> =>
       (request) => run(request).pipe(Effect.catchTag("SqlError", Effect.die), Effect.withSpan(`Queries.${name}`))
 
     const visitorList = visitorReport("visitors", (request: ReportRequest<VisitorsQuery>) =>
       Effect.gen(function*() {
-        const environment = yield* projects.persistentEnvironment(request.member, request.environmentId)
-        const now = yield* DateTime.now
-        const scope: ReportScope = {
-          environmentId: environment.id,
-          projectId: environment.projectId,
-          range: resolveRange(request.query, environment.timeZone, now),
-          filters: request.query.filters
-        }
+        const scope = yield* resolveScope(request, projects.persistentEnvironment(request.member, request.environmentId))
+        const { environmentId, projectId } = scope
         const { cursor, search } = request.query
         const after = cursor === undefined ? undefined : parseCursor(cursor)
         const rows = yield* sql<VisitorRow>`
@@ -754,14 +756,14 @@ export class Queries extends Context.Service<Queries, {
             SELECT DISTINCT visitor_id FROM scoped
             WHERE visitor_id IS NOT NULL
               ${search === undefined ? sql`` : sql`AND visitor_id IN (
-                SELECT visitor_id FROM visitor_alias WHERE project_id = ${environment.projectId} AND starts_with(visitor_id, ${search})
+                SELECT visitor_id FROM visitor_alias WHERE project_id = ${projectId} AND starts_with(visitor_id, ${search})
               )`}
           ),
           totals AS (
             SELECT visitor_id, min(ts) AS first_seen_at, max(ts) AS last_seen_at,
                    count(DISTINCT session_id)::int AS sessions, count(*)::int AS events
             FROM event
-            WHERE environment_id = ${environment.id} AND visitor_id IN (SELECT visitor_id FROM listed)
+            WHERE environment_id = ${environmentId} AND visitor_id IN (SELECT visitor_id FROM listed)
             GROUP BY visitor_id
           ),
           page AS (
@@ -771,7 +773,7 @@ export class Queries extends Context.Service<Queries, {
             LIMIT ${VISITORS_PAGE_SIZE + 1}
           )
           SELECT p.visitor_id, p.first_seen_at, p.last_seen_at, p.sessions, p.events,
-                 EXISTS (SELECT 1 FROM visitor_alias a WHERE a.project_id = ${environment.projectId} AND a.visitor_id = p.visitor_id) AS identified,
+                 EXISTS (SELECT 1 FROM visitor_alias a WHERE a.project_id = ${projectId} AND a.visitor_id = p.visitor_id) AS identified,
                  fe.properties ->> '$country' AS country, fe.properties ->> '$device' AS device,
                  fe.properties ->> '$browser' AS browser,
                  ${referringDomainOf(sql, "fp.properties")} AS referring_domain
@@ -779,17 +781,17 @@ export class Queries extends Context.Service<Queries, {
           -- The latest Session: the one holding the Visitor's last Event.
           LEFT JOIN LATERAL (
             SELECT session_id FROM event
-            WHERE environment_id = ${environment.id} AND visitor_id = p.visitor_id AND ts = p.last_seen_at
+            WHERE environment_id = ${environmentId} AND visitor_id = p.visitor_id AND ts = p.last_seen_at
             ORDER BY received_at DESC LIMIT 1
           ) ls ON TRUE
           LEFT JOIN LATERAL (
             SELECT properties FROM event
-            WHERE environment_id = ${environment.id} AND session_id = ls.session_id
+            WHERE environment_id = ${environmentId} AND session_id = ls.session_id
             ORDER BY ts, received_at LIMIT 1
           ) fe ON TRUE
           LEFT JOIN LATERAL (
             SELECT properties FROM event
-            WHERE environment_id = ${environment.id} AND session_id = ls.session_id AND name = '$pageview'
+            WHERE environment_id = ${environmentId} AND session_id = ls.session_id AND name = '$pageview'
             ORDER BY ts, received_at LIMIT 1
           ) fp ON TRUE
           ORDER BY p.last_seen_at DESC, p.visitor_id DESC`
@@ -812,10 +814,10 @@ export class Queries extends Context.Service<Queries, {
         } satisfies VisitorList
       }))
 
-    const visitorProfile = visitorReport("visitorProfile", (request: ReportRequest<{ readonly visitorId: string }>) =>
+    const visitorProfile = visitorReport("visitorProfile", (request: VisitorRequest<{}>) =>
       Effect.gen(function*() {
         const { environment, totals } = yield* checkVisitor(request)
-        const { visitorId } = request.query
+        const { visitorId } = request
         const { timeZone } = environment
         const today = localDate(yield* DateTime.now, timeZone)
         const firstDay = addDays(today, -(VISITOR_ACTIVITY_DAYS - 1))
@@ -849,14 +851,14 @@ export class Queries extends Context.Service<Queries, {
 
     const visitorSessions = visitorReport(
       "visitorSessions",
-      (request: ReportRequest<VisitorSessionsQuery & { readonly visitorId: string }>) =>
+      (request: VisitorRequest<VisitorSessionsQuery>) =>
         Effect.gen(function*() {
           const { environment } = yield* checkVisitor(request)
           return yield* pageOfSessions(
             environment.id,
             sql``,
             sql`SELECT DISTINCT session_id FROM event
-                WHERE environment_id = ${environment.id} AND visitor_id = ${request.query.visitorId} AND session_id IS NOT NULL`,
+                WHERE environment_id = ${environment.id} AND visitor_id = ${request.visitorId} AND session_id IS NOT NULL`,
             request.query.cursor
           )
         })

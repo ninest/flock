@@ -118,9 +118,9 @@ const VisitorsHandlers = HttpApiBuilder.group(FlockApi, "visitors", Effect.fn(fu
     .handle("list", ({ params: { environmentId }, query }) =>
       CurrentMember.use(({ id: member }) => queries.visitors({ member, environmentId, query })))
     .handle("profile", ({ params: { environmentId, visitorId } }) =>
-      CurrentMember.use(({ id: member }) => queries.visitorProfile({ member, environmentId, query: { visitorId } })))
+      CurrentMember.use(({ id: member }) => queries.visitorProfile({ member, environmentId, visitorId, query: {} })))
     .handle("sessions", ({ params: { environmentId, visitorId }, query }) =>
-      CurrentMember.use(({ id: member }) => queries.visitorSessions({ member, environmentId, query: { ...query, visitorId } })))
+      CurrentMember.use(({ id: member }) => queries.visitorSessions({ member, environmentId, visitorId, query })))
 }))
 
 const AnnotationsHandlers = HttpApiBuilder.group(FlockApi, "annotations", Effect.fn(function*(handlers) {
