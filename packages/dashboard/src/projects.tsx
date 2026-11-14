@@ -1,23 +1,72 @@
-// The Member's Projects: the Projects page (one table), New Project, and one Project's page,
-// which shows the Dashboard, Live or Events tab.
-import type { EventPropertyFilter, ProjectId } from "@flock/shared"
+// The Member's Projects: the Projects page (one table, with each Project's `production` numbers),
+// New Project, and one Project's page, which shows the Dashboard, Live or Events tab.
+import type { EventPropertyFilter, ProductionNumbers, ProjectId } from "@flock/shared"
 import { Link, useNavigate } from "@tanstack/react-router"
 import type { FormEvent } from "react"
 import { request } from "./api.ts"
+import { formatChange } from "./change.ts"
 import { CustomEvents } from "./custom-events.tsx"
 import { Dashboard } from "./dashboard.tsx"
+import { formatCount } from "./format.ts"
 import { Live } from "./live.tsx"
 import { type ProjectSearch, reportQuery, withFilter, withQuery } from "./project-search.ts"
 import { SessionPage } from "./sessions.tsx"
 import { environmentOf, type ProjectChrome, Shell } from "./shell.tsx"
-import { Notice, Rows, useAction } from "./ui.tsx"
+import { sparklinePoints } from "./sparkline.ts"
+import { Notice, Rows, useAction, wide } from "./ui.tsx"
 import { usePoll } from "./use-poll.ts"
 
 /** The browser's time zone, the default for a new Project. */
 const browserTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone
 
+const SPARK_WIDTH = 96
+const SPARK_HEIGHT = 22
+
+/** Visitors per day over the last 7 days, without axes. */
+const Sparkline = ({ numbers }: { numbers: ProductionNumbers }) => (
+  <svg
+    className="sparkline"
+    width={SPARK_WIDTH}
+    height={SPARK_HEIGHT}
+    viewBox={`0 0 ${SPARK_WIDTH} ${SPARK_HEIGHT}`}
+    role="img"
+    aria-label={`Visitors per day: ${numbers.series.map((d) => d.visitors).join(", ")}`}
+  >
+    <polyline points={sparklinePoints(numbers.series.map((d) => d.visitors), SPARK_WIDTH, SPARK_HEIGHT)} />
+  </svg>
+)
+
+/**
+ * A Project row's four number cells, for its `production` Environment: live Visitors, Visitors over
+ * the last 7 days, the change against the 7 before, and the sparkline. Empty without `production`
+ * (or before the numbers load).
+ */
+const NumberCells = ({ numbers }: { numbers: ProductionNumbers | null | undefined }) => {
+  if (!numbers) {
+    return (
+      <>
+        <span className="muted" {...wide}>–</span>
+        <span className="muted">–</span>
+        <span className="muted" {...wide}>–</span>
+        <span />
+      </>
+    )
+  }
+  const change = formatChange(numbers.visitors, numbers.previousVisitors, "percent")
+  return (
+    <>
+      <span className={numbers.live > 0 ? "live-count" : "muted"} {...wide}>{formatCount(numbers.live)}</span>
+      <span>{formatCount(numbers.visitors)}</span>
+      <span className="kpi-change" data-tone={change.tone} title="Against the 7 days before" {...wide}>{change.label}</span>
+      <span className="spark-cell"><Sparkline numbers={numbers} /></span>
+    </>
+  )
+}
+
 export const ProjectsPage = () => {
   const { data, error } = usePoll(() => request((api) => api.projects.list()), [])
+  const { data: numbers } = usePoll(() => request((api) => api.projects.numbers()), [], 30_000)
+  const numbersOf = new Map(numbers?.map((row) => [row.projectId, row.production]))
   return (
     <Shell section="projects">
       <div className="page">
@@ -29,12 +78,22 @@ export const ProjectsPage = () => {
         {!data && !error ? <Notice>Loading…</Notice> : null}
         {data?.length === 0 ? <Notice>No Projects yet. Create one to get a key for the browser script.</Notice> : null}
         {data && data.length > 0 && (
-          <Rows variant="end" columns={[{ label: "Project" }, { label: "Environments", width: 120 }, { label: "Your role", width: 96 }]}>
+          <Rows
+            variant="end"
+            columns={[
+              { label: "Project" },
+              { label: "Live", width: 56, wide: true },
+              { label: "Visitors, 7 days", width: 120 },
+              { label: "Change", width: 72, wide: true },
+              { label: "Last 7 days", width: SPARK_WIDTH },
+              { label: "Your role", width: 80, wide: true }
+            ]}
+          >
             {data.map((project) => (
               <Link key={project.id} role="row" className="row" to="/projects/$projectId" params={{ projectId: project.id }}>
                 <span style={{ fontWeight: 500 }}>{project.name}</span>
-                <span>{project.environments.length}</span>
-                <span className="muted" style={{ fontFamily: "var(--sans)" }}>{project.role === "owner" ? "Owner" : "Viewer"}</span>
+                <NumberCells numbers={numbersOf.get(project.id)} />
+                <span className="muted" style={{ fontFamily: "var(--sans)" }} {...wide}>{project.role === "owner" ? "Owner" : "Viewer"}</span>
               </Link>
             ))}
           </Rows>
