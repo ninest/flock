@@ -19,7 +19,8 @@ import { barStyle, Notice, pending, Rows, StatusDot, useNow, wide } from "./ui.t
 import { usePoll } from "./use-poll.ts"
 import { activityWeeks } from "./visitor-activity.ts"
 
-const errorMessage = (error: unknown) => (error as Error).message
+/** The message of a failed request; undefined while there is no error yet. */
+const errorMessage = (error: unknown) => error instanceof Error ? error.message : undefined
 
 const NO_VISITORS = "This Project uses cookieless Tracking mode, where a Visitor starts afresh every day. Persistent mode (in Project settings) keeps Visitors across days."
 
@@ -91,7 +92,11 @@ const VisitorRows = ({ projectId, environment, search, timeZone }: {
         ]}
       >
         {!complete ? <Notice>Pick both dates.</Notice> : !data ? (
-          errorMessage(error) === "VisitorsNeedPersistentMode" ? <Notice>{NO_VISITORS}</Notice> : pending(error, "Visitors")
+          !error
+            ? <Notice>Loading…</Notice>
+            : errorMessage(error) === "VisitorsNeedPersistentMode"
+            ? <Notice>{NO_VISITORS}</Notice>
+            : <Notice alert>{errorMessage(error)}</Notice>
         ) : visitors.length === 0 ? (
           <Notice>{search.q ? <>No identified Visitor ID starting with <code>{search.q}</code> in this range.</> : "No Visitors in this range."}</Notice>
         ) : visitors.map((v) => (
