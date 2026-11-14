@@ -84,6 +84,56 @@ layer(Harness.layer({ geoIp }))("Engagement on pages", (it) => {
         { value: "/", visitors: 1, pageviews: 1, bounceRate: 1, exitRate: 1, timeOnPage: null }
       ])
     }))
+
+  it.effect("a $path Filter counts a page's Pageviews but reads the rest of their Sessions for its columns", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* h.createProject({})
+      const send = (ip: string, ...events: ReadonlyArray<IngestEvent>) => h.ingest(production!.key, events, { ip })
+      // Session 1: / -> /pricing (60s later) -> /signup (120s later).
+      yield* at("2026-03-01T09:00:00Z")
+      yield* send("198.51.100.1", visit("/"))
+      yield* at("2026-03-01T09:01:00Z")
+      yield* send("198.51.100.1", visit("/pricing"))
+      yield* at("2026-03-01T09:03:00Z")
+      yield* send("198.51.100.1", visit("/signup"))
+      // Session 2: enters on /pricing, then a Custom event: not a Bounce, and left from /pricing.
+      yield* at("2026-03-01T10:00:00Z")
+      yield* send("198.51.100.2", visit("/pricing"))
+      yield* at("2026-03-01T10:05:00Z")
+      yield* send("198.51.100.2", customEvent("signup_clicked"))
+
+      // Entered by Session 2 only (no Bounce); left from 1 of 2 Pageviews; 120s in Session 1.
+      const pricing = { value: "/pricing", visitors: 2, pageviews: 2, bounceRate: 0, exitRate: 0.5, timeOnPage: 120 }
+      const rows = (yield* h.top(production!.id, "pages", day())).rows
+      assert.deepStrictEqual(rows.find((row) => row.value === "/pricing"), pricing)
+      const onPricing = day([{ eventProperty: "$path", op: "is", value: "/pricing" }])
+      assert.deepStrictEqual((yield* h.top(production!.id, "pages", onPricing)).rows, [pricing])
+    }))
+
+  it.effect("a Filter chooses Sessions, but whether one is a Bounce reads all its Events", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* h.createProject({})
+      const send = (ip: string, ...events: ReadonlyArray<IngestEvent>) => h.ingest(production!.key, events, { ip })
+      // On Feb 28 (the previous period) and on Mar 1: / -> /pricing, one Session each; only one
+      // of its Events is on /pricing.
+      for (const date of ["2026-02-28", "2026-03-01"]) {
+        yield* at(`${date}T09:00:00Z`)
+        yield* send("198.51.100.1", visit("/"))
+        yield* at(`${date}T09:01:00Z`)
+        yield* send("198.51.100.1", visit("/pricing"))
+      }
+
+      const onPricing = day([{ eventProperty: "$path", op: "is", value: "/pricing" }])
+      const overview = yield* h.overview(production!.id, onPricing)
+      assert.deepStrictEqual([overview.totals.sessions, overview.totals.bounceRate], [1, 0])
+      assert.deepStrictEqual([overview.previous.totals.sessions, overview.previous.totals.bounceRate], [1, 0])
+      assert.deepStrictEqual(overview.series.find((b) => b.sessions > 0)?.bounceRate, 0)
+      assert.deepStrictEqual((yield* h.top(production!.id, "entryPages", onPricing)).rows, [
+        { value: "/pricing", visitors: 1, bounceRate: 0 }
+      ])
+    }))
 })
 
 layer(Harness.layer({ geoIp }))("Engagement on sources and devices", (it) => {

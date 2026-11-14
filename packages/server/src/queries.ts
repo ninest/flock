@@ -120,32 +120,48 @@ export class Queries extends Context.Service<Queries, {
         return { environmentId: environment.id, projectId: environment.projectId, range, filters: request.query.filters } satisfies ReportScope
       })
 
+    /** The condition on an Event row (`ts`, `properties`) for the scope's local range and filters. */
+    const inScope = ({ filters, range }: ReportScope) => sql`
+      ts >= (${range.from}::date::timestamp AT TIME ZONE ${range.timeZone})
+      AND ts < ((${range.to}::date + 1)::timestamp AT TIME ZONE ${range.timeZone})
+      ${range.until === null ? sql`` : sql`AND ts < (${range.until}::timestamp AT TIME ZONE ${range.timeZone})`}
+      AND ${matchesFilters(sql, filters)}`
+
     /**
      * CTE `scoped`: the Environment's Events in the range that match the filters (only Custom
      * events with `customOnly`), with `bucket`, their local bucket start.
      */
-    const scopedEvents = ({ environmentId, filters, range }: ReportScope, options: { readonly customOnly?: boolean } = {}) => sql`
+    const scopedEvents = (scope: ReportScope, options: { readonly customOnly?: boolean } = {}) => sql`
       scoped AS (
-        SELECT e.*, date_trunc(${range.interval}, e.ts AT TIME ZONE ${range.timeZone}) AS bucket
+        SELECT e.*, date_trunc(${scope.range.interval}, e.ts AT TIME ZONE ${scope.range.timeZone}) AS bucket
         FROM event e
-        WHERE e.environment_id = ${environmentId}
+        WHERE e.environment_id = ${scope.environmentId}
           ${options.customOnly ? sql`AND e.name NOT LIKE '$%'` : sql``}
-          AND e.ts >= (${range.from}::date::timestamp AT TIME ZONE ${range.timeZone})
-          AND e.ts < ((${range.to}::date + 1)::timestamp AT TIME ZONE ${range.timeZone})
-          ${range.until === null ? sql`` : sql`AND e.ts < (${range.until}::timestamp AT TIME ZONE ${range.timeZone})`}
-          AND ${matchesFilters(sql, filters)}
+          AND ${inScope(scope)}
       )`
 
     /**
-     * CTE `sessions` over `scoped`: per Session in range, `bucket` where it starts, `duration` in
-     * seconds, and `bounce`, a Session with a single Event.
+     * The Filters choose Sessions (those with an Event in `scoped`); what a Session is (its
+     * Events, its first and last Pageview) comes from all its Events in the Environment.
      */
-    const scopedSessions = sql`
+    const ofScopedSessions = (environmentId: EnvironmentId) =>
+      sql`environment_id = ${environmentId} AND session_id IN (SELECT session_id FROM scoped)`
+
+    /**
+     * CTE `sessions` over `scoped`: per Session in range, `bucket` where it starts and `duration`
+     * in seconds over its Events in `scoped`, and `bounce`, a Session with a single Event (of all its Events).
+     */
+    const scopedSessions = (environmentId: EnvironmentId) => sql`
       sessions AS (
-        SELECT session_id, min(bucket) AS bucket,
-               extract(epoch FROM max(ts) - min(ts)) AS duration, count(*) = 1 AS bounce
-        FROM scoped WHERE session_id IS NOT NULL
-        GROUP BY session_id
+        SELECT s.session_id, s.bucket, s.duration,
+               (SELECT count(*) FROM (
+                  SELECT 1 FROM event WHERE environment_id = ${environmentId} AND session_id = s.session_id LIMIT 2
+                ) two) = 1 AS bounce
+        FROM (
+          SELECT session_id, min(bucket) AS bucket, extract(epoch FROM max(ts) - min(ts)) AS duration
+          FROM scoped WHERE session_id IS NOT NULL
+          GROUP BY session_id
+        ) s
       )`
 
     /** CTE `buckets`: every local bucket start in the range. */
@@ -185,10 +201,10 @@ export class Queries extends Context.Service<Queries, {
       Effect.gen(function*() {
         const { range } = scope
         const [totals] = yield* sql<NumbersRow>`
-          WITH ${scopedEvents(scope)}, ${scopedSessions}
+          WITH ${scopedEvents(scope)}, ${scopedSessions(scope.environmentId)}
           SELECT ev.*, se.* FROM (SELECT ${eventNumbers} FROM scoped) ev, (SELECT ${sessionNumbers} FROM sessions) se`
         const series = yield* sql<NumbersRow & { readonly bucket: string }>`
-          WITH ${scopedEvents(scope)}, ${scopedSessions}, ${buckets(range)}
+          WITH ${scopedEvents(scope)}, ${scopedSessions(scope.environmentId)}, ${buckets(range)}
           SELECT to_char(b.bucket, ${bucketLabel(range)}) AS bucket,
                  coalesce(ev.visitors, 0) AS visitors, coalesce(ev.pageviews, 0) AS pageviews,
                  coalesce(se.sessions, 0) AS sessions, se.bounce_rate, se.visit_duration
@@ -222,10 +238,14 @@ export class Queries extends Context.Service<Queries, {
         }
       }))
 
-    /** The first (or last) Pageview of each Session in the range, as `properties`, `visitor_id` and `session_id`. */
-    const sessionPageview = (which: "first" | "last") => sql`
-      SELECT DISTINCT ON (session_id) properties, visitor_id, session_id FROM scoped
-      WHERE name = '$pageview' AND session_id IS NOT NULL
+    /**
+     * The first (or last) Pageview of each Session in the range, as `properties`, `visitor_id` and
+     * `session_id`: of its Pageviews in `scoped`, or with `whole` of all its Pageviews in the Environment.
+     */
+    const sessionPageview = (which: "first" | "last", whole?: EnvironmentId) => sql`
+      SELECT DISTINCT ON (session_id) properties, visitor_id, session_id
+      FROM ${whole === undefined ? sql`scoped WHERE session_id IS NOT NULL` : sql`event WHERE ${ofScopedSessions(whole)}`}
+        AND name = '$pageview'
       ORDER BY session_id, ${which === "first" ? sql`ts ASC, received_at ASC` : sql`ts DESC, received_at DESC`}`
 
     const visitors = sql`count(DISTINCT visitor_id)::int AS visitors`
@@ -236,28 +256,33 @@ export class Queries extends Context.Service<Queries, {
      * One SELECT per ranked-list report, over the `scoped` and `sessions` CTEs, yielding `value`,
      * `visitors` and every optional column, `NULL` where the report doesn't fill it in.
      */
-    const topRows = (kind: TopQuery["report"]) => {
+    const topRows = (kind: TopQuery["report"], scope: ReportScope) => {
+      const { environmentId } = scope
       switch (kind) {
         case "pages":
-          // Each Pageview with the next Pageview's time in its Session (Session-ordered, on the
-          // Environment, Session and timestamp index); bounce rate by the path Sessions entered on.
+          // The Pageviews in scope (`counted`), each with the next Pageview's time in its Session,
+          // of all the Session's Pageviews (Session-ordered, on the Environment, Session and timestamp
+          // index); bounce rate by the path Sessions entered on.
           return sql`
             SELECT p.value, count(DISTINCT p.visitor_id)::int AS visitors, count(*)::int AS pageviews,
                    e.bounce_rate,
                    (count(*) FILTER (WHERE p.last))::float8 / count(*) AS exit_rate,
                    avg(extract(epoch FROM p.next_ts - p.ts))::float8 AS time_on_page
             FROM (
-              SELECT value, visitor_id, ts, next_ts, session_id IS NOT NULL AND next_ts IS NULL AS last
+              SELECT ${pathOf(sql)} AS value, visitor_id, ts, next_ts, next_ts IS NULL AS last
               FROM (
-                SELECT ${pathOf(sql)} AS value, visitor_id, session_id, ts,
-                       CASE WHEN session_id IS NOT NULL
-                         THEN lead(ts) OVER (PARTITION BY session_id ORDER BY ts, received_at) END AS next_ts
-                FROM scoped WHERE name = '$pageview'
+                SELECT properties, visitor_id, ts, ${inScope(scope)} AS counted,
+                       lead(ts) OVER (PARTITION BY session_id ORDER BY ts, received_at) AS next_ts
+                FROM event WHERE ${ofScopedSessions(environmentId)} AND name = '$pageview'
               ) w
+              WHERE counted
+              UNION ALL
+              SELECT ${pathOf(sql)}, visitor_id, ts, NULL, FALSE
+              FROM scoped WHERE name = '$pageview' AND session_id IS NULL
             ) p
             LEFT JOIN (
               SELECT ${pathOf(sql)} AS value, ${bounceRate} AS bounce_rate
-              FROM (${sessionPageview("first")}) s JOIN sessions se USING (session_id) GROUP BY 1
+              FROM (${sessionPageview("first", environmentId)}) s JOIN sessions se USING (session_id) GROUP BY 1
             ) e ON e.value IS NOT DISTINCT FROM p.value
             GROUP BY p.value, e.bounce_rate`
         case "entryPages":
@@ -305,8 +330,8 @@ export class Queries extends Context.Service<Queries, {
         const { range } = scope
         const { report: kind } = request.query
         const rows = yield* sql<TopRowRow>`
-          WITH ${scopedEvents(scope)}, ${scopedSessions}
-          SELECT value, visitors, pageviews, bounce_rate, exit_rate, time_on_page FROM (${topRows(kind)}) t
+          WITH ${scopedEvents(scope)}, ${scopedSessions(scope.environmentId)}
+          SELECT value, visitors, pageviews, bounce_rate, exit_rate, time_on_page FROM (${topRows(kind, scope)}) t
           ORDER BY visitors DESC, value ASC NULLS LAST
           LIMIT ${TOP_LIMIT}`
         return { from: range.from, to: range.to, timeZone: range.timeZone, report: kind, rows: rows.map((row) => toTopRow(kind, row)) }
