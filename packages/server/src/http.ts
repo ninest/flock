@@ -38,8 +38,10 @@ const requestContext = (request: HttpServerRequest.HttpServerRequest, trusted: T
 
 const ProjectsHandlers = HttpApiBuilder.group(FlockApi, "projects", Effect.fn(function*(handlers) {
   const projects = yield* Projects
+  const queries = yield* Queries
   return handlers
     .handle("list", () => CurrentMember.use(({ id }) => projects.list(id)))
+    .handle("numbers", () => CurrentMember.use(({ id }) => queries.projectNumbers(id)))
     .handle("create", ({ payload }) =>
       CurrentMember.use(({ id }) =>
         projects.create({ ...payload, owner: Option.some(id) }).pipe(

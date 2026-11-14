@@ -9,13 +9,12 @@ import type {
   CustomEventDetail,
   CustomEventList,
   CustomEventStats,
-  EnvironmentId,
   EnvironmentNotFound,
   MemberId,
   NumericStats,
+  ProjectNumbers,
   Overview,
   OverviewNumbers,
-  ProjectId,
   EventPropertyFilters,
   ReportRangeQuery,
   SessionDetail,
@@ -27,7 +26,7 @@ import type {
   TopQuery,
   TopRow
 } from "@flock/shared"
-import { SESSION_EVENT_LIMIT, SessionNotFound, SESSIONS_PAGE_SIZE, TOP_LIMIT } from "@flock/shared"
+import { EnvironmentId, PRODUCTION, ProjectId, SESSION_EVENT_LIMIT, SessionNotFound, SESSIONS_PAGE_SIZE, TOP_LIMIT } from "@flock/shared"
 import { Context, DateTime, Effect, Layer } from "effect"
 import type { SqlError } from "effect/sql/SqlError"
 import type { Fragment } from "effect/sql/Statement"
@@ -56,6 +55,11 @@ export interface ReportRequest<Q> {
 type Report<Q, A> = (request: ReportRequest<Q>) => Effect.Effect<A, EnvironmentNotFound>
 
 export class Queries extends Context.Service<Queries, {
+  /**
+   * The Projects page: for every Project the Member can see, its `production` Environment's live
+   * Visitors, Visitors over the last 7 local days and the 7 before, and Visitors per local day.
+   */
+  readonly projectNumbers: (member: MemberId) => Effect.Effect<ReadonlyArray<ProjectNumbers>>
   /** Unique Visitors, Pageviews, Sessions, bounce rate and visit duration: totals and a time series. */
   readonly overview: Report<ReportRangeQuery, Overview>
   /** A ranked-list report: top pages, entry and exit pages, referrers, UTM tags or audience. */
@@ -264,6 +268,53 @@ export class Queries extends Context.Service<Queries, {
             AND ${matchesFilters(sql, request.query.filters)}`
         return row?.visitors ?? 0
       }))
+
+    // The Projects page. One query for every visible Project, each on its own local days; a
+    // Project without a `production` Environment keeps a row with null numbers.
+    const projectNumbers = (member: MemberId) =>
+      Effect.gen(function*() {
+        const instant = yield* DateTime.now
+        const now = DateTime.toDateUtc(instant)
+        const liveFrom = DateTime.toDateUtc(DateTime.subtract(instant, { minutes: LIVE_MINUTES }))
+        /** The instant a local day starts in the Project's time zone. */
+        const dayStart = (day: Fragment) => sql`((${day})::timestamp AT TIME ZONE p.time_zone)`
+        /** Unique production Visitors from local day `first` through local day `last`. */
+        const visitorsOn = (first: Fragment, last: Fragment) => sql`(
+          SELECT count(DISTINCT visitor_id)::int FROM event
+          WHERE environment_id = e.id AND ts >= ${dayStart(first)} AND ts < ${dayStart(sql`${last} + 1`)})`
+        const rows = yield* sql<{
+          readonly projectId: string
+          readonly environmentId: string | null
+          readonly live: number | null
+          readonly visitors: number | null
+          readonly previousVisitors: number | null
+          readonly series: ReadonlyArray<{ readonly date: string; readonly visitors: number }> | null
+        }>`
+          SELECT p.id AS project_id, e.id AS environment_id,
+                 (SELECT count(DISTINCT visitor_id)::int FROM event
+                  WHERE environment_id = e.id AND ts > ${liveFrom} AND ts <= ${now}) AS live,
+                 ${visitorsOn(sql`l.today - 6`, sql`l.today`)} AS visitors,
+                 ${visitorsOn(sql`l.today - 13`, sql`l.today - 7`)} AS previous_visitors,
+                 (SELECT json_agg(json_build_object('date', to_char(d.day, 'YYYY-MM-DD'), 'visitors', ${visitorsOn(sql`d.day`, sql`d.day`)}) ORDER BY d.day)
+                  FROM (SELECT l.today - n AS day FROM generate_series(0, 6) n) d) AS series
+          FROM project p
+          JOIN project_member pm ON pm.project_id = p.id AND pm.member_id = ${member}
+          CROSS JOIN LATERAL (SELECT (${now}::timestamptz AT TIME ZONE p.time_zone)::date AS today) l
+          LEFT JOIN environment e ON e.project_id = p.id AND e.name = ${PRODUCTION}
+          ORDER BY p.created_at, p.id`.pipe(Effect.orDie, Effect.withSpan("Queries.projectNumbers"))
+        return rows.map((row): ProjectNumbers => ({
+          projectId: ProjectId.make(row.projectId),
+          production: row.environmentId === null
+            ? null
+            : {
+              environmentId: EnvironmentId.make(row.environmentId),
+              live: row.live ?? 0,
+              visitors: row.visitors ?? 0,
+              previousVisitors: row.previousVisitors ?? 0,
+              series: row.series ?? []
+            }
+        }))
+      })
 
     // Reports on an exact `[from, to)` range.
 
@@ -513,6 +564,7 @@ export class Queries extends Context.Service<Queries, {
       }))
 
     return Queries.of({
+      projectNumbers,
       overview,
       top,
       liveVisitors,
