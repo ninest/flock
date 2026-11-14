@@ -129,11 +129,12 @@ export class Ingest extends Context.Service<Ingest, {
                 properties: sql.json(enrichment.enrich(event.properties ?? {}, audience))
               }
             }))
-            const current = (sessionId: string): string => {
-              const next = joinedInto.get(sessionId)
-              return next === undefined ? sessionId : current(next)
+            /** The Session that `sessionId` is part of by the end of the batch, following every join after it was assigned. */
+            const survivingSession = (sessionId: string): string => {
+              const joined = joinedInto.get(sessionId)
+              return joined === undefined ? sessionId : survivingSession(joined)
             }
-            const rows = assigned.map((row) => ({ ...row, sessionId: current(row.sessionId) }))
+            const rows = assigned.map((row) => ({ ...row, sessionId: survivingSession(row.sessionId) }))
             if (Arr.isArrayNonEmpty(rows)) yield* sql`INSERT INTO event ${sql.insert(rows)}`
           }))
           return uuids.length
