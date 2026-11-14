@@ -228,17 +228,21 @@ const PropertyStats = ({ environment, detail, query, keys, search, onChoose }: {
   search: ProjectSearch
   onChoose: (choice: ChartChoice) => void
 }) => {
-  const { data } = usePoll(
-    () =>
-      Promise.all(keys.map((eventProperty) =>
+  // Each property's statistics under its own key: one that fails to load leaves only its own row
+  // empty, and when the event's numeric properties change, none is shown under another's name.
+  const { data: stats } = usePoll(
+    async () => {
+      const loaded = await Promise.all(keys.map((eventProperty) =>
         request((api) => api.customEvents.stats({ params: { environmentId: environment.id }, query: { ...query, name: detail.name, eventProperty } }))
-      )),
+          .then((stats) => [eventProperty, stats] as const, () => undefined)
+      ))
+      return new Map(loaded.filter((entry) => entry !== undefined))
+    },
     [environment.id, detail.name, keys.join("\n"), ...queryDeps(query)]
   )
   const charted = chartedProperty(keys, search.number)!
   const stat = search.stat ?? "average"
-  const stats = data?.length === keys.length ? data : undefined
-  const chartedStats = stats?.[keys.indexOf(charted)]
+  const chartedStats = stats?.get(charted)
   return (
     <div className="detail-block" data-testid="custom-event-stats">
       <Rows
@@ -253,8 +257,8 @@ const PropertyStats = ({ environment, detail, query, keys, search, onChoose }: {
           { label: "Max", width: 64, wide: true }
         ]}
       >
-        {keys.map((key, i) => {
-          const cells = <StatsCells eventProperty={key} totals={stats?.[i]?.totals} />
+        {keys.map((key) => {
+          const cells = <StatsCells eventProperty={key} totals={stats?.get(key)?.totals} />
           return keys.length > 1
             ? (
               <button
