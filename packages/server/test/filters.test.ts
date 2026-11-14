@@ -1,10 +1,14 @@
 // Property filters: every report narrowed to the Events that match, observed through the
 // reports and Custom events APIs.
 import { assert, layer } from "@effect/vitest"
-import type { EventPropertyFilter } from "@flock/shared"
+import type { EventPropertyFilter, TopRow } from "@flock/shared"
 import { Effect } from "effect"
 import { TestClock } from "effect/testing"
 import { customEvent, Harness, pageview } from "./harness.ts"
+
+/** A ranked-list row's counts, leaving its engagement columns to engagement.test.ts. */
+const counts = (rows: ReadonlyArray<TopRow>) =>
+  rows.map(({ pageviews, value, visitors }) => pageviews === undefined ? { value, visitors } : { value, visitors, pageviews })
 
 const at = (iso: string) => TestClock.setTime(Date.parse(iso))
 const DE = "203.0.113.7"
@@ -105,15 +109,15 @@ layer(Harness.layer({ geoIp }))("Pages, sources and audience with filters", (it)
       yield* h.ingest(production!.key, [pageview({ $url: url("/pricing") })], { ip: US })
       const de = day([is("$country", "DE")])
 
-      assert.deepStrictEqual((yield* h.top(production!.id, "pages", de)).rows, [
+      assert.deepStrictEqual(counts((yield* h.top(production!.id, "pages", de)).rows), [
         { value: "/", visitors: 1, pageviews: 1 },
         { value: "/pricing", visitors: 1, pageviews: 1 }
       ])
-      assert.deepStrictEqual((yield* h.top(production!.id, "entryPages", de)).rows, [{ value: "/", visitors: 1 }])
-      assert.deepStrictEqual((yield* h.top(production!.id, "exitPages", de)).rows, [{ value: "/pricing", visitors: 1 }])
+      assert.deepStrictEqual(counts((yield* h.top(production!.id, "entryPages", de)).rows), [{ value: "/", visitors: 1 }])
+      assert.deepStrictEqual(counts((yield* h.top(production!.id, "exitPages", de)).rows), [{ value: "/pricing", visitors: 1 }])
       // Filtering by a page keeps only its Pageviews, so it is each Session's entry and exit.
       const pricing = day([is("$path", "/pricing")])
-      assert.deepStrictEqual((yield* h.top(production!.id, "entryPages", pricing)).rows, [{ value: "/pricing", visitors: 2 }])
+      assert.deepStrictEqual(counts((yield* h.top(production!.id, "entryPages", pricing)).rows), [{ value: "/pricing", visitors: 2 }])
     }))
 
   it.effect("referrers and UTM tags count only Visitors with a matching Session", () =>
@@ -125,12 +129,12 @@ layer(Harness.layer({ geoIp }))("Pages, sources and audience with filters", (it)
       yield* h.ingest(production!.key, [pageview({ $url: url("/?utm_source=twitter"), $referrer: "https://www.google.com/" })], { ip: US })
       const de = day([is("$country", "DE")])
 
-      assert.deepStrictEqual((yield* h.top(production!.id, "referrers", de)).rows, [{ value: "news.ycombinator.com", visitors: 1 }])
-      assert.deepStrictEqual((yield* h.top(production!.id, "utmSources", de)).rows, [{ value: "newsletter", visitors: 1 }])
+      assert.deepStrictEqual(counts((yield* h.top(production!.id, "referrers", de)).rows), [{ value: "news.ycombinator.com", visitors: 1 }])
+      assert.deepStrictEqual(counts((yield* h.top(production!.id, "utmSources", de)).rows), [{ value: "newsletter", visitors: 1 }])
       const google = day([is("$referring_domain", "google.com")])
-      assert.deepStrictEqual((yield* h.top(production!.id, "countries", google)).rows, [{ value: "US", visitors: 1 }])
+      assert.deepStrictEqual(counts((yield* h.top(production!.id, "countries", google)).rows), [{ value: "US", visitors: 1 }])
       const twitter = day([is("$utm_source", "twitter")])
-      assert.deepStrictEqual((yield* h.top(production!.id, "referrers", twitter)).rows, [{ value: "google.com", visitors: 1 }])
+      assert.deepStrictEqual(counts((yield* h.top(production!.id, "referrers", twitter)).rows), [{ value: "google.com", visitors: 1 }])
     }))
 
   it.effect("audience reports count only Visitors with a matching Pageview", () =>
@@ -144,12 +148,12 @@ layer(Harness.layer({ geoIp }))("Pages, sources and audience with filters", (it)
       yield* h.ingest(production!.key, [pageview({ $url: url("/pricing") })], { ip: US, userAgent: firefox })
 
       const pricing = day([is("$path", "/pricing")])
-      assert.deepStrictEqual((yield* h.top(production!.id, "countries", pricing)).rows, [
+      assert.deepStrictEqual(counts((yield* h.top(production!.id, "countries", pricing)).rows), [
         { value: "DE", visitors: 1 },
         { value: "US", visitors: 1 }
       ])
       // The US Visitor's two Pageviews count once.
-      assert.deepStrictEqual((yield* h.top(production!.id, "browsers", day([is("$country", "US")]))).rows, [{ value: "Firefox", visitors: 1 }])
+      assert.deepStrictEqual(counts((yield* h.top(production!.id, "browsers", day([is("$country", "US")]))).rows), [{ value: "Firefox", visitors: 1 }])
       // The exact-range breakdown endpoint takes filters too.
       const range = { from: "2026-03-01T00:00:00Z", to: "2026-03-02T00:00:00Z" }
       assert.deepStrictEqual(yield* h.breakdown(production!.id, "$country", range, undefined, [is("$path", "/")]), [{ value: "US", count: 1 }])

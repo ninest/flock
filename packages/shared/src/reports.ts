@@ -169,7 +169,20 @@ export const TopRow = Schema.Struct({
   value: Schema.NullOr(Schema.String),
   visitors: Schema.Number,
   /** `pages` only: the path's Pageviews. */
-  pageviews: Schema.optional(Schema.Number)
+  pageviews: Schema.optional(Schema.Number),
+  /**
+   * The share (0 to 1) of the row's Sessions that are a Bounce. On `pages` (and `entryPages`) a
+   * Session belongs to the path of its first Pageview, so `pages` is null for a path no Session
+   * entered on. Every report fills it in.
+   */
+  bounceRate: Schema.optional(Schema.NullOr(Schema.Number)),
+  /** `pages` only: "Left from here", the share of the path's Pageviews that were the last Pageview of their Session. */
+  exitRate: Schema.optional(Schema.Number),
+  /**
+   * `pages` only: time on page, the average seconds from one of the path's Pageviews to the next
+   * Pageview in the same Session. A Session's last Pageview is left out; null when none count.
+   */
+  timeOnPage: Schema.optional(Schema.NullOr(Schema.Number))
 })
 export type TopRow = typeof TopRow.Type
 

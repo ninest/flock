@@ -186,6 +186,8 @@ a.row:hover, button.row:hover { background: var(--hover); }
 .recent .section-head { margin-bottom: 8px; }
 .more { padding: 14px 0 4px; }
 .breakdowns { display: grid; grid-template-columns: 1fr 1fr; gap: 28px 56px; padding: 28px 0; }
+/* A breakdown with many columns (Pages) takes the full row. */
+.breakdown-full { grid-column: 1 / -1; }
 .attribution { color: var(--muted); font-size: 13px; }
 .attribution a { text-decoration: underline; text-decoration-color: #444; }
 
