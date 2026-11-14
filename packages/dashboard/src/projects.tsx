@@ -11,6 +11,7 @@ import { type ProjectSearch, reportQuery, withFilter, withQuery } from "./projec
 import { SessionPage } from "./sessions.tsx"
 import { environmentOf, type ProjectChrome, Shell } from "./shell.tsx"
 import { Notice, Rows, useAction } from "./ui.tsx"
+import { VisitorPage } from "./visitors.tsx"
 import { usePoll } from "./use-poll.ts"
 
 /** The browser's time zone, the default for a new Project. */
@@ -120,6 +121,20 @@ export const ProjectSessionPage = ({ projectId, sessionId, search }: { projectId
         search={search}
         timeZone={project.timeZone}
       />
+    </Shell>
+  )
+}
+
+export const ProjectVisitorPage = ({ projectId, visitorId, search }: { projectId: ProjectId; visitorId: string; search: ProjectSearch }) => {
+  const navigate = useNavigate()
+  const { data: project, error } = useProject(projectId)
+  if (!project) return <ProjectPending error={error} />
+  const onSearch = (next: ProjectSearch) =>
+    void navigate({ to: "/projects/$projectId/visitors/$visitorId", params: { projectId, visitorId }, search: next })
+  const environment = environmentOf(project, search.env)
+  return (
+    <Shell section="visitor" chrome={{ project, search, onSearch }}>
+      <VisitorPage key={`${environment.id}-${visitorId}`} projectId={projectId} environment={environment} visitorId={visitorId} search={search} timeZone={project.timeZone} />
     </Shell>
   )
 }

@@ -3,7 +3,7 @@ import { createRootRoute, createRoute, createRouter, Outlet, redirect } from "@t
 import { currentMember } from "./auth.ts"
 import { InstancePage } from "./instance.tsx"
 import { validateProjectSearch } from "./project-search.ts"
-import { NewProjectPage, ProjectPage, ProjectSessionPage, ProjectsPage } from "./projects.tsx"
+import { NewProjectPage, ProjectPage, ProjectSessionPage, ProjectsPage, ProjectVisitorPage } from "./projects.tsx"
 import { SettingsPage } from "./settings.tsx"
 import { SignInPage } from "./sign-in.tsx"
 import { MemberContext } from "./ui.tsx"
@@ -61,6 +61,18 @@ const sessionRoute = createRoute({
   }
 })
 
+/** One Visitor's profile in the picked Environment (persistent Tracking mode); keeps the search params for the way back. */
+const visitorRoute = createRoute({
+  getParentRoute: () => memberRoute,
+  path: "/projects/$projectId/visitors/$visitorId",
+  validateSearch: validateProjectSearch,
+  component: () => {
+    const { projectId, visitorId } = visitorRoute.useParams()
+    const search = visitorRoute.useSearch()
+    return <ProjectVisitorPage key={`${projectId}-${visitorId}`} projectId={ProjectId.make(projectId)} visitorId={visitorId} search={search} />
+  }
+})
+
 /** A Project's settings (`?env=dev` picks the Environment whose key is shown). */
 const settingsRoute = createRoute({
   getParentRoute: () => memberRoute,
@@ -85,7 +97,7 @@ const instanceRoute = createRoute({
 export const router = createRouter({
   routeTree: rootRoute.addChildren([
     signInRoute,
-    memberRoute.addChildren([indexRoute, newProjectRoute, projectRoute, sessionRoute, settingsRoute, instanceRoute])
+    memberRoute.addChildren([indexRoute, newProjectRoute, projectRoute, sessionRoute, visitorRoute, settingsRoute, instanceRoute])
   ])
 })
 
