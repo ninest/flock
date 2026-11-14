@@ -1,4 +1,5 @@
-// The Events tab: every Custom event sent in the range on the left; the selected one on the right
+// The Events tab: every Custom event sent in the range on the left, each with a sparkline over the
+// range and its change against the previous period; the selected one on the right
 // with its count over time, a breakdown for each string or boolean Event property, and statistics
 // for each numeric one. Clicking a breakdown row adds its value as a Filter. The count chart draws
 // the Environment's Annotations like the overview's (owners may delete them from their details).
@@ -6,12 +7,17 @@ import type { CustomEventDetail, Environment, EventPropertyFilter, ProjectId, Re
 import { useNavigate } from "@tanstack/react-router"
 import { request } from "./api.ts"
 import { AnnotationDetails, useChartAnnotations } from "./chart-annotations.tsx"
+import { formatChange } from "./change.ts"
 import { bucketLabel } from "./chart-scale.ts"
 import { barWidth, formatCount, formatNumber, formatPercent } from "./format.ts"
 import { isComplete, type ProjectSearch, queryDeps, reportQuery } from "./project-search.ts"
+import { Sparkline } from "./sparkline-chart.tsx"
 import { TrendChart } from "./trend-chart.tsx"
 import { barStyle, Detail, Notice, pending, Rows, wide } from "./ui.tsx"
 import { usePoll } from "./use-poll.ts"
+
+/** A list row's sparkline: narrower than the Projects page's, to leave room for the name. */
+const SPARK_LIST_WIDTH = 72
 
 export const CustomEvents = ({ projectId, environment, environments, search, timeZone, isOwner, onAddFilter }: {
   projectId: ProjectId
@@ -40,14 +46,30 @@ export const CustomEvents = ({ projectId, environment, environments, search, tim
         {!complete ? <Notice>Pick both dates.</Notice> : !data ? pending(error, "Custom events") : data.events.length === 0 ? (
           <Notice>No Custom events in this range. Send one with <code>flock.track("name", {"{ … }"})</code>.</Notice>
         ) : (
-          <Rows variant="select" columns={[{ label: "Event" }, { label: "Events", width: 96 }, { label: "Unique Visitors", width: 120 }]}>
-            {data.events.map((e) => (
-              <button key={e.name} type="button" role="row" className="row" aria-current={e.name === selected} onClick={() => select(e.name)}>
-                <span>{e.name}</span>
-                <span>{formatCount(e.count)}</span>
-                <span>{formatCount(e.visitors)}</span>
-              </button>
-            ))}
+          <Rows
+            variant="select"
+            columns={[
+              { label: "Event" },
+              { label: "Trend", width: SPARK_LIST_WIDTH + 8 },
+              { label: "Events", width: 72 },
+              { label: "Change", width: 64, wide: true },
+              { label: "Unique Visitors", width: 112, wide: true }
+            ]}
+          >
+            {data.events.map((e) => {
+              const change = formatChange(e.count, e.previousCount, "percent")
+              return (
+                <button key={e.name} type="button" role="row" className="row" aria-current={e.name === selected} onClick={() => select(e.name)}>
+                  <span>{e.name}</span>
+                  <span className="spark-cell">
+                    <Sparkline values={e.series.map((b) => b.count)} label={`Events per ${data.interval}`} width={SPARK_LIST_WIDTH} />
+                  </span>
+                  <span>{formatCount(e.count)}</span>
+                  <span className="kpi-change" data-tone={change.tone} title="Against the previous period" {...wide}>{change.label}</span>
+                  <span {...wide}>{formatCount(e.visitors)}</span>
+                </button>
+              )
+            })}
           </Rows>
         )}
       </section>
