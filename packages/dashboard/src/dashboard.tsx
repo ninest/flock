@@ -1,4 +1,5 @@
-// The Dashboard tab, top to bottom: the five headline numbers (click one to chart it), the chart,
+// The Dashboard tab, top to bottom: the five headline numbers with their change against the
+// previous period (click one to chart it), the chart with the previous period as a grey line,
 // Recent Sessions, then Pages, Sources, Countries and Devices as a 2×2 grid.
 import type { Environment, EventPropertyFilter, OverviewNumbers, ProjectId, ReportRangeQuery } from "@flock/shared"
 import { DateTime } from "effect"
@@ -6,6 +7,7 @@ import { useState } from "react"
 import { placeAnnotations } from "./annotations.ts"
 import { request } from "./api.ts"
 import { Breakdown, BREAKDOWNS } from "./breakdown.tsx"
+import { type ChangeUnit, formatChange } from "./change.ts"
 import { AddAnnotation, AnnotationDetails } from "./chart-annotations.tsx"
 import { bucketLabel } from "./chart-scale.ts"
 import { formatCount, formatDuration, formatPercent } from "./format.ts"
@@ -17,12 +19,18 @@ import { usePoll } from "./use-poll.ts"
 
 type Metric = keyof OverviewNumbers
 
-const METRICS: ReadonlyArray<{ key: Metric; label: string; format: (value: number) => string }> = [
-  { key: "visitors", label: "Unique Visitors", format: formatCount },
-  { key: "pageviews", label: "Pageviews", format: formatCount },
-  { key: "sessions", label: "Sessions", format: formatCount },
-  { key: "bounceRate", label: "Bounce rate", format: formatPercent },
-  { key: "visitDuration", label: "Visit duration", format: formatDuration }
+const METRICS: ReadonlyArray<{
+  key: Metric
+  label: string
+  format: (value: number) => string
+  unit: ChangeUnit
+  lowerIsBetter?: boolean
+}> = [
+  { key: "visitors", label: "Unique Visitors", format: formatCount, unit: "percent" },
+  { key: "pageviews", label: "Pageviews", format: formatCount, unit: "percent" },
+  { key: "sessions", label: "Sessions", format: formatCount, unit: "percent" },
+  { key: "bounceRate", label: "Bounce rate", format: formatPercent, unit: "points", lowerIsBetter: true },
+  { key: "visitDuration", label: "Visit duration", format: formatDuration, unit: "percent" }
 ]
 
 export const Dashboard = ({ projectId, environment, search, timeZone, isOwner, onAddFilter }: {
@@ -84,10 +92,14 @@ const Overview = ({ projectId, environment, query, timeZone, isOwner }: {
       <div className="kpis">
         {METRICS.map((m) => {
           const value = data?.totals[m.key]
+          const change = data && formatChange(value, data.previous.totals[m.key], m.unit, { lowerIsBetter: m.lowerIsBetter })
           return (
             <button key={m.key} type="button" aria-pressed={m.key === metricKey} onClick={() => setMetricKey(m.key)} data-testid={`overview-${m.key}`}>
               <span>{m.label}</span>
               <strong>{value === undefined || value === null ? "–" : m.format(value)}</strong>
+              <small className="kpi-change" data-tone={change?.tone} title="Against the previous period">
+                {change ? change.label : "\u00a0"}
+              </small>
             </button>
           )
         })}
@@ -106,6 +118,10 @@ const Overview = ({ projectId, environment, query, timeZone, isOwner }: {
               name={metric.label}
               labels={data.series.map((b) => bucketLabel(data.interval, b.bucket))}
               values={data.series.map((b) => b[metric.key])}
+              previous={{
+                labels: data.previous.series.map((b) => bucketLabel(data.interval, b.bucket)),
+                values: data.previous.series.map((b) => b[metric.key])
+              }}
               format={metric.format}
               height={phone ? 210 : 300}
               annotations={placed.map((p) => ({ index: p.index, label: p.annotations[0]!.annotation.label, count: p.annotations.length }))}

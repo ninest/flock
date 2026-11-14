@@ -34,7 +34,7 @@ import type { Fragment } from "effect/sql/Statement"
 import { matchesFilters, pathOf, referringDomainOf } from "./filters.ts"
 import { Annotations } from "./annotations.ts"
 import { Projects } from "./projects.ts"
-import { type ReportRange, resolveRange } from "./report-range.ts"
+import { type ReportRange, resolvePreviousRange, resolveRange } from "./report-range.ts"
 import { SESSION_TIMEOUT_MINUTES } from "./sessions.ts"
 
 /** An exact `[from, to)` time range, for the reports that don't work on local days. */
@@ -109,6 +109,7 @@ export class Queries extends Context.Service<Queries, {
           ${options.customOnly ? sql`AND e.name NOT LIKE '$%'` : sql``}
           AND e.ts >= (${range.from}::date::timestamp AT TIME ZONE ${range.timeZone})
           AND e.ts < ((${range.to}::date + 1)::timestamp AT TIME ZONE ${range.timeZone})
+          ${range.until === null ? sql`` : sql`AND e.ts < (${range.until}::timestamp AT TIME ZONE ${range.timeZone})`}
           AND ${matchesFilters(sql, filters)}
       )`
 
@@ -156,9 +157,9 @@ export class Queries extends Context.Service<Queries, {
       avg(bounce::int)::float8 AS bounce_rate,
       round(avg(duration))::int AS visit_duration`
 
-    const overview = report("overview", (request: ReportRequest<ReportRangeQuery>) =>
+    /** The overview totals and every bucket's numbers for one scope. */
+    const overviewNumbers = (scope: ReportScope) =>
       Effect.gen(function*() {
-        const scope = yield* checkAccessAndResolveRange(request)
         const { range } = scope
         const [totals] = yield* sql<NumbersRow>`
           WITH ${scopedEvents(scope)}, ${scopedSessions}
@@ -173,10 +174,28 @@ export class Queries extends Context.Service<Queries, {
           LEFT JOIN (SELECT bucket, ${sessionNumbers} FROM sessions GROUP BY bucket) se ON se.bucket = b.bucket
           ORDER BY b.bucket`
         return {
-          ...range,
           totals: toNumbers(totals),
-          series: series.map((row) => ({ bucket: row.bucket, ...toNumbers(row) })),
-          annotations: yield* annotations.inRange(scope.projectId, scope.environmentId, range)
+          series: series.map((row) => ({ bucket: row.bucket, ...toNumbers(row) }))
+        }
+      })
+
+    const overview = report("overview", (request: ReportRequest<ReportRangeQuery>) =>
+      Effect.gen(function*() {
+        const scope = yield* checkAccessAndResolveRange(request)
+        const { range } = scope
+        const previousRange = resolvePreviousRange(request.query, range.timeZone, yield* DateTime.now)
+        const [current, previous] = yield* Effect.all(
+          [overviewNumbers(scope), overviewNumbers({ ...scope, range: previousRange })],
+          { concurrency: 2 }
+        )
+        return {
+          from: range.from,
+          to: range.to,
+          timeZone: range.timeZone,
+          interval: range.interval,
+          ...current,
+          annotations: yield* annotations.inRange(scope.projectId, scope.environmentId, range),
+          previous: { from: previousRange.from, to: previousRange.to, until: previousRange.until, ...previous }
         }
       }))
 

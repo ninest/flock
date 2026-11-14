@@ -96,6 +96,22 @@ export const OverviewBucket = Schema.Struct({
 })
 export type OverviewBucket = typeof OverviewBucket.Type
 
+/**
+ * The previous period: the same number of local days ending the day before `from`. For `today`
+ * it is yesterday up to the current local time of day.
+ */
+export const OverviewPreviousPeriod = Schema.Struct({
+  /** Local dates (inclusive). */
+  from: Schema.String,
+  to: Schema.String,
+  /** Local wall-clock end (exclusive) on `to`, `2026-02-28T09:15:00`, for `today`; null otherwise. */
+  until: Schema.NullOr(Schema.String),
+  totals: OverviewNumbers,
+  /** One bucket per bucket of the current series, in the same order, labelled with its own dates. */
+  series: Schema.Array(OverviewBucket)
+})
+export type OverviewPreviousPeriod = typeof OverviewPreviousPeriod.Type
+
 export const Overview = Schema.Struct({
   /** The resolved range, as local dates (inclusive). */
   from: Schema.String,
@@ -106,6 +122,8 @@ export const Overview = Schema.Struct({
   totals: OverviewNumbers,
   /** Every bucket in the range, including empty ones. A Session counts in the bucket where it starts. */
   series: Schema.Array(OverviewBucket),
+  /** The same numbers for the previous period, with the same Filters. */
+  previous: OverviewPreviousPeriod,
   /** The Annotations that apply to the Environment and fall in the range, oldest first. Filters don't affect them. */
   annotations: Schema.Array(Annotation)
 })
