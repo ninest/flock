@@ -213,9 +213,18 @@ const RangePicker = ({ query, onChange }: { query: ReportRangeQuery; onChange: (
 }
 
 /** The two dates of a custom range, in the Project's time zone. A range applies once both are set and in order. */
-const CustomDates = ({ query, onChange }: { query: ReportRangeQuery; onChange: (query: ReportRangeQuery) => void }) => {
+export const CustomDates = ({ query, onChange }: { query: ReportRangeQuery; onChange: (query: ReportRangeQuery) => void }) => {
   const [from, setFrom] = useState(query.from ?? "")
   const [to, setTo] = useState(query.to ?? "")
+  // The inputs hold drafts (a half-finished edit is not in the URL yet), but follow the committed
+  // range whenever it changes, e.g. on Back/Forward. Reset during render rather than in an effect,
+  // so the stale dates never show and the input keeps focus.
+  const [committed, setCommitted] = useState({ from: query.from, to: query.to })
+  if (committed.from !== query.from || committed.to !== query.to) {
+    setCommitted({ from: query.from, to: query.to })
+    setFrom(query.from ?? "")
+    setTo(query.to ?? "")
+  }
   const apply = (f: string, t: string) => {
     setFrom(f)
     setTo(t)
