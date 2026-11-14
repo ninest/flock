@@ -69,6 +69,7 @@ label.field > input, label.field > select, label.field > textarea { color: var(-
 .seg button { padding: 7px 14px; border-radius: 8px; color: var(--muted); font-weight: 500; font-size: 14px; white-space: nowrap; }
 .seg button:hover { color: var(--ink); }
 .seg button[aria-pressed="true"] { background: var(--raised); color: var(--ink); }
+.seg.chart-choice { flex-wrap: wrap; margin: 16px 0 8px; }
 .top-button { padding: 7px 12px; border-radius: 8px; color: var(--muted); font-weight: 500; font-size: 14px; }
 .top-button:hover, .top-button[aria-expanded="true"] { color: var(--ink); background: var(--raised); }
 .avatar { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--raised); font-weight: 600; font-size: 14px; }

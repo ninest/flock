@@ -1,6 +1,6 @@
 # Identify merges devices, never identified Visitors
 
-In persistent Tracking mode, Identify links a device's own Visitor ID to the tracked app's ID for the person. From then on, that ID is the Visitor: every device identified with it counts as one Visitor, and the device's earlier Events and Sessions in the Project move over to it, so a Visitor profile shows the person's whole history across devices. A device that identifies as a different ID later switches to it (someone signed in to another account). An ID that is itself already an identified Visitor is never linked to another, so two identified Visitors are never merged.
+In persistent Tracking mode, Identify links a device's own Visitor ID to the tracked app's ID for the person. From then on, that ID is the Visitor: every device identified with it counts as one Visitor, and the device's earlier Events and Sessions in the Project move over to it, so a Visitor profile shows the person's whole history across devices. A device that identifies as a different ID later switches to it (someone signed in to another account). An ID stays an identified Visitor for good once an Identify has named it, also after its last device switched to another ID. An ID that is itself already an identified Visitor is never linked to another, so two identified Visitors are never merged.
 
 ## Considered Options
 

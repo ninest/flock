@@ -28,6 +28,7 @@ import { Context, Effect, Layer, Option } from "effect"
 import { isSqlError, type SqlError } from "effect/sql/SqlError"
 import { Ingest } from "./ingest.ts"
 import { makeEnvironmentKey, makeId } from "./keys.ts"
+import { lockMemberships, ownerless } from "./project-membership.ts"
 
 interface Row {
   readonly projectId: string
@@ -282,15 +283,14 @@ export class Projects extends Context.Service<Projects, {
         change: Effect.Effect<unknown, SqlError>
       ) =>
         sql.withTransaction(Effect.gen(function*() {
-          const rows = yield* sql<{ memberId: string; role: ProjectRole }>`
-            SELECT member_id, role FROM project_member WHERE project_id = ${id} FOR UPDATE`
+          const rows = yield* lockMemberships(sql, [id])
           const roleOf = (m: MemberId) => rows.find((r) => r.memberId === m)?.role
           if (roleOf(actor) !== "owner") return yield* new ProjectOwnerRequired({ message: "Only a Project owner can do this" })
           if (!roleOf(target)) return yield* new ProjectMemberNotFound({ id: target })
           yield* change
-          const [row] = yield* sql<{ owners: number }>`
-            SELECT count(*)::int AS owners FROM project_member WHERE project_id = ${id} AND role = 'owner'`
-          if (row?.owners === 0) return yield* new LastProjectOwner({ message: "A Project always keeps at least one owner" })
+          if (ownerless(yield* lockMemberships(sql, [id]), [id]).length > 0) {
+            return yield* new LastProjectOwner({ message: "A Project always keeps at least one owner" })
+          }
         })).pipe(orDie)
 
       return Projects.of({

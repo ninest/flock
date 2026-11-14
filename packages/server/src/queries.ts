@@ -255,13 +255,12 @@ export class Queries extends Context.Service<Queries, {
       }))
 
     /**
-     * The first (or last) Pageview of each Session in the range, as `properties`, `visitor_id` and
-     * `session_id`: of its Pageviews in `scoped`, or with `whole` of all its Pageviews in the Environment.
+     * The first (or last) Pageview of each Session in scope, as `properties`, `visitor_id` and
+     * `session_id`: of all the Session's Pageviews in the Environment, not only those in `scoped`.
      */
-    const sessionPageview = (which: "first" | "last", whole?: EnvironmentId) => sql`
+    const sessionPageview = (which: "first" | "last", environmentId: EnvironmentId) => sql`
       SELECT DISTINCT ON (session_id) properties, visitor_id, session_id
-      FROM ${whole === undefined ? sql`scoped WHERE session_id IS NOT NULL` : sql`event WHERE ${ofScopedSessions(whole)}`}
-        AND name = '$pageview'
+      FROM event WHERE ${ofScopedSessions(environmentId)} AND name = '$pageview'
       ORDER BY session_id, ${which === "first" ? sql`ts ASC, received_at ASC` : sql`ts DESC, received_at DESC`}`
 
     const visitors = sql`count(DISTINCT visitor_id)::int AS visitors`
@@ -303,30 +302,30 @@ export class Queries extends Context.Service<Queries, {
             GROUP BY p.value, e.bounce_rate`
         case "entryPages":
         case "exitPages":
-          return sessionRows(pathOf(sql), sessionPageview(kind === "entryPages" ? "first" : "last"))
+          return sessionRows(pathOf(sql), sessionPageview(kind === "entryPages" ? "first" : "last", environmentId))
         case "referrers":
-          return sessionRows(referringDomainOf(sql), sessionPageview("first"))
+          return sessionRows(referringDomainOf(sql), sessionPageview("first", environmentId))
         case "utmSources":
         case "utmMediums":
         case "utmCampaigns": {
           const tag = UTM_TAGS[kind]
           const value = sql`coalesce(properties ->> ${"$" + tag}, properties ->> ${tag})`
-          return sql`SELECT * FROM (${sessionRows(value, sessionPageview("first"))}) u WHERE value IS NOT NULL AND value <> ''`
+          return sql`SELECT * FROM (${sessionRows(value, sessionPageview("first", environmentId))}) u WHERE value IS NOT NULL AND value <> ''`
         }
         case "countries":
         case "browsers":
         case "oses":
         case "devices": {
-          // Visitors by their Pageviews' value; bounce rate over the Sessions with a Pageview of it.
+          // Visitors by the value of their Events in scope, of any kind; bounce rate over the Sessions
+          // with an Event in scope carrying it.
           const value = sql`properties ->> ${AUDIENCE[kind]}`
           return sql`
             SELECT v.value, count(DISTINCT v.visitor_id)::int AS visitors, NULL::int AS pageviews,
                    b.bounce_rate, NULL::float8 AS exit_rate, NULL::float8 AS time_on_page
-            FROM (SELECT ${value} AS value, visitor_id FROM scoped WHERE name = '$pageview') v
+            FROM (SELECT ${value} AS value, visitor_id FROM scoped) v
             LEFT JOIN (
               SELECT d.value, ${bounceRate} AS bounce_rate
-              FROM (SELECT DISTINCT ${value} AS value, session_id FROM scoped
-                    WHERE name = '$pageview' AND session_id IS NOT NULL) d
+              FROM (SELECT DISTINCT ${value} AS value, session_id FROM scoped WHERE session_id IS NOT NULL) d
               JOIN sessions se USING (session_id) GROUP BY 1
             ) b ON b.value IS NOT DISTINCT FROM v.value
             GROUP BY v.value, b.bounce_rate`
@@ -569,9 +568,9 @@ export class Queries extends Context.Service<Queries, {
         })
     )
 
-    /** Identified: the Visitor ID is one a device was linked to by Identify (ADR 0005). */
+    /** Identified: an Identify once named the Visitor ID, whatever its devices are linked to now (ADR 0005). */
     const isIdentified = (projectId: string, visitorId: string) =>
-      sql`SELECT 1 FROM visitor_alias WHERE project_id = ${projectId} AND visitor_id = ${visitorId} LIMIT 1`.pipe(
+      sql`SELECT 1 FROM identified_visitor WHERE project_id = ${projectId} AND visitor_id = ${visitorId}`.pipe(
         Effect.map((rows) => rows.length > 0)
       )
 
@@ -756,7 +755,7 @@ export class Queries extends Context.Service<Queries, {
             SELECT DISTINCT visitor_id FROM scoped
             WHERE visitor_id IS NOT NULL
               ${search === undefined ? sql`` : sql`AND visitor_id IN (
-                SELECT visitor_id FROM visitor_alias WHERE project_id = ${projectId} AND starts_with(visitor_id, ${search})
+                SELECT visitor_id FROM identified_visitor WHERE project_id = ${projectId} AND starts_with(visitor_id, ${search})
               )`}
           ),
           totals AS (
@@ -773,7 +772,7 @@ export class Queries extends Context.Service<Queries, {
             LIMIT ${VISITORS_PAGE_SIZE + 1}
           )
           SELECT p.visitor_id, p.first_seen_at, p.last_seen_at, p.sessions, p.events,
-                 EXISTS (SELECT 1 FROM visitor_alias a WHERE a.project_id = ${projectId} AND a.visitor_id = p.visitor_id) AS identified,
+                 EXISTS (SELECT 1 FROM identified_visitor i WHERE i.project_id = ${projectId} AND i.visitor_id = p.visitor_id) AS identified,
                  fe.properties ->> '$country' AS country, fe.properties ->> '$device' AS device,
                  fe.properties ->> '$browser' AS browser,
                  ${referringDomainOf(sql, "fp.properties")} AS referring_domain

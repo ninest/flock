@@ -8,18 +8,25 @@ import {
   type ReportRangeQuery
 } from "@flock/shared"
 import { Option, Schema } from "effect"
+import { EVENT_MEASURES, type EventMeasure, type Statistic, STATISTICS } from "./custom-event-charts.ts"
 
 /** The Project page's tabs after the Dashboard (the default, kept out of the URL). */
 export const PROJECT_TABS = ["live", "events", "visitors"] as const
 export type ProjectTab = (typeof PROJECT_TABS)[number]
 
-/** `?env=dev&tab=events&event=signup&q=user_&period=custom&from=…&to=…&filters=[…]`. */
+/** `?env=dev&tab=events&event=signup&measure=visitors&number=price&stat=median&q=user_&period=custom&from=…&to=…&filters=[…]`. */
 export interface ProjectSearch {
   /** The Environment's name; `production` when absent. */
   readonly env?: string | undefined
   readonly tab?: ProjectTab
   /** The Custom event open on the Events tab. */
   readonly event?: string | undefined
+  /** What the Custom event's chart counts; Events when absent. */
+  readonly measure?: EventMeasure | undefined
+  /** The numeric Event property charted on the Events tab; the event's first when absent. */
+  readonly number?: string | undefined
+  /** The statistic of `number` charted; average when absent. */
+  readonly stat?: Statistic | undefined
   /** The Session open on the Live tab. */
   readonly live?: string | undefined
   /** The start of an identified Visitor ID searched for on the Visitors tab. */
@@ -43,6 +50,12 @@ export const validateProjectSearch = (search: Record<string, unknown>): ProjectS
   if (PROJECT_TABS.includes(search.tab as ProjectTab)) result.tab = search.tab as ProjectTab
   const event = text(search.event)
   if (event !== undefined) result.event = event
+  const measure = EVENT_MEASURES.find((m) => m.key === search.measure)
+  if (measure !== undefined) result.measure = measure.key
+  const number = text(search.number)
+  if (number !== undefined) result.number = number
+  const stat = STATISTICS.find((s) => s.key === search.stat)
+  if (stat !== undefined) result.stat = stat.key
   const live = text(search.live)
   if (live !== undefined) result.live = live
   const q = text(search.q)

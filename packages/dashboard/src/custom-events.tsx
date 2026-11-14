@@ -1,20 +1,35 @@
 // The Events tab: every Custom event sent in the range on the left, each with a sparkline over the
 // range and its change against the previous period; the selected one on the right
-// with its count over time, a breakdown for each string or boolean Event property, and statistics
-// for each numeric one. Clicking a breakdown row adds its value as a Filter. The count chart draws
-// the Environment's Annotations like the overview's (owners may delete them from their details).
-import type { CustomEventDetail, Environment, EventPropertyFilter, ProjectId, ReportRangeQuery } from "@flock/shared"
+// with its Event count or unique Visitors over time, a breakdown for each string or boolean Event
+// property, and statistics for each numeric one with one property's chosen statistic charted over
+// time. Clicking a breakdown row adds its value as a Filter. The event's chart draws the
+// Environment's Annotations like the overview's (owners may delete them from their details).
+// The chart choices live in the URL (`measure`, `number`, `stat`), like the selected event.
+import type { CustomEventDetail, CustomEventStats, Environment, EventPropertyFilter, ProjectId, ReportRangeQuery } from "@flock/shared"
 import { useNavigate } from "@tanstack/react-router"
 import { request } from "./api.ts"
 import { AnnotationDetails, useChartAnnotations } from "./chart-annotations.tsx"
 import { formatChange } from "./change.ts"
 import { bucketLabel } from "./chart-scale.ts"
+import {
+  chartedProperty,
+  DEFAULT_MEASURE,
+  DEFAULT_STATISTIC,
+  EVENT_MEASURES,
+  eventSeries,
+  type Statistic,
+  STATISTICS,
+  statisticSeries
+} from "./custom-event-charts.ts"
 import { barWidth, formatCount, formatNumber, formatPercent } from "./format.ts"
 import { isComplete, type ProjectSearch, queryDeps, reportQuery } from "./project-search.ts"
 import { Sparkline } from "./sparkline-chart.tsx"
 import { TrendChart } from "./trend-chart.tsx"
 import { barStyle, Detail, Notice, pending, Rows, wide } from "./ui.tsx"
 import { usePoll } from "./use-poll.ts"
+
+/** The chart choices kept in the URL; an absent one is its default. */
+type ChartChoice = Pick<ProjectSearch, "measure" | "number" | "stat">
 
 /** A list row's sparkline: narrower than the Projects page's, to leave room for the name. */
 const SPARK_LIST_WIDTH = 72
@@ -39,6 +54,9 @@ export const CustomEvents = ({ projectId, environment, environments, search, tim
   const selected = search.event ?? data?.events[0]?.name
   const select = (event: string | undefined) =>
     void navigate({ to: "/projects/$projectId", params: { projectId }, search: { ...search, event }, replace: event === undefined })
+  /** Changes a chart choice in place, without a history entry per click. */
+  const choose = (choice: ChartChoice) =>
+    void navigate({ to: "/projects/$projectId", params: { projectId }, search: { ...search, ...choice }, replace: true })
   return (
     <div className="page split">
       <section data-testid="custom-events">
@@ -81,9 +99,11 @@ export const CustomEvents = ({ projectId, environment, environments, search, tim
             environments={environments}
             name={selected}
             query={query}
+            search={search}
             timeZone={timeZone}
             isOwner={isOwner}
             onAddFilter={onAddFilter}
+            onChoose={choose}
           />
         )}
       </Detail>
@@ -91,15 +111,17 @@ export const CustomEvents = ({ projectId, environment, environments, search, tim
   )
 }
 
-const Drilldown = ({ projectId, environment, environments, name, query, timeZone, isOwner, onAddFilter }: {
+const Drilldown = ({ projectId, environment, environments, name, query, search, timeZone, isOwner, onAddFilter, onChoose }: {
   projectId: ProjectId
   environment: Environment
   environments: ReadonlyArray<Environment>
   name: string
   query: ReportRangeQuery
+  search: ProjectSearch
   timeZone: string
   isOwner: boolean
   onAddFilter: (filter: EventPropertyFilter) => void
+  onChoose: (choice: ChartChoice) => void
 }) => {
   const { data, error, reload } = usePoll(
     () => request((api) => api.customEvents.detail({ params: { environmentId: environment.id }, query: { ...query, name } })),
@@ -113,6 +135,8 @@ const Drilldown = ({ projectId, environment, environments, name, query, timeZone
   const own = data.properties.filter((p) => !p.key.startsWith("$"))
   const categorical = own.filter((p) => p.types.includes("string") || p.types.includes("boolean")).map((p) => p.key)
   const numeric = own.filter((p) => p.types.includes("number")).map((p) => p.key)
+  const measure = search.measure ?? DEFAULT_MEASURE
+  const chart = eventSeries(data.series, measure)
   return (
     <>
       <h2>{name}</h2>
@@ -120,10 +144,17 @@ const Drilldown = ({ projectId, environment, environments, name, query, timeZone
         {formatCount(data.totals.count)} {data.totals.count === 1 ? "Event" : "Events"} from {formatCount(data.totals.visitors)}{" "}
         {data.totals.visitors === 1 ? "Visitor" : "Visitors"}
       </p>
+      <div className="seg chart-choice" role="group" aria-label="Chart" data-testid="custom-event-measure">
+        {EVENT_MEASURES.map((m) => (
+          <button key={m.key} type="button" aria-pressed={m.key === measure} onClick={() => onChoose({ measure: m.key === DEFAULT_MEASURE ? undefined : m.key })}>
+            {m.label}
+          </button>
+        ))}
+      </div>
       <TrendChart
-        name="Events"
+        name={chart.name}
         labels={data.series.map((b) => bucketLabel(data.interval, b.bucket))}
-        values={data.series.map((b) => b.count)}
+        values={chart.values}
         format={formatCount}
         height={200}
         {...pills.chart}
@@ -142,7 +173,9 @@ const Drilldown = ({ projectId, environment, environments, name, query, timeZone
       {categorical.map((key) => (
         <PropertyBreakdown key={key} environment={environment} detail={data} query={query} eventProperty={key} onAddFilter={onAddFilter} />
       ))}
-      {numeric.length > 0 && <PropertyStats environment={environment} detail={data} query={query} keys={numeric} />}
+      {numeric.length > 0 && (
+        <PropertyStats environment={environment} detail={data} query={query} keys={numeric} search={search} onChoose={onChoose} />
+      )}
     </>
   )
 }
@@ -193,50 +226,103 @@ const PropertyBreakdown = ({ environment, detail, query, eventProperty, onAddFil
   )
 }
 
-/** The numeric Event properties: average, median, sum, min and max of each, one row per property. */
-const PropertyStats = ({ environment, detail, query, keys }: {
+/**
+ * The numeric Event properties: average, median, sum, min and max of each, one row per property,
+ * then one property's chosen statistic over time. With several properties, clicking a row charts it.
+ */
+const PropertyStats = ({ environment, detail, query, keys, search, onChoose }: {
   environment: Environment
   detail: CustomEventDetail
   query: ReportRangeQuery
   keys: ReadonlyArray<string>
-}) => (
-  <div className="detail-block" data-testid="custom-event-stats">
-    <Rows
-      title="Numbers"
-      columns={[
-        { label: "Numbers" },
-        { label: "Average", width: 88 },
-        { label: "Median", width: 80, wide: true },
-        { label: "Sum", width: 88 },
-        { label: "Min", width: 64, wide: true },
-        { label: "Max", width: 64, wide: true }
-      ]}
-    >
-      {keys.map((key) => <StatsRow key={key} environment={environment} detail={detail} query={query} eventProperty={key} />)}
-    </Rows>
-    <p className="dim" style={{ marginTop: 8 }}>Only numeric values count.</p>
-  </div>
-)
-
-const StatsRow = ({ environment, detail, query, eventProperty }: {
-  environment: Environment
-  detail: CustomEventDetail
-  query: ReportRangeQuery
-  eventProperty: string
+  search: ProjectSearch
+  onChoose: (choice: ChartChoice) => void
 }) => {
-  const { data } = usePoll(
-    () => request((api) => api.customEvents.stats({ params: { environmentId: environment.id }, query: { ...query, name: detail.name, eventProperty } })),
-    [environment.id, detail.name, eventProperty, ...queryDeps(query)]
+  // Each property's statistics under its own key: one that fails to load leaves only its own row
+  // empty, and when the event's numeric properties change, none is shown under another's name.
+  const { data: stats } = usePoll(
+    async () => {
+      const loaded = await Promise.all(keys.map((eventProperty) =>
+        request((api) => api.customEvents.stats({ params: { environmentId: environment.id }, query: { ...query, name: detail.name, eventProperty } }))
+          .then((stats) => [eventProperty, stats] as const, () => undefined)
+      ))
+      return new Map(loaded.filter((entry) => entry !== undefined))
+    },
+    [environment.id, detail.name, keys.join("\n"), ...queryDeps(query)]
   )
-  const t = data?.totals
+  const charted = chartedProperty(keys, search.number)!
+  const stat = search.stat ?? DEFAULT_STATISTIC
+  const chartedStats = stats?.get(charted)
   return (
-    <div role="row" className="row">
-      <span><code>{eventProperty}</code></span>
-      <span>{formatNumber(t?.average)}</span>
-      <span {...wide}>{formatNumber(t?.median)}</span>
-      <span>{formatNumber(t?.sum)}</span>
-      <span {...wide}>{formatNumber(t?.min)}</span>
-      <span {...wide}>{formatNumber(t?.max)}</span>
+    <div className="detail-block" data-testid="custom-event-stats">
+      <Rows
+        title="Numbers"
+        {...(keys.length > 1 ? { variant: "select" as const } : {})}
+        columns={[
+          { label: "Numbers" },
+          { label: "Average", width: 88 },
+          { label: "Median", width: 80, wide: true },
+          { label: "Sum", width: 88 },
+          { label: "Min", width: 64, wide: true },
+          { label: "Max", width: 64, wide: true }
+        ]}
+      >
+        {keys.map((key) => {
+          const cells = <StatsCells eventProperty={key} totals={stats?.get(key)?.totals} />
+          return keys.length > 1
+            ? (
+              <button
+                key={key}
+                type="button"
+                role="row"
+                className="row"
+                aria-current={key === charted}
+                title={`Chart ${key}`}
+                onClick={() => onChoose({ number: key === keys[0] ? undefined : key })}
+              >
+                {cells}
+              </button>
+            )
+            : <div key={key} role="row" className="row">{cells}</div>
+        })}
+      </Rows>
+      <p className="dim" style={{ marginTop: 8 }}>Only numeric values count.</p>
+      <div className="seg chart-choice" role="group" aria-label="Statistic" data-testid="custom-event-statistic">
+        {STATISTICS.map((s) => (
+          <button key={s.key} type="button" aria-pressed={s.key === stat} onClick={() => onChoose({ stat: s.key === DEFAULT_STATISTIC ? undefined : s.key })}>
+            {s.label}
+          </button>
+        ))}
+      </div>
+      {chartedStats ? <StatisticChart stats={chartedStats} eventProperty={charted} statistic={stat} /> : <div style={{ height: 200 }} />}
     </div>
   )
 }
+
+const StatisticChart = ({ stats, eventProperty, statistic }: {
+  stats: CustomEventStats
+  eventProperty: string
+  statistic: Statistic
+}) => {
+  const chart = statisticSeries(stats.series, eventProperty, statistic)
+  return (
+    <TrendChart
+      name={chart.name}
+      labels={stats.series.map((b) => bucketLabel(stats.interval, b.bucket))}
+      values={chart.values}
+      format={formatNumber}
+      height={200}
+    />
+  )
+}
+
+const StatsCells = ({ eventProperty, totals: t }: { eventProperty: string; totals: CustomEventStats["totals"] | undefined }) => (
+  <>
+    <span><code>{eventProperty}</code></span>
+    <span>{formatNumber(t?.average)}</span>
+    <span {...wide}>{formatNumber(t?.median)}</span>
+    <span>{formatNumber(t?.sum)}</span>
+    <span {...wide}>{formatNumber(t?.min)}</span>
+    <span {...wide}>{formatNumber(t?.max)}</span>
+  </>
+)

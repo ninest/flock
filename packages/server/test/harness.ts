@@ -168,6 +168,11 @@ const makeClient = (fetch: typeof globalThis.fetch) =>
   )
 
 export class Harness extends Context.Service<Harness, {
+  /**
+   * The Instance's own database, for the few tests that hold a row lock on a second
+   * connection to pause a request part-way and stage a race. Not for reading results.
+   */
+  readonly databaseUrl: string
   /** The server as a fetch-style handler (no port). */
   readonly handler: (request: Request) => Promise<Response>
   /** The stub OIDC issuer, when `options.oidc` is set. */
@@ -248,7 +253,8 @@ export class Harness extends Context.Service<Harness, {
     Layer.effect(
       Harness,
       Effect.gen(function*() {
-        const databaseUrl = Redacted.make(yield* TestDatabase)
+        const rawDatabaseUrl = yield* TestDatabase
+        const databaseUrl = Redacted.make(rawDatabaseUrl)
         const clientId = "flock-test"
         const clientSecret = "flock-test-secret"
         const oidc = options.oidc === undefined ? undefined : yield* Effect.acquireRelease(
@@ -394,6 +400,7 @@ export class Harness extends Context.Service<Harness, {
 
         return Harness.of({
           ingest, breakdown, eventPropertyKeys, top, live, sessions, session,
+          databaseUrl: rawDatabaseUrl,
           handler,
           oidc,
           fetch,

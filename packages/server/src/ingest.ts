@@ -106,21 +106,35 @@ export class Ingest extends Context.Service<Ingest, {
                 yield* visitors.identify({ projectId, deviceId, visitorId: event.distinct_id! })
               }
             }
-            const rows = yield* Effect.forEach(events, ({ event, ts, uuid }) => Effect.gen(function*() {
+            // A late Event can join Sessions into one (see Sessions.assign): their stored Events
+            // move to it here, and `joinedInto` does the same for this batch's rows below.
+            const joinedInto = new Map<string, string>()
+            const assigned = yield* Effect.forEach(events, ({ event, ts, uuid }) => Effect.gen(function*() {
               const visitorId = yield* visitorOf(event)
-              return yield* sessions.assign({ environmentId, visitorId, at: ts }).pipe(
-                Effect.map((sessionId) => ({
-                  environmentId,
-                  uuid,
-                  name: event.name,
-                  ts: DateTime.toDateUtc(ts),
-                  receivedAt: DateTime.toDateUtc(receivedAt),
-                  visitorId,
-                  sessionId,
-                  properties: sql.json(enrichment.enrich(event.properties ?? {}, audience))
-                }))
-              )
+              const { absorbed, sessionId } = yield* sessions.assign({ environmentId, visitorId, at: ts })
+              if (absorbed.length > 0) {
+                for (const id of absorbed) joinedInto.set(id, sessionId)
+                yield* sql`
+                  UPDATE event SET session_id = ${sessionId}
+                  WHERE environment_id = ${environmentId} AND session_id IN ${sql.in(absorbed)}`
+              }
+              return {
+                environmentId,
+                uuid,
+                name: event.name,
+                ts: DateTime.toDateUtc(ts),
+                receivedAt: DateTime.toDateUtc(receivedAt),
+                visitorId,
+                sessionId,
+                properties: sql.json(enrichment.enrich(event.properties ?? {}, audience))
+              }
             }))
+            /** The Session that `sessionId` is part of by the end of the batch, following every join after it was assigned. */
+            const survivingSession = (sessionId: string): string => {
+              const joined = joinedInto.get(sessionId)
+              return joined === undefined ? sessionId : survivingSession(joined)
+            }
+            const rows = assigned.map((row) => ({ ...row, sessionId: survivingSession(row.sessionId) }))
             if (Arr.isArrayNonEmpty(rows)) yield* sql`INSERT INTO event ${sql.insert(rows)}`
           }))
           return uuids.length

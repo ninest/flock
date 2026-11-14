@@ -29,7 +29,7 @@ One thing being tracked (a website, mobile app or backend), with its own key and
 _Avoid_: Site, property, app
 
 **Project owner**:
-A Member who manages a Project: its settings, keys, Environments and who it is shared with. A Project always has at least one.
+A Member who manages a Project: its settings, keys, Environments and who it is shared with. A Project always has at least one, so a Member who is the only owner of a Project can't be removed from the Instance until another Member owns it.
 
 **Project viewer**:
 A Member a Project is shared with read-only: they see its reports for every Environment but can't change or delete anything.
@@ -76,7 +76,7 @@ A Session with a single Event. The bounce rate is the share of Sessions that are
 A per-Project choice of how Visitors are recognised: cookieless (an anonymous ID that resets daily) or persistent (an ID that is stored on the device and can be identified).
 
 **Filter**:
-A condition on one top-level Event property (is, is not, contains) that narrows every report to the Events that match. Several Filters combine with AND.
+A condition on one top-level Event property (is, is not, contains) that narrows every report to the Events that match. Several Filters combine with AND. Filters choose which Sessions a report covers (those with a matching Event) without changing what a Session is: its entry page, exit page and source still come from its first or last Pageview, and whether it is a Bounce from all its Events.
 _Avoid_: Segment, query
 
 **Identify**:

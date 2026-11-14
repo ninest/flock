@@ -1,6 +1,7 @@
 import { assert, layer } from "@effect/vitest"
-import { DateTime, Effect } from "effect"
+import { DateTime, Effect, Fiber, Result } from "effect"
 import { TestClock } from "effect/testing"
+import pg from "pg"
 import { Harness } from "./harness.ts"
 
 const json = <A>(response: Response) => Effect.promise(() => response.json() as Promise<A>)
@@ -159,5 +160,105 @@ layer(Harness.layer())("Members", (it) => {
       const error = yield* Effect.flip(h.client.instance.removeMember({ params: { memberId: me.id } }))
       assert.strictEqual(error._tag, "Forbidden")
       assert.isTrue((yield* h.client.members.me()).isAdmin)
+    }))
+})
+
+/** Seeds a Member and returns a browser signed in as them. */
+const signedIn = (email: string) =>
+  Effect.gen(function*() {
+    const h = yield* Harness
+    const id = yield* h.seedMember({ email, password })
+    const browser = yield* h.browser()
+    yield* browser.signIn({ email, password })
+    return { id, browser }
+  })
+
+layer(Harness.layer())("Removing a Member who owns Projects", (it) => {
+  it.effect("is refused while they are the only owner of a Project, and succeeds once another Member owns it", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const sole = yield* signedIn("sole@example.com")
+      yield* signedIn("heir@example.com")
+      const project = yield* h.createProject({ name: "Sole site", environments: ["dev"], as: sole.browser })
+      const projectId = project.id
+      const heir = yield* sole.browser.client.projects.addMember({
+        params: { projectId },
+        payload: { email: "heir@example.com", role: "viewer" }
+      })
+
+      const error = yield* Effect.flip(h.client.instance.removeMember({ params: { memberId: sole.id } }))
+      assert.strictEqual(error._tag, "SoleProjectOwner")
+      assert.include((error as { message: string }).message, "Sole site")
+
+      // The Member and their memberships are untouched.
+      assert.include((yield* h.client.instance.members()).map((m) => m.email), "sole@example.com")
+      assert.deepStrictEqual((yield* sole.browser.client.projects.list()).map((p) => p.id), [projectId])
+      const roles = (yield* sole.browser.client.projects.members({ params: { projectId } }))
+        .map((m) => [m.email, m.role] as const)
+      assert.deepStrictEqual(new Map(roles), new Map([["sole@example.com", "owner"], ["heir@example.com", "viewer"]]))
+
+      // Ownership is transferred through the Project membership controls, then the removal goes through.
+      yield* sole.browser.client.projects.changeMemberRole({ params: { projectId, memberId: heir.id }, payload: { role: "owner" } })
+      yield* h.client.instance.removeMember({ params: { memberId: sole.id } })
+      assert.notInclude((yield* h.client.instance.members()).map((m) => m.email), "sole@example.com")
+    }))
+
+  it.effect("a Member who co-owns a Project, or only views one, can be removed", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const first = yield* signedIn("first@example.com")
+      const coOwner = yield* signedIn("coowner@example.com")
+      const viewer = yield* signedIn("viewer@example.com")
+      const project = yield* h.createProject({ name: "Shared site", environments: ["dev"], as: first.browser })
+      const projectId = project.id
+      yield* first.browser.client.projects.addMember({ params: { projectId }, payload: { email: "coowner@example.com", role: "owner" } })
+      yield* first.browser.client.projects.addMember({ params: { projectId }, payload: { email: "viewer@example.com", role: "viewer" } })
+
+      yield* h.client.instance.removeMember({ params: { memberId: coOwner.id } })
+      yield* h.client.instance.removeMember({ params: { memberId: viewer.id } })
+      const left = (yield* first.browser.client.projects.members({ params: { projectId } })).map((m) => m.email)
+      assert.deepStrictEqual(left, ["first@example.com"])
+    }))
+
+  /**
+   * Pauses a request that is about to change or delete this Member's row, by holding the lock a new
+   * Project membership of theirs would take, on a second connection, until `release` is called.
+   */
+  const holdMember = (memberId: string) =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const connection = new pg.Client({ connectionString: h.databaseUrl })
+      yield* Effect.promise(async () => {
+        await connection.connect()
+        await connection.query("BEGIN")
+        await connection.query(`SELECT 1 FROM member WHERE id = $1 FOR KEY SHARE`, [memberId])
+      })
+      yield* Effect.addFinalizer(() => Effect.promise(() => connection.end()))
+      return { release: Effect.promise(() => connection.query("COMMIT")) }
+    })
+  /** Real time for a paused request to reach the lock it waits on (requests run on the TestClock). */
+  const settle = Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 300)))
+
+  it.effect("is refused when they become the only owner of a Project while the removal is under way", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const founder = yield* signedIn("founder@example.com")
+      const leaving = yield* signedIn("leaving@example.com")
+      const { id: projectId } = yield* h.createProject({ name: "Handed over", environments: ["dev"], as: founder.browser })
+      yield* founder.browser.client.projects.addMember({ params: { projectId }, payload: { email: "leaving@example.com", role: "viewer" } })
+
+      const hold = yield* holdMember(leaving.id)
+      const removal = yield* Effect.forkChild(Effect.result(h.client.instance.removeMember({ params: { memberId: leaving.id } })))
+      yield* settle
+      // The founder hands the Project over and steps down while the removal waits.
+      yield* founder.browser.client.projects.changeMemberRole({ params: { projectId, memberId: leaving.id }, payload: { role: "owner" } })
+      yield* founder.browser.client.projects.changeMemberRole({ params: { projectId, memberId: founder.id }, payload: { role: "viewer" } })
+      yield* hold.release
+
+      const result = yield* Fiber.join(removal)
+      assert.isTrue(Result.isFailure(result), "the removal went through")
+      assert.strictEqual(Result.isFailure(result) && result.failure._tag, "SoleProjectOwner")
+      const roles = (yield* founder.browser.client.projects.members({ params: { projectId } })).map((m) => [m.email, m.role] as const)
+      assert.deepStrictEqual(new Map(roles), new Map([["leaving@example.com", "owner"], ["founder@example.com", "viewer"]]))
     }))
 })

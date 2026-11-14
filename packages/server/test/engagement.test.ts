@@ -16,6 +16,8 @@ const day = (filters?: ReadonlyArray<EventPropertyFilter>) => ({
 const DE = "203.0.113.7"
 const US = "198.51.100.23"
 const geoIp = { [DE]: "DE", [US]: "US" }
+const CHROME_WINDOWS =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 const SAFARI_IPHONE =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1"
 
@@ -129,8 +131,9 @@ layer(Harness.layer({ geoIp }))("Engagement on pages", (it) => {
       assert.deepStrictEqual([overview.totals.sessions, overview.totals.bounceRate], [1, 0])
       assert.deepStrictEqual([overview.previous.totals.sessions, overview.previous.totals.bounceRate], [1, 0])
       assert.deepStrictEqual(overview.series.find((b) => b.sessions > 0)?.bounceRate, 0)
+      // The Session entered on /, not on the Pageview the Filter matched.
       assert.deepStrictEqual((yield* h.top(production!.id, "entryPages", onPricing)).rows, [
-        { value: "/pricing", visitors: 1, bounceRate: 0 }
+        { value: "/", visitors: 1, bounceRate: 0 }
       ])
     }))
 })
@@ -170,6 +173,25 @@ layer(Harness.layer({ geoIp }))("Engagement on sources and devices", (it) => {
       assert.deepStrictEqual(yield* rows("devices"), [
         { value: null, visitors: 3, bounceRate: 1 / 3 },
         { value: "mobile", visitors: 2, bounceRate: 1 }
+      ])
+    }))
+
+  it.effect("a device's bounce rate is over the Sessions with any Event on it, Custom events included", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* h.createProject({})
+      const send = (ip: string, userAgent: string, ...events: ReadonlyArray<IngestEvent>) =>
+        h.ingest(production!.key, events, { ip, userAgent })
+      yield* at("2026-03-01T09:00:00Z")
+      // Phones: a Session of one Custom event (a Bounce), and one with a Pageview and a Custom event.
+      yield* send("198.51.100.1", SAFARI_IPHONE, customEvent("app_opened"))
+      yield* send("198.51.100.2", SAFARI_IPHONE, visit("/"), customEvent("signup_clicked"))
+      // Desktop: a Session of two Custom events and no Pageview, so no Bounce.
+      yield* send("198.51.100.3", CHROME_WINDOWS, customEvent("app_opened"), customEvent("signup_clicked"))
+
+      assert.deepStrictEqual((yield* h.top(production!.id, "devices", day())).rows, [
+        { value: "mobile", visitors: 2, bounceRate: 0.5 },
+        { value: "desktop", visitors: 1, bounceRate: 0 }
       ])
     }))
 })

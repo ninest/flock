@@ -1,7 +1,8 @@
 // The Visitors list, the Visitor profile and a Visitor's Sessions (persistent Tracking mode), observed through the Visitors API.
 import { assert, layer } from "@effect/vitest"
 import type { EnvironmentId, IngestEvent, VisitorsQuery } from "@flock/shared"
-import { DateTime, Effect } from "effect"
+import { DateTime, Effect, Fiber } from "effect"
+import pg from "pg"
 import { TestClock } from "effect/testing"
 import { customEvent, Harness, pageview } from "./harness.ts"
 
@@ -190,6 +191,90 @@ layer(Harness.layer())("Visitor profile and Identify (ADR 0005)", (it) => {
       assert.strictEqual(two.identified, true)
       assert.strictEqual(one.events, 3)
       assert.strictEqual(two.events, 3)
+    }))
+
+  it.effect("a Visitor stays identified after its only device switches to another account, and is never merged afterwards", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* persistentProject()
+      yield* at("2026-03-01T09:00:00Z")
+      yield* h.ingest(production!.key, [identify("person-1", "laptop"), as("person-1", pageview())])
+      // Someone else signs in on the same laptop: the device switches to person-2.
+      yield* at("2026-03-01T10:00:00Z")
+      yield* h.ingest(production!.key, [identify("person-2", "laptop"), as("person-2", pageview())])
+
+      const afterSwitch = yield* profile(production!.id, "person-1")
+      assert.strictEqual(afterSwitch.identified, true)
+      assert.strictEqual(afterSwitch.events, 2)
+      assert.strictEqual(afterSwitch.sessions, 1)
+      const list = yield* visitors(production!.id, march("01"))
+      assert.deepStrictEqual(list.visitors.map((v) => [v.visitorId, v.identified]), [["person-2", true], ["person-1", true]])
+      const found = yield* visitors(production!.id, { ...march("01"), search: "person-1" })
+      assert.deepStrictEqual(found.visitors.map((v) => v.visitorId), ["person-1"])
+      const { sessions: [session] } = yield* visitorSessions(production!.id, "person-1")
+      const details = yield* h.session(production!.id, session!.id)
+      assert.deepStrictEqual([details.visitorId, details.visitorIdentified], ["person-1", true])
+
+      // An Identify that would move person-1's history into person-2 is ignored.
+      yield* at("2026-03-01T11:00:00Z")
+      yield* h.ingest(production!.key, [identify("person-2", "person-1"), as("person-1", pageview())])
+
+      const one = yield* profile(production!.id, "person-1")
+      const two = yield* profile(production!.id, "person-2")
+      assert.strictEqual(one.identified, true)
+      assert.strictEqual(two.identified, true)
+      assert.strictEqual(one.events, 3)
+      assert.strictEqual(two.events, 3)
+      assert.strictEqual(one.sessions, 2)
+      assert.strictEqual(two.sessions, 2)
+    }))
+
+  it.effect("an ID named by a refused Identify is an identified Visitor too, and is never merged afterwards", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* persistentProject()
+      yield* at("2026-03-01T09:00:00Z")
+      yield* h.ingest(production!.key, [identify("user_1", "laptop"), as("user_1", pageview())])
+      // The app calls identify("user_2") on a device whose stored ID is user_1 itself: nothing moves,
+      // but the device sends its Events as user_2 from now on.
+      yield* h.ingest(production!.key, [identify("user_2", "user_1"), as("user_2", pageview())])
+      yield* h.ingest(production!.key, [identify("user_3", "user_2"), as("user_3", pageview())])
+
+      const profiles = yield* Effect.forEach(["user_1", "user_2", "user_3"], (id) => profile(production!.id, id))
+      assert.deepStrictEqual(profiles.map((p) => [p.identified, p.events]), [[true, 2], [true, 2], [true, 2]])
+    }))
+
+  it.effect("an ID is never merged away by an Identify that arrives while its own first Identify is still being stored", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* persistentProject()
+      yield* at("2026-03-01T09:00:00Z")
+      yield* h.ingest(production!.key, [as("laptop", pageview())])
+      yield* h.ingest(production!.key, [as("account-1", pageview())], { ip: "203.0.113.9" })
+
+      // Holding the laptop's Events on a second connection pauses its Identify part-way, before it commits.
+      const connection = new pg.Client({ connectionString: h.databaseUrl })
+      yield* Effect.addFinalizer(() => Effect.promise(() => connection.end()))
+      yield* Effect.promise(async () => {
+        await connection.connect()
+        await connection.query("BEGIN")
+        await connection.query("SELECT 1 FROM event WHERE visitor_id = 'laptop' FOR UPDATE")
+      })
+      const settle = Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 300)))
+      const first = yield* Effect.forkChild(h.ingest(production!.key, [identify("account-1", "laptop")]))
+      yield* settle
+      const second = yield* Effect.forkChild(h.ingest(production!.key, [identify("account-2", "account-1")], { ip: "203.0.113.9" }))
+      yield* settle
+      yield* Effect.promise(() => connection.query("COMMIT"))
+      yield* Fiber.join(first)
+      yield* Fiber.join(second)
+      yield* h.ingest(production!.key, [as("account-1", customEvent("after"))])
+
+      const one = yield* profile(production!.id, "account-1")
+      const two = yield* profile(production!.id, "account-2")
+      assert.strictEqual(one.identified, true)
+      assert.strictEqual(one.events, 4) // both Pageviews, its Identify and the Event after
+      assert.strictEqual(two.events, 1) // only its own refused Identify
     }))
 })
 

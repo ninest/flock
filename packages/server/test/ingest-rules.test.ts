@@ -1,9 +1,10 @@
 // Ingest rules: limits and reserved names, dedupe by Event UUID, client timestamps,
 // allowed origins per Environment, and bot dropping. Observed only through the HTTP API.
-import { assert, layer } from "@effect/vitest"
+import { assert, describe, it, layer } from "@effect/vitest"
 import type { EnvironmentId, IngestResult } from "@flock/shared"
 import { Effect } from "effect"
 import { TestClock } from "effect/testing"
+import { isPrivateHost } from "../src/ingest-rules.ts"
 import { customEvent, type Harness as HarnessT, Harness, pageview } from "./harness.ts"
 
 type H = HarnessT["Service"]
@@ -173,6 +174,60 @@ layer(Harness.layer())("Ingest origins", (it) => {
       assert.strictEqual(yield* count(h, production!.id), 2)
     }))
 
+  it.effect("production judges IPv6 literal origins by address: public ones pass, loopback, link-local and private ones don't", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* h.createProject({})
+      for (const origin of ["https://[2606:4700:4700::1111]", "http://[2a00:1450:4001:82a::200e]:8080"]) {
+        assert.strictEqual((yield* fromOrigin(h, production!.key, origin)).status, 200, origin)
+      }
+      const rejected = [
+        "http://[::1]:3000", // loopback
+        "http://[::]", // unspecified
+        "http://[fe80::1ff:fe23:4567:890a]", // link-local
+        "http://[febf::1]",
+        "http://[fd12:3456:789a::1]", // unique local
+        "http://[fc00::1]",
+        "http://[::ffff:192.168.1.20]", // IPv4-mapped private and loopback addresses
+        "http://[::ffff:127.0.0.1]",
+        "http://[::ffff:a00:5]", // ::ffff:10.0.0.5 in hex
+        "http://[::ffff:100.100.1.1]" // carrier-grade NAT, Tailscale
+      ]
+      for (const origin of rejected) {
+        const { body, status } = yield* fromOrigin(h, production!.key, origin)
+        assert.strictEqual(status, 403, origin)
+        assert.strictEqual(body._tag, "OriginNotAllowed", origin)
+      }
+      // An IPv4-mapped address is as public as the IPv4 address it maps.
+      assert.strictEqual((yield* fromOrigin(h, production!.key, "http://[::ffff:8.8.8.8]")).status, 200)
+    }))
+
+  it.effect("production rejects IPv6 literal origins that embed a private IPv4 address, and site-local and multicast ones", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* h.createProject({})
+      const rejected = [
+        "http://[::7f00:1]", // IPv4-compatible ::127.0.0.1
+        "http://[::a00:1]", // IPv4-compatible ::10.0.0.1
+        "http://[::ffff:0:7f00:1]", // IPv4-translated ::ffff:0:127.0.0.1
+        "http://[64:ff9b::a00:1]", // NAT64 of 10.0.0.1
+        "http://[64:ff9b:1::a00:1]", // local-use NAT64
+        "http://[2002:c0a8:101::1]", // 6to4 of 192.168.1.1
+        "http://[fec0::1]", // site-local
+        "http://[feff::1]",
+        "http://[ff02::1]" // multicast
+      ]
+      for (const origin of rejected) {
+        const { body, status } = yield* fromOrigin(h, production!.key, origin)
+        assert.strictEqual(status, 403, origin)
+        assert.strictEqual(body._tag, "OriginNotAllowed", origin)
+      }
+      // An embedded IPv4 address is as public as it is on its own.
+      for (const origin of ["http://[64:ff9b::808:808]", "http://[2002:808:808::1]"]) {
+        assert.strictEqual((yield* fromOrigin(h, production!.key, origin)).status, 200, origin)
+      }
+    }))
+
   it.effect("a new non-production Environment accepts localhost and *.ts.net, and nothing else", () =>
     Effect.gen(function*() {
       const h = yield* Harness
@@ -246,4 +301,12 @@ layer(Harness.layer())("Ingest bots", (it) => {
       assert.strictEqual((yield* send(h, production!.key, [pageview()], { "user-agent": person })).body.accepted, 1)
       assert.strictEqual(yield* count(h, production!.id), 1)
     }))
+})
+
+describe("Private hosts", () => {
+  it("treats a bracketed host that isn't an IPv6 address as private instead of throwing", () => {
+    for (const host of ["[1:2:3:4:5::6:7:8:9]", "[1:2:3:4:5:6:7:8:9]", "[1::2::3]", "[g::1]", "[]", "[:::]"]) {
+      assert.strictEqual(isPrivateHost(host), true, host)
+    }
+  })
 })
