@@ -407,7 +407,8 @@ export class Queries extends Context.Service<Queries, {
           name,
           totals: { count: totals?.count ?? 0, visitors: totals?.visitors ?? 0 },
           series,
-          properties
+          properties,
+          annotations: yield* annotations.inRange(scope.projectId, scope.environmentId, range)
         }
       }))
 
