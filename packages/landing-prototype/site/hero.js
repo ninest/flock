@@ -1,7 +1,7 @@
 // PROTOTYPE. The hero: the drive as a camera feed. Top left is the logo (the blinking record dot and "flock"), top
 // right the GitHub link, bottom left the pitch. The car is always in the middle of the frame, so the reticle and tag
 // are pinned there. Bottom right, a report card says what Sam is doing: what came before, then the event, what was
-// observed, a note and the time.
+// observed, a note, and the time.
 import { BEATS, GITHUB, HEADLINE, SUB, VISITOR } from './content.js';
 import { createDrive, h } from './drive.js';
 

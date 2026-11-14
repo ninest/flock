@@ -1,5 +1,5 @@
 // PROTOTYPE. Below the hero: one sentence on what Flock does, the capabilities as a bento board (tiles of different
-// sizes, some showing a number, a snippet or a small timeline; no heading, the tiles say what they are), the use
+// sizes, some showing a number, a snippet, or a small timeline; no heading, the tiles say what they are), the use
 // cases as a plain grid, the way out to GitHub.
 import { BEATS, EXAMPLES, FEATURES, GITHUB, STATEMENT } from './content.js';
 import { h } from './drive.js';

@@ -35,7 +35,7 @@ export const FEATURES = [
   ['A tiny script', 'One tag on your site. Pageviews arrive on their own, single-page apps included.', { stat: '< 2 KB' }],
   ['Custom events', 'Name anything that happens and attach properties to it. Break any Event down by its properties.', { code: 'flock.track("signup")' }],
   ['Sessions and timelines', 'Bounce rate, visit duration, and every Session readable Event by Event.', { size: 'tall', timeline: true }],
-  ['Sources, pages, countries', 'Referrers and utm tags, top, entry and exit pages, and where in the world Visitors are.', { code: 'utm_source=newsletter' }],
+  ['Sources, pages, countries', 'Referrers and utm tags; top, entry, and exit pages; and where in the world Visitors are.', { code: 'utm_source=newsletter' }],
   ['Filters', 'Click any row to narrow every report to it. Filters live in the URL, so a view is a link.', { code: '$country is DE' }],
   ['Cookieless by default', 'An anonymous ID that resets daily. Turn on persistent tracking and Identify per Project, if you need them.', { stat: '0 cookies' }],
   ['Projects and people', 'A Project per site, a dev Environment beside production, read-only sharing, invites, and sign-in through your own OIDC provider.', { size: 'wide3' }],
