@@ -316,16 +316,16 @@ export class Queries extends Context.Service<Queries, {
         case "browsers":
         case "oses":
         case "devices": {
-          // Visitors by their Pageviews' value; bounce rate over the Sessions with a Pageview of it.
+          // Visitors by the value of their Events in scope, of any kind; bounce rate over the Sessions
+          // with an Event in scope carrying it.
           const value = sql`properties ->> ${AUDIENCE[kind]}`
           return sql`
             SELECT v.value, count(DISTINCT v.visitor_id)::int AS visitors, NULL::int AS pageviews,
                    b.bounce_rate, NULL::float8 AS exit_rate, NULL::float8 AS time_on_page
-            FROM (SELECT ${value} AS value, visitor_id FROM scoped WHERE name = '$pageview') v
+            FROM (SELECT ${value} AS value, visitor_id FROM scoped) v
             LEFT JOIN (
               SELECT d.value, ${bounceRate} AS bounce_rate
-              FROM (SELECT DISTINCT ${value} AS value, session_id FROM scoped
-                    WHERE name = '$pageview' AND session_id IS NOT NULL) d
+              FROM (SELECT DISTINCT ${value} AS value, session_id FROM scoped WHERE session_id IS NOT NULL) d
               JOIN sessions se USING (session_id) GROUP BY 1
             ) b ON b.value IS NOT DISTINCT FROM v.value
             GROUP BY v.value, b.bounce_rate`

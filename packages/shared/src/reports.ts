@@ -147,7 +147,8 @@ export type Overview = typeof Overview.Type
  * - `utmSources` / `utmMediums` / `utmCampaigns`: Visitors per `utm_source` / `utm_medium` /
  *   `utm_campaign` of their Sessions' first Pageview. Sessions without the tag are left out.
  * - `countries` / `browsers` / `oses` / `devices`: Visitors per `$country` / `$browser` /
- *   `$os` / `$device` of their Pageviews; `null` when unknown.
+ *   `$os` / `$device` of their Events of any kind, so a Visitor with only Custom events counts
+ *   too; `null` when unknown.
  */
 export const TopReport = Schema.Literals([
   "pages",
