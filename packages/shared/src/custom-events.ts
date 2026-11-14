@@ -2,6 +2,7 @@
 // breakdowns and numeric statistics. Every report takes the date range picker.
 import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/http-api"
+import { Annotation } from "./annotations.ts"
 import { EnvironmentId, EnvironmentNotFound } from "./domain.ts"
 import { MemberAuth } from "./members.ts"
 import { ReportInterval, ReportRangeQuery } from "./reports.ts"
@@ -46,7 +47,9 @@ export const CustomEventDetail = Schema.Struct({
   /** Every bucket in the range, including empty ones. */
   series: Schema.Array(Schema.Struct({ bucket: Schema.String, ...CustomEventNumbers.fields })),
   /** The Event properties sent with this Custom event in the range, by key. */
-  properties: Schema.Array(CustomEventProperty)
+  properties: Schema.Array(CustomEventProperty),
+  /** The Annotations that apply to the Environment and fall in the range, oldest first. Filters don't affect them. */
+  annotations: Schema.Array(Annotation)
 })
 export type CustomEventDetail = typeof CustomEventDetail.Type
 

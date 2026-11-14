@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { fromLocalInput, linkParts, localBucket, placeAnnotations, toLocalInput } from "./annotations.ts"
+import { annotationEnvironments, environmentsLabel, fromLocalInput, linkParts, localBucket, placeAnnotations, toLocalInput } from "./annotations.ts"
 
 const NY = "America/New_York"
 const ms = (iso: string) => Date.parse(iso)
@@ -51,5 +51,22 @@ describe("linkParts", () => {
     ])
     expect(linkParts("no links")).toEqual([{ text: "no links" }])
     expect(linkParts("javascript:alert(1)")).toEqual([{ text: "javascript:alert(1)" }])
+  })
+})
+
+describe("annotationEnvironments", () => {
+  it("is all, or the chosen Environments, and undefined for an empty choice", () => {
+    expect(annotationEnvironments("all", ["env_dev"])).toBe("all")
+    expect(annotationEnvironments("some", ["env_dev", "env_staging"])).toEqual(["env_dev", "env_staging"])
+    expect(annotationEnvironments("some", [])).toBeUndefined()
+  })
+})
+
+describe("environmentsLabel", () => {
+  const environments = [{ id: "env_prod", name: "production" }, { id: "env_dev", name: "dev" }, { id: "env_staging", name: "staging" }]
+  it("reads All Environments, or the chosen names in the Project's order", () => {
+    expect(environmentsLabel("all", environments)).toBe("All Environments")
+    expect(environmentsLabel(["env_staging", "env_prod"], environments)).toBe("production, staging")
+    expect(environmentsLabel(["env_dev"], environments)).toBe("dev")
   })
 })

@@ -351,6 +351,14 @@ export class Projects extends Context.Service<Projects, {
             yield* notProduction(env, "The production Environment can't be deleted")
             yield* sql.withTransaction(Effect.gen(function*() {
               yield* ingest.deleteEvents([id])
+              // Narrowed Annotations whose only Environment this is go with it; the others lose it
+              // from their set when the row cascades.
+              yield* sql`
+                DELETE FROM annotation a
+                WHERE a.project_id = ${env.projectId} AND NOT a.all_environments
+                  AND NOT EXISTS (
+                    SELECT 1 FROM annotation_environment ae WHERE ae.annotation_id = a.id AND ae.environment_id <> ${id}
+                  )`
               yield* sql`DELETE FROM environment WHERE id = ${id}`
             })).pipe(orDie)
           }),

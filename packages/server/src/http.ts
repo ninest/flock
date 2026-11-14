@@ -126,7 +126,10 @@ const VisitorsHandlers = HttpApiBuilder.group(FlockApi, "visitors", Effect.fn(fu
 const AnnotationsHandlers = HttpApiBuilder.group(FlockApi, "annotations", Effect.fn(function*(handlers) {
   const annotations = yield* Annotations
   return handlers
+    .handle("list", ({ params }) => CurrentMember.use(({ id }) => annotations.list(id, params.projectId)))
     .handle("create", ({ params, payload }) => CurrentMember.use(({ id }) => annotations.create(id, params.projectId, payload)))
+    .handle("update", ({ params, payload }) =>
+      CurrentMember.use(({ id }) => annotations.update(id, params.projectId, params.annotationId, payload)))
     .handle("delete", ({ params }) =>
       CurrentMember.use(({ id }) => annotations.delete(id, params.projectId, params.annotationId)))
 }))

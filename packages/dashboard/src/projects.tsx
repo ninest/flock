@@ -158,7 +158,7 @@ export const ProjectPage = ({ projectId, search }: { projectId: ProjectId; searc
   return (
     <Shell section={section} chrome={chrome}>
       {section === "dashboard" && (
-        <Dashboard key={environment.id} projectId={projectId} environment={environment} search={search} timeZone={project.timeZone} isOwner={project.role === "owner"} onAddFilter={addFilter} />
+        <Dashboard key={environment.id} projectId={projectId} environment={environment} environments={project.environments} search={search} timeZone={project.timeZone} isOwner={project.role === "owner"} onAddFilter={addFilter} />
       )}
       {section === "live" && <Live key={environment.id} projectId={projectId} environment={environment} search={search} timeZone={project.timeZone} />}
       {section === "visitors" && persistent && (
@@ -171,7 +171,18 @@ export const ProjectPage = ({ projectId, search }: { projectId: ProjectId; searc
           onSearch={(q) => void navigate({ to: "/projects/$projectId", params: { projectId }, search: { ...search, q }, replace: true })}
         />
       )}
-      {section === "events" && <CustomEvents key={environment.id} projectId={projectId} environment={environment} search={search} onAddFilter={addFilter} />}
+      {section === "events" && (
+        <CustomEvents
+          key={environment.id}
+          projectId={projectId}
+          environment={environment}
+          environments={project.environments}
+          search={search}
+          timeZone={project.timeZone}
+          isOwner={project.role === "owner"}
+          onAddFilter={addFilter}
+        />
+      )}
     </Shell>
   )
 }

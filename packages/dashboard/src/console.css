@@ -48,7 +48,7 @@ input:focus, select:focus, textarea:focus { border-color: #555; outline: none; }
 select { -webkit-appearance: none; appearance: none; padding-right: 36px; cursor: pointer; text-overflow: ellipsis;
   background: #0c0c0c url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%238c8c8c' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 12px center; }
 select option { background: #0c0c0c; color: var(--ink); }
-input[type="checkbox"] { width: 18px; height: 18px; padding: 0; accent-color: var(--accent); vertical-align: -3px; }
+input[type="checkbox"], input[type="radio"] { width: 18px; height: 18px; padding: 0; accent-color: var(--accent); vertical-align: -3px; }
 textarea { font-family: var(--mono); font-size: 14px; }
 label.field { display: grid; gap: 6px; color: var(--muted); font-size: 14px; }
 label.field > input, label.field > select, label.field > textarea { color: var(--ink); }
@@ -145,6 +145,11 @@ label.field > input, label.field > select, label.field > textarea { color: var(-
 .annotation p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .annotation p a { color: var(--accent); }
 .annotation-form { margin-top: 20px; max-width: 560px; }
+.annotation-list { margin-top: 0; }
+.annotation-list .annotation-form { margin-top: 0; }
+.choices { display: grid; gap: 8px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.choices legend { padding: 0; margin-bottom: 6px; color: var(--muted); font-size: 14px; }
+.choices-nested { display: grid; gap: 8px; padding-left: 26px; }
 
 /* Rows: tables built from grids. --cols sets the columns; cells marked data-wide drop on a phone. */
 .rows { min-width: 0; font-size: 14px; }
