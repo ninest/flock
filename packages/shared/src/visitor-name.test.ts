@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { visitorName } from "./visitor-name.ts"
+import { visitorLabel, visitorName } from "./visitor-name.ts"
 
 describe("visitorName", () => {
   it("gives the same name for the same Visitor ID, every time", () => {
@@ -31,5 +31,12 @@ describe("visitorName", () => {
   it("does not tie the animal to the adjective", () => {
     const quiet = Array.from({ length: 3000 }, (_, i) => visitorName(`v${i}`)).filter((n) => n.startsWith("Quiet "))
     expect(new Set(quiet).size).toBeGreaterThan(5)
+  })
+})
+
+describe("visitorLabel", () => {
+  it("shows an identified Visitor by their ID, an anonymous one by their Visitor name", () => {
+    expect(visitorLabel({ visitorId: "user_20418", identified: true })).toBe("user_20418")
+    expect(visitorLabel({ visitorId: "device-1", identified: false })).toBe("Merry Owl")
   })
 })

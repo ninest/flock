@@ -45,3 +45,7 @@ export const visitorName = (visitorId: string): string => {
   const animal = ANIMALS[Math.floor(h / ADJECTIVES.length) % ANIMALS.length]!
   return `${adjective} ${animal}`
 }
+
+/** How a Visitor is shown: by their ID when identified, else by their Visitor name. */
+export const visitorLabel = (visitor: { readonly visitorId: string; readonly identified: boolean }): string =>
+  visitor.identified ? visitor.visitorId : visitorName(visitor.visitorId)
