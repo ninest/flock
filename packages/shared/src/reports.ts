@@ -97,15 +97,21 @@ export const OverviewBucket = Schema.Struct({
 export type OverviewBucket = typeof OverviewBucket.Type
 
 /**
- * The previous period: the same number of local days ending the day before `from`. For `today`
- * it is yesterday up to the current local time of day.
+ * The previous period of a report's range: the same number of local days ending the day before
+ * `from`. For a range of only today it is yesterday up to the current local time of day.
  */
-export const OverviewPreviousPeriod = Schema.Struct({
+export const PreviousPeriod = Schema.Struct({
   /** Local dates (inclusive). */
   from: Schema.String,
   to: Schema.String,
-  /** Local wall-clock end (exclusive) on `to`, `2026-02-28T09:15:00`, for `today`; null otherwise. */
-  until: Schema.NullOr(Schema.String),
+  /** Local wall-clock end (exclusive) on `to`, `2026-02-28T09:15:00`, for a range of only today; null otherwise. */
+  until: Schema.NullOr(Schema.String)
+})
+export type PreviousPeriod = typeof PreviousPeriod.Type
+
+/** The overview's previous period, with its numbers. */
+export const OverviewPreviousPeriod = Schema.Struct({
+  ...PreviousPeriod.fields,
   totals: OverviewNumbers,
   /** One bucket per bucket of the current series, in the same order, labelled with its own dates. */
   series: Schema.Array(OverviewBucket)

@@ -16,6 +16,7 @@ import type {
   Overview,
   OverviewNumbers,
   EventPropertyFilters,
+  PreviousPeriod,
   ReportRangeQuery,
   SessionDetail,
   SessionList,
@@ -127,6 +128,13 @@ export class Queries extends Context.Service<Queries, {
       ${range.until === null ? sql`` : sql`AND ts < (${range.until}::timestamp AT TIME ZONE ${range.timeZone})`}
       AND ${matchesFilters(sql, filters)}`
 
+    /** The same scope over its previous period, and that period as reports return it. */
+    const previousScope = (scope: ReportScope) =>
+      Effect.map(DateTime.now, (now) => {
+        const range = resolvePreviousRange(scope.range, now)
+        return { scope: { ...scope, range }, period: { from: range.from, to: range.to, until: range.until } satisfies PreviousPeriod }
+      })
+
     /**
      * CTE `scoped`: the Environment's Events in the range that match the filters (only Custom
      * events with `customOnly`), with `bucket`, their local bucket start.
@@ -222,9 +230,9 @@ export class Queries extends Context.Service<Queries, {
       Effect.gen(function*() {
         const scope = yield* checkAccessAndResolveRange(request)
         const { range } = scope
-        const previousRange = resolvePreviousRange(range, yield* DateTime.now)
+        const previousPeriod = yield* previousScope(scope)
         const [current, previous] = yield* Effect.all(
-          [overviewNumbers(scope), overviewNumbers({ ...scope, range: previousRange })],
+          [overviewNumbers(scope), overviewNumbers(previousPeriod.scope)],
           { concurrency: 2 }
         )
         return {
@@ -234,7 +242,7 @@ export class Queries extends Context.Service<Queries, {
           interval: range.interval,
           ...current,
           annotations: yield* annotations.inRange(scope),
-          previous: { from: previousRange.from, to: previousRange.to, until: previousRange.until, ...previous }
+          previous: { ...previousPeriod.period, ...previous }
         }
       }))
 
@@ -459,14 +467,14 @@ export class Queries extends Context.Service<Queries, {
                   FROM buckets b LEFT JOIN per_bucket p ON p.name = n.name AND p.bucket = b.bucket) AS series
           FROM names n
           ORDER BY n.count DESC, n.name ASC`
-        const previousRange = resolvePreviousRange(range, yield* DateTime.now)
+        const previousPeriod = yield* previousScope(scope)
         const previous = yield* sql<{ name: string; count: number }>`
-          WITH ${scopedEvents({ ...scope, range: previousRange }, { customOnly: true })}
+          WITH ${scopedEvents(previousPeriod.scope, { customOnly: true })}
           SELECT name, count(*)::int AS count FROM scoped GROUP BY name`
         const previousCounts = new Map(previous.map((row) => [row.name, row.count]))
         return {
           ...range,
-          previous: { from: previousRange.from, to: previousRange.to, until: previousRange.until },
+          previous: previousPeriod.period,
           events: events.map((event) => ({ ...event, previousCount: previousCounts.get(event.name) ?? 0 }))
         }
       }))

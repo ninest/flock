@@ -5,7 +5,7 @@ import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/http-api"
 import { Annotation } from "./annotations.ts"
 import { EnvironmentId, EnvironmentNotFound } from "./domain.ts"
 import { MemberAuth } from "./members.ts"
-import { ReportInterval, ReportRangeQuery } from "./reports.ts"
+import { PreviousPeriod, ReportInterval, ReportRangeQuery } from "./reports.ts"
 
 /** The resolved range of a report, as local dates (inclusive) in the Project's time zone. */
 const ResolvedRange = {
@@ -31,11 +31,8 @@ export type CustomEventSummary = typeof CustomEventSummary.Type
 
 export const CustomEventList = Schema.Struct({
   ...ResolvedRange,
-  /**
-   * The previous period, as for the overview: the same number of local days ending the day before
-   * `from`; for `today`, yesterday up to the current local time of day (`until`, exclusive).
-   */
-  previous: Schema.Struct({ from: Schema.String, to: Schema.String, until: Schema.NullOr(Schema.String) }),
+  /** The previous period, as for the overview. */
+  previous: PreviousPeriod,
   /** Every Custom event name sent in the range, most sent first. Built-in events are left out. */
   events: Schema.Array(CustomEventSummary)
 })
