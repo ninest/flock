@@ -90,6 +90,10 @@ _Avoid_: Segment, query
 **Identify**:
 Linking a persistent Visitor to an ID from the tracked app's own user system. Only possible in persistent Tracking mode. Every device identified with the same ID is one Visitor.
 
+**Reset**:
+Forgetting who a device is in persistent Tracking mode, typically when someone logs out of the tracked app. The device's later Events belong to a new anonymous Visitor, and everything it did before stays with the Visitor it was.
+_Avoid_: Logout, unidentify
+
 **Visitor name**:
 The made-up two-word name, such as "Quiet Heron", that an anonymous persistent Visitor is shown by. It is always the same for the same Visitor. An identified Visitor is shown by their ID instead.
 _Avoid_: Nickname, alias
