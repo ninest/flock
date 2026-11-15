@@ -86,7 +86,11 @@ const LiveSession = ({ projectId, environment, sessionId, search, timeZone }: {
     <>
       <h2>{session.lastPage ?? "No Pageview"}</h2>
       <p className="dim">{session.entryPage === null ? "From" : `Entered on ${session.entryPage} from`} {formatFrom(session.referringDomain, [session.utmSource, session.utmMedium, session.utmCampaign])}{where.length > 0 ? `, ${where.join(", ")}` : ""}</p>
-      {session.visitorId !== null && <p className="dim">Identified as <code>{session.visitorId}</code></p>}
+      {session.visitorId !== null && (
+        <p className="dim">
+          Identified as {session.visitorDisplayName === null ? <code>{session.visitorId}</code> : <span title={session.visitorId}>{session.visitorDisplayName}</span>}
+        </p>
+      )}
       <Timeline
         session={session}
         timeZone={timeZone}

@@ -568,10 +568,14 @@ export class Queries extends Context.Service<Queries, {
         })
     )
 
-    /** Identified: an Identify once named the Visitor ID, whatever its devices are linked to now (ADR 0005). */
-    const isIdentified = (projectId: string, visitorId: string) =>
-      sql`SELECT 1 FROM identified_visitor WHERE project_id = ${projectId} AND visitor_id = ${visitorId}`.pipe(
-        Effect.map((rows) => rows.length > 0)
+    /**
+     * Identified: an Identify once named the Visitor ID, whatever its devices are linked to now (ADR 0005);
+     * with the Display name of the latest one that carried a name.
+     */
+    const identityOf = (projectId: string, visitorId: string) =>
+      sql<{ readonly displayName: string | null }>`
+        SELECT display_name FROM identified_visitor WHERE project_id = ${projectId} AND visitor_id = ${visitorId}`.pipe(
+        Effect.map(([row]) => ({ identified: row !== undefined, displayName: row?.displayName ?? null }))
       )
 
     // Sessions.
@@ -684,7 +688,7 @@ export class Queries extends Context.Service<Queries, {
         // The Visitor shows only in persistent Tracking mode (switching back to cookieless hides it, as
         // Visitors start afresh).
         const visitorId = environment.trackingMode === "persistent" ? row.visitorId : null
-        const visitorIdentified = visitorId === null ? null : yield* isIdentified(environment.projectId, visitorId)
+        const identity = visitorId === null ? null : yield* identityOf(environment.projectId, visitorId)
         const neighbours = visitorId === null ? undefined : yield* sessionNeighbours(environment.id, visitorId, sessionId)
         const events = yield* sql<{
           readonly uuid: string
@@ -705,7 +709,8 @@ export class Queries extends Context.Service<Queries, {
           browser: row.browser,
           os: row.os,
           visitorId,
-          visitorIdentified,
+          visitorIdentified: identity?.identified ?? null,
+          visitorDisplayName: identity?.displayName ?? null,
           earlierSessionId: neighbours?.earlier ?? null,
           laterSessionId: neighbours?.later ?? null,
           timeline: events.map((e) => ({
@@ -754,7 +759,9 @@ export class Queries extends Context.Service<Queries, {
             SELECT DISTINCT visitor_id FROM scoped
             WHERE visitor_id IS NOT NULL
               ${search === undefined ? sql`` : sql`AND visitor_id IN (
-                SELECT visitor_id FROM identified_visitor WHERE project_id = ${projectId} AND starts_with(visitor_id, ${search})
+                SELECT visitor_id FROM identified_visitor
+                WHERE project_id = ${projectId}
+                  AND (starts_with(visitor_id, ${search}) OR strpos(lower(display_name), lower(${search})) > 0)
               )`}
           ),
           totals AS (
@@ -771,12 +778,13 @@ export class Queries extends Context.Service<Queries, {
             LIMIT ${VISITORS_PAGE_SIZE + 1}
           )
           SELECT p.visitor_id, p.first_seen_at, p.last_seen_at, p.sessions, p.events,
-                 EXISTS (SELECT 1 FROM identified_visitor i WHERE i.project_id = ${projectId} AND i.visitor_id = p.visitor_id) AS identified,
+                 i.visitor_id IS NOT NULL AS identified, i.display_name,
                  fe.properties ->> '$country' AS country, fe.properties ->> '$device' AS device,
                  fe.properties ->> '$browser' AS browser,
                  ${referringDomainOf(sql, "fp.properties")} AS referring_domain,
                  coalesce(fp.properties ->> '$utm_source', fp.properties ->> 'utm_source') AS utm_source
           FROM page p
+          LEFT JOIN identified_visitor i ON i.project_id = ${projectId} AND i.visitor_id = p.visitor_id
           -- The latest Session: the one holding the Visitor's last Event.
           LEFT JOIN LATERAL (
             SELECT session_id FROM event
@@ -800,6 +808,7 @@ export class Queries extends Context.Service<Queries, {
           visitors: page.map((row) => ({
             visitorId: row.visitorId,
             identified: row.identified,
+            displayName: row.displayName,
             firstSeenAt: DateTime.fromDateUnsafe(row.firstSeenAt),
             lastSeenAt: DateTime.fromDateUnsafe(row.lastSeenAt),
             sessions: row.sessions,
@@ -839,7 +848,7 @@ export class Queries extends Context.Service<Queries, {
           ORDER BY count DESC, name`
         return {
           visitorId,
-          identified: yield* isIdentified(environment.projectId, visitorId),
+          ...(yield* identityOf(environment.projectId, visitorId)),
           firstSeenAt: DateTime.fromDateUnsafe(totals.firstSeenAt),
           lastSeenAt: DateTime.fromDateUnsafe(totals.lastSeenAt),
           sessions: totals.sessions,
@@ -956,6 +965,7 @@ interface SessionRow {
 interface VisitorRow {
   readonly visitorId: string
   readonly identified: boolean
+  readonly displayName: string | null
   readonly firstSeenAt: Date
   readonly lastSeenAt: Date
   readonly sessions: number

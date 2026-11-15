@@ -91,6 +91,8 @@ export const SessionDetail = Schema.Struct({
   visitorId: Schema.NullOr(Schema.String),
   /** Whether that Visitor is identified (their ID is one Identify linked a device to); null in cookieless mode. */
   visitorIdentified: Schema.NullOr(Schema.Boolean),
+  /** That Visitor's Display name, if they are identified and have one; null otherwise. */
+  visitorDisplayName: Schema.NullOr(Schema.String),
   /**
    * The same Visitor's previous and next Session in the Environment, by start time (persistent Tracking mode);
    * null at either end of their history, and always null in cookieless mode.

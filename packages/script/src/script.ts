@@ -5,11 +5,12 @@
 // - cookieless (default): writes no cookies, localStorage or sessionStorage; `identify` and
 //   `reset` are no-ops.
 // - persistent: stores a random Visitor ID in localStorage (`flock_id`) and sends it with every
-//   Event as `distinct_id`; after `identify(id)` (kept in `flock_uid`) Events are sent as `id`.
+//   Event as `distinct_id`; after `identify(id)` (kept in `flock_uid`) Events are sent as `id`,
+//   and `identify(id, { name })` also sends the Display name (the last one sent kept in `flock_name`).
 //   `reset()` (Reset, on log out) forgets both and stores a new `flock_id`. Every send reads them
 //   afresh, so Identify and Reset apply to all open tabs.
 //   The snippet may be stale, so the script first asks `/api/ingest/config` for the Project's
-//   mode. If the Project is cookieless now, it clears both keys and behaves as cookieless.
+//   mode. If the Project is cookieless now, it clears its keys and behaves as cookieless.
 const tag = document.currentScript as HTMLScriptElement
 const key = tag.dataset.key
 const endpoint = `${tag.dataset.api ?? new URL(tag.src).origin}/api/ingest`
@@ -68,6 +69,7 @@ const ready = persistent
       persistent = trackingMode == "persistent"
       if (!persistent) {
         forget("flock_id")
+        forget("flock_name")
         forget("flock_uid")
       }
     },
@@ -110,12 +112,25 @@ history.pushState = function (...args: Parameters<History["pushState"]>) {
 }
 addEventListener("popstate", pageview)
 
-/** Links this device to `id` from the app's own user system. Persistent mode only. */
-const identify = (id: string) =>
+/** Identify options: `name` is the Display name, such as the person's username, shown instead of `id`. */
+export type IdentifyOptions = { name?: string }
+
+/**
+ * Links this device to `id` from the app's own user system. Persistent mode only. An already linked
+ * device sends again only when `name` (trimmed, at most 200 characters, ignored when blank) differs from the last one it sent (kept in `flock_name`), so it
+ * can be called on every page load.
+ */
+const identify = (id: string, options?: IdentifyOptions) =>
   whenReady(() => {
-    if (!persistent || !id || id == distinctId()) return
+    if (!persistent || !id) return
+    // Cleaned as the server does, so a name that only differs in spaces isn't sent again.
+    const name = options?.name?.trim().slice(0, 200) || undefined
+    const changed = id != distinctId()
+    if (!changed && (name == null || name == load("flock_name"))) return
     save("flock_uid", id)
-    post("$identify", { $anon_distinct_id: deviceId() })
+    if (name != null) save("flock_name", name)
+    else forget("flock_name") // another account: its name is unknown
+    post("$identify", name == null ? { $anon_distinct_id: deviceId() } : { $anon_distinct_id: deviceId(), $name: name })
   })
 
 /**
@@ -126,12 +141,13 @@ const reset = () =>
   whenReady(() => {
     if (!persistent || !load("flock_uid")) return
     forget("flock_uid")
+    forget("flock_name")
     save("flock_id", uuid())
   })
 
 declare global {
   interface Window {
-    flock: { track: (name: string, properties?: EventProperties) => void; identify: (id: string) => void; reset: () => void }
+    flock: { track: (name: string, properties?: EventProperties) => void; identify: (id: string, options?: IdentifyOptions) => void; reset: () => void }
   }
 }
 window.flock = { track: send, identify, reset }

@@ -199,6 +199,30 @@ describe("Persistent mode", () => {
   })
 })
 
+describe("Persistent mode: Display name", () => {
+  it("identify(id, { name }) sends the name with $identify, and again only when it changed", async () => {
+    const site = await openPlayground(browser(), { mode: "persistent" })
+    await site.goto("/")
+    const [pageview] = await site.waitForEvents(1)
+    const deviceId = pageview!.distinct_id
+    await site.page.evaluate(() => window.flock.identify("test-user", { name: "sam" }))
+    await site.page.evaluate(() => window.flock.identify("test-user", { name: "sam" })) // unchanged: nothing to send
+    await site.page.evaluate(() => window.flock.identify("test-user")) // no name: nothing to send
+    await site.page.reload()
+    await site.page.evaluate(() => window.flock.identify("test-user", { name: "sam" })) // still unchanged after a reload
+    await site.page.evaluate(() => window.flock.identify("test-user", { name: "samuel" })) // renamed
+    const events = await site.waitForEvents(4)
+    expect(await site.settledEvents()).toHaveLength(4)
+    expect(events.map((e) => [e.name, e.distinct_id, e.properties.$name])).toEqual([
+      ["$pageview", deviceId, undefined],
+      ["$identify", "test-user", "sam"],
+      ["$pageview", "test-user", undefined],
+      ["$identify", "test-user", "samuel"]
+    ])
+    expect(events[3]!.properties).toMatchObject({ $anon_distinct_id: deviceId })
+  })
+})
+
 describe("Persistent mode: reset", () => {
   it("after identify, sends later Events as a new anonymous Visitor ID and sends nothing itself", async () => {
     const site = await openPlayground(browser(), { mode: "persistent" })

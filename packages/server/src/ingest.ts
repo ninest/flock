@@ -10,7 +10,7 @@ import { Array as Arr, Context, DateTime, Effect, Layer, Result } from "effect"
 import type { SqlError } from "effect/sql/SqlError"
 import { Enrichment, type RequestContext } from "./enrichment.ts"
 import { EventPartitions } from "./event-partitions.ts"
-import { ANON_DISTINCT_ID, eventTime, IDENTIFY, isBot, originAllowed, rawUuid, validateEvent } from "./ingest-rules.ts"
+import { ANON_DISTINCT_ID, displayNameOf, eventTime, IDENTIFY, isBot, originAllowed, rawUuid, validateEvent } from "./ingest-rules.ts"
 import { Sessions } from "./sessions.ts"
 import { type VisitorId, Visitors } from "./visitors.ts"
 
@@ -100,10 +100,10 @@ export class Ingest extends Context.Service<Ingest, {
               ON CONFLICT DO NOTHING RETURNING uuid`
             const events = fresh.map(({ uuid }) => ({ uuid, ...byUuid.get(uuid)! }))
             if (projectId !== undefined) {
-              for (const { event } of events) {
+              for (const { event, ts } of events) {
                 if (event.name !== IDENTIFY) continue
                 const deviceId = event.properties![ANON_DISTINCT_ID] as string // checked by validateEvent
-                yield* visitors.identify({ projectId, deviceId, visitorId: event.distinct_id! })
+                yield* visitors.identify({ projectId, deviceId, visitorId: event.distinct_id!, displayName: displayNameOf(event), at: ts })
               }
             }
             // A late Event can join Sessions into one (see Sessions.assign): their stored Events

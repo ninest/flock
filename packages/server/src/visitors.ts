@@ -26,6 +26,10 @@ export interface IdentifyInput {
   readonly deviceId: VisitorId
   /** The tracked app's ID for the person, which becomes the Visitor ID. */
   readonly visitorId: VisitorId
+  /** The Display name the Identify carried, already cleaned; undefined leaves the Visitor's current one. */
+  readonly displayName?: string | undefined
+  /** The Identify Event's time: the Display name of the latest one wins. */
+  readonly at: DateTime.Utc
 }
 
 const utcDay = (at: DateTime.Utc) => DateTime.formatIso(at).slice(0, 10)
@@ -40,6 +44,7 @@ export class Visitors extends Context.Service<Visitors, {
    * as someone else switches to the new ID (the person signed in as another account). An ID that
    * was ever identified stays an identified Visitor, also once no device is linked to it, and is
    * never linked to another, so two identified Visitors are never merged.
+   * A Display name it carries replaces the Visitor's unless an Identify with a later time set theirs.
    * Run it inside the ingest transaction.
    */
   readonly identify: (input: IdentifyInput) => Effect.Effect<void, SqlError>
@@ -82,7 +87,7 @@ export class Visitors extends Context.Service<Visitors, {
         return alias?.visitorId ?? input.distinctId
       })
 
-      const identify = Effect.fn("Visitors.identify")(function*({ deviceId, projectId, visitorId }: IdentifyInput) {
+      const identify = Effect.fn("Visitors.identify")(function*({ at, deviceId, displayName, projectId, visitorId }: IdentifyInput) {
         if (deviceId === visitorId) return
         // Identifies that name the same ID, as the device or as the Visitor, take turns, even across
         // servers: the check below then sees an earlier Identify of `deviceId` that hasn't committed
@@ -93,9 +98,17 @@ export class Visitors extends Context.Service<Visitors, {
         // Recorded for good: the ID stays identified when its devices later switch to another one.
         // Also when the link below is refused: the tracked app has named the ID as a person, and the
         // device sends its Events as that ID from now on, so it must never be merged away either.
+        const row = displayName === undefined
+          ? { projectId, visitorId }
+          : { projectId, visitorId, displayName, displayNameAt: DateTime.toDateUtc(at) }
         yield* sql`
-          INSERT INTO identified_visitor ${sql.insert({ projectId, visitorId })}
-          ON CONFLICT (project_id, visitor_id) DO NOTHING`
+          INSERT INTO identified_visitor ${sql.insert(row)}
+          ON CONFLICT (project_id, visitor_id) DO ${
+          displayName === undefined
+            ? sql`NOTHING`
+            : sql`UPDATE SET display_name = excluded.display_name, display_name_at = excluded.display_name_at
+                 WHERE identified_visitor.display_name_at IS NULL OR identified_visitor.display_name_at <= excluded.display_name_at`
+        }`
         const [identified] = yield* sql`
           SELECT 1 FROM identified_visitor WHERE project_id = ${projectId} AND visitor_id = ${deviceId}`
         if (identified) return

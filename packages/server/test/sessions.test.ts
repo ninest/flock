@@ -188,6 +188,7 @@ layer(Harness.layer({ geoIp: { "198.51.100.1": "DE" } }))("Session timeline", (i
           os: "Windows",
           visitorId: null,
           visitorIdentified: null,
+          visitorDisplayName: null,
           earlierSessionId: null,
           laterSessionId: null,
           status: "active",

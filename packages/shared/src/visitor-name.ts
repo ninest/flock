@@ -46,6 +46,7 @@ export const visitorName = (visitorId: string): string => {
   return `${adjective} ${animal}`
 }
 
-/** How a Visitor is shown: by their ID when identified, else by their Visitor name. */
-export const visitorLabel = (visitor: { readonly visitorId: string; readonly identified: boolean }): string =>
-  visitor.identified ? visitor.visitorId : visitorName(visitor.visitorId)
+/** How a Visitor is shown: by their Display name, else by their ID when identified, else by their Visitor name. */
+export const visitorLabel = (
+  visitor: { readonly visitorId: string; readonly identified: boolean; readonly displayName?: string | null }
+): string => visitor.displayName ?? (visitor.identified ? visitor.visitorId : visitorName(visitor.visitorId))

@@ -39,4 +39,9 @@ describe("visitorLabel", () => {
     expect(visitorLabel({ visitorId: "user_20418", identified: true })).toBe("user_20418")
     expect(visitorLabel({ visitorId: "device-1", identified: false })).toBe("Merry Owl")
   })
+
+  it("shows an identified Visitor with a Display name by that name instead of their ID", () => {
+    expect(visitorLabel({ visitorId: "user_20418", identified: true, displayName: "samuel" })).toBe("samuel")
+    expect(visitorLabel({ visitorId: "user_20418", identified: true, displayName: null })).toBe("user_20418")
+  })
 })

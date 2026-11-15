@@ -19,6 +19,7 @@ const renderVisitors = (respond: () => Response | Promise<Response>) => {
 const row = (visitorId: string, identified: boolean) => ({
   visitorId,
   identified,
+  displayName: null,
   firstSeenAt: "2026-11-01T09:00:00.000Z",
   lastSeenAt: "2026-11-13T09:00:00.000Z",
   sessions: 3,

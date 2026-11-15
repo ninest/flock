@@ -279,8 +279,8 @@ export const SessionPage = ({ projectId, environment, sessionId, search, timeZon
     ...(session.visitorId !== null
       ? [[
         "Visitor",
-        <Link key="visitor" to="/projects/$projectId/visitors/$visitorId" params={{ projectId, visitorId: session.visitorId }} search={sharedSearch(search)} data-testid="session-visitor">
-          {visitorLabel({ visitorId: session.visitorId, identified: session.visitorIdentified === true })}
+        <Link key="visitor" to="/projects/$projectId/visitors/$visitorId" params={{ projectId, visitorId: session.visitorId }} search={sharedSearch(search)} data-testid="session-visitor" title={session.visitorId}>
+          {visitorLabel({ visitorId: session.visitorId, identified: session.visitorIdentified === true, displayName: session.visitorDisplayName })}
         </Link>
       ] as [string, React.ReactNode]]
       : [])

@@ -26,7 +26,7 @@ const NO_VISITORS = "This Project uses cookieless Tracking mode, where a Visitor
 
 // The Visitors tab.
 
-/** The Visitors tab: a search on the start of an identified Visitor ID over the list of Visitors. */
+/** The Visitors tab: a search on identified Visitors' IDs and Display names over the list of Visitors. */
 export const VisitorsList = (props: {
   projectId: ProjectId
   environment: Environment
@@ -98,10 +98,10 @@ const VisitorRows = ({ projectId, environment, search, timeZone }: {
             ? <Notice>{NO_VISITORS}</Notice>
             : <Notice alert>{errorMessage(error)}</Notice>
         ) : visitors.length === 0 ? (
-          <Notice>{search.q ? <>No identified Visitor ID starting with <code>{search.q}</code> in this range.</> : "No Visitors in this range."}</Notice>
+          <Notice>{search.q ? <>No identified Visitor whose ID starts with, or Display name contains, <code>{search.q}</code> in this range.</> : "No Visitors in this range."}</Notice>
         ) : visitors.map((v) => (
           <Link key={v.visitorId} role="row" className="row" to="/projects/$projectId/visitors/$visitorId" params={{ projectId, visitorId: v.visitorId }} search={back}>
-            <span title={v.visitorId} style={v.identified ? { fontFamily: "var(--mono)" } : undefined}>{visitorLabel(v)}</span>
+            <span title={v.visitorId} style={v.identified && v.displayName === null ? { fontFamily: "var(--mono)" } : undefined}>{visitorLabel(v)}</span>
             <span>{formatStart(v.lastSeenAt, timeZone, now)}</span>
             <span {...wide}>{formatStart(v.firstSeenAt, timeZone, now)}</span>
             <span {...wide}>{formatCount(v.sessions)}</span>
@@ -123,7 +123,7 @@ const VisitorRows = ({ projectId, environment, search, timeZone }: {
 
 const deviceOf = (v: VisitorListRow) => [v.device && capitalize(v.device), v.browser].filter((x) => x !== null).join(", ") || "Unknown"
 
-/** Searches identified Visitor IDs by their start; applies after a pause in typing. */
+/** Searches identified Visitors by the start of their ID or any part of their Display name; applies after a pause in typing. */
 const SearchBox = ({ value, onChange }: { value: string; onChange: (q: string | undefined) => void }) => {
   const [text, setText] = useState(value)
   useEffect(() => {
@@ -138,8 +138,8 @@ const SearchBox = ({ value, onChange }: { value: string; onChange: (q: string | 
       className="visitors-search"
       value={text}
       onChange={(e) => setText(e.target.value)}
-      placeholder="Search identified IDs"
-      aria-label="Search identified Visitor IDs by their start"
+      placeholder="Search identified IDs and names"
+      aria-label="Search identified Visitors by the start of their ID or their Display name"
       maxLength={200}
     />
   )
@@ -186,7 +186,7 @@ export const VisitorPage = ({ projectId, environment, visitorId, search, timeZon
   return (
     <div className="page session visitor">
       {crumb}
-      <h1 data-testid="visitor-name">{visitorLabel(visitor)}</h1>
+      <h1 data-testid="visitor-name" title={visitor.visitorId}>{visitorLabel(visitor)}</h1>
       <dl className="facts">
         {facts.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
       </dl>

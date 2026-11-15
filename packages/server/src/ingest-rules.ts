@@ -108,11 +108,27 @@ export const isBot = (userAgent: string | undefined) => userAgent !== undefined 
 export const BUILT_IN_EVENTS: ReadonlySet<string> = new Set(["$pageview", "$identify"])
 
 /**
- * Identify (persistent Tracking mode): the browser script's `identify(id)` sends this Built-in
- * event with `distinct_id` set to `id` and `$anon_distinct_id` set to the device's own Visitor ID.
+ * Identify (persistent Tracking mode): the browser script's `identify(id, { name })` sends this
+ * Built-in event with `distinct_id` set to `id`, `$anon_distinct_id` set to the device's own
+ * Visitor ID and, when given, `$name` set to the Display name.
  */
 export const IDENTIFY = "$identify"
 export const ANON_DISTINCT_ID = "$anon_distinct_id"
+export const DISPLAY_NAME = "$name"
+
+/** Display names are cut to this many characters. */
+export const MAX_DISPLAY_NAME_LENGTH = 200
+
+/**
+ * The Display name an Identify carries: `$name` trimmed and cut to `MAX_DISPLAY_NAME_LENGTH`. Undefined when it
+ * is missing, blank or not text, which counts as no name sent and never refuses the Identify.
+ */
+export const displayNameOf = (event: IngestEvent): string | undefined => {
+  const name = event.properties?.[DISPLAY_NAME]
+  if (typeof name !== "string") return undefined
+  const trimmed = name.trim()
+  return trimmed === "" ? undefined : trimmed.slice(0, MAX_DISPLAY_NAME_LENGTH)
+}
 
 /**
  * Flock-defined Event properties a client may send on any Event: the URLs the browser
@@ -153,7 +169,7 @@ export const validateEvent = (raw: unknown): Result.Result<IngestEvent, string> 
   if (event.name === IDENTIFY && (event.distinct_id === undefined || typeof event.properties?.[ANON_DISTINCT_ID] !== "string")) {
     return Result.fail(`${IDENTIFY} needs \`distinct_id\` and a string \`${ANON_DISTINCT_ID}\` property`)
   }
-  const isClientProperty = (name: string) => CLIENT_FLOCK_PROPERTIES.has(name) || (event.name === IDENTIFY && name === ANON_DISTINCT_ID)
+  const isClientProperty = (name: string) => CLIENT_FLOCK_PROPERTIES.has(name) || (event.name === IDENTIFY && (name === ANON_DISTINCT_ID || name === DISPLAY_NAME))
   if (properties.some((name) => name.startsWith("$") && !isClientProperty(name))) {
     return Result.fail("Event property names starting with $ are reserved for Flock")
   }

@@ -1,7 +1,7 @@
 // Visitors (persistent Tracking mode only, ADR 0002): the Visitors list, the Visitor profile and a
 // Visitor's Sessions.
-// A Visitor is shown by their ID when identified, else by their Visitor name (see visitor-name.ts),
-// which the server never sends.
+// A Visitor is shown by their Display name when identified and named, else by their ID when
+// identified, else by their Visitor name (see visitor-name.ts), which the server never sends.
 import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/http-api"
 import { EnvironmentId, EnvironmentNotFound } from "./domain.ts"
@@ -14,6 +14,8 @@ export const VisitorSummary = Schema.Struct({
   visitorId: Schema.String,
   /** The Visitor ID is one Identify linked a device to (ADR 0005). */
   identified: Schema.Boolean,
+  /** The Display name of the Visitor's latest Identify that carried one; null if none did, or anonymous. */
+  displayName: Schema.NullOr(Schema.String),
   /** The Visitor's first and last Event in the Environment. */
   firstSeenAt: Schema.DateTimeUtcFromString,
   lastSeenAt: Schema.DateTimeUtcFromString,
@@ -44,7 +46,7 @@ export const VisitorsQuery = Schema.Struct({
   ...rangeFields,
   /** `nextCursor` of the previous page. */
   cursor: Schema.optional(Schema.String.check(Schema.isPattern(VISITORS_CURSOR))),
-  /** Only identified Visitors whose ID starts with this text. */
+  /** Only identified Visitors whose ID starts with this text, or whose Display name contains it (any case). */
   search: Schema.optional(Schema.String.check(Schema.isMaxLength(200)))
 }).check(validRange)
 export type VisitorsQuery = typeof VisitorsQuery.Type

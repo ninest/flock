@@ -95,8 +95,12 @@ Forgetting who a device is in persistent Tracking mode, typically when someone l
 _Avoid_: Logout, unidentify
 
 **Visitor name**:
-The made-up two-word name, such as "Quiet Heron", that an anonymous persistent Visitor is shown by. It is always the same for the same Visitor. An identified Visitor is shown by their ID instead.
+The made-up two-word name, such as "Quiet Heron", that an anonymous persistent Visitor is shown by. It is always the same for the same Visitor. An identified Visitor is shown by their Display name, or their ID if they have none.
 _Avoid_: Nickname, alias
+
+**Display name**:
+The name the tracked app gives an identified Visitor along with Identify, such as their username, shown in place of their ID. A Visitor has only their latest one. Changing it renames the Visitor and keeps all their history, because the ID is what makes them the same Visitor.
+_Avoid_: Username, nickname, label
 
 **Visitor profile**:
 Everything one persistent Visitor did in an Environment, over all time: when they were first and last seen, their activity, their Events by name and their Sessions. Not available in cookieless Tracking mode.

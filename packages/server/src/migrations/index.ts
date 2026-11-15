@@ -18,6 +18,7 @@ import eventSessionIndex from "./0008_event_session_index.ts"
 import annotations from "./0009_annotations.ts"
 import annotationEnvironments from "./0010_annotation_environments.ts"
 import identifiedVisitors from "./0011_identified_visitors.ts"
+import displayNames from "./0012_display_names.ts"
 
 export const migrations = PgMigrator.fromRecord({
   "0001_init": init,
@@ -30,7 +31,8 @@ export const migrations = PgMigrator.fromRecord({
   "0008_event_session_index": eventSessionIndex,
   "0009_annotations": annotations,
   "0010_annotation_environments": annotationEnvironments,
-  "0011_identified_visitors": identifiedVisitors
+  "0011_identified_visitors": identifiedVisitors,
+  "0012_display_names": displayNames
 })
 
 export const MigratorLive = PgMigrator.layer({ loader: migrations, table: "flock_migrations" }).pipe(

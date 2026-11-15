@@ -9,7 +9,8 @@ import { customEvent, Harness, pageview } from "./harness.ts"
 const at = (iso: string) => TestClock.setTime(Date.parse(iso))
 const as = (distinctId: string, event: IngestEvent): IngestEvent => ({ ...event, distinct_id: distinctId })
 /** What the browser script sends on `identify(id)` from a device with Visitor ID `deviceId`. */
-const identify = (id: string, deviceId: string) => as(id, customEvent("$identify", { $anon_distinct_id: deviceId }))
+const identify = (id: string, deviceId: string, name?: unknown) =>
+  as(id, customEvent("$identify", { $anon_distinct_id: deviceId, ...(name === undefined ? {} : { $name: name }) }))
 const iso = (t: DateTime.Utc) => DateTime.formatIso(t)
 
 const persistentProject = (options: { readonly timeZone?: string; readonly environments?: ReadonlyArray<string> } = {}) =>
@@ -174,6 +175,49 @@ layer(Harness.layer())("Visitor profile and Identify (ADR 0005)", (it) => {
       assert.strictEqual(laptop._tag, "VisitorNotFound")
     }))
 
+  it.effect("an identified Visitor is shown by the Display name of their latest Identify, and an Identify without one keeps it", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* persistentProject()
+      yield* at("2026-03-01T09:00:00Z")
+      yield* h.ingest(production!.key, [identify("user_1", "laptop", "sam"), as("user_1", pageview())])
+      assert.strictEqual((yield* profile(production!.id, "user_1")).displayName, "sam")
+      // Renamed: the phone's Identify is later, and the Visitor keeps all their history.
+      yield* at("2026-03-02T09:00:00Z")
+      yield* h.ingest(production!.key, [identify("user_1", "phone", "samuel")], { ip: "203.0.113.9" })
+      // A stale tab's Identify, sent late with an earlier timestamp, doesn't undo the rename.
+      yield* h.ingest(production!.key, [{ ...identify("user_1", "laptop", "sam"), timestamp: "2026-03-01T20:00:00Z" }])
+      // An Identify without a name leaves it alone.
+      yield* at("2026-03-02T10:00:00Z")
+      yield* h.ingest(production!.key, [identify("user_1", "laptop")])
+
+      const visitor = yield* profile(production!.id, "user_1")
+      assert.strictEqual(visitor.displayName, "samuel")
+      assert.strictEqual(visitor.events, 5)
+      const { sessions: [latest] } = yield* visitorSessions(production!.id, "user_1")
+      assert.strictEqual((yield* h.session(production!.id, latest!.id)).visitorDisplayName, "samuel")
+      // Anonymous and nameless identified Visitors have none.
+      yield* h.ingest(production!.key, [identify("user_2", "tablet"), as("anon", pageview())], { ip: "203.0.113.10" })
+      assert.isNull((yield* profile(production!.id, "user_2")).displayName)
+      assert.isNull((yield* profile(production!.id, "anon")).displayName)
+    }))
+
+  it.effect("cleans the Display name, and never refuses an Identify over it", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* persistentProject()
+      yield* at("2026-03-01T09:00:00Z")
+      yield* h.ingest(production!.key, [identify("user_1", "laptop", "  Sam Lee  ")])
+      yield* h.ingest(production!.key, [identify("user_2", "phone", "x".repeat(250))], { ip: "203.0.113.9" })
+      yield* at("2026-03-01T10:00:00Z")
+      // Blank or not text: as if no name was sent, so the earlier one stays.
+      const result = yield* h.ingest(production!.key, [identify("user_1", "laptop", "   "), identify("user_2", "phone", 42)])
+      assert.deepStrictEqual(result.rejected, [])
+
+      assert.strictEqual((yield* profile(production!.id, "user_1")).displayName, "Sam Lee")
+      assert.strictEqual((yield* profile(production!.id, "user_2")).displayName, "x".repeat(200))
+    }))
+
   it.effect("two identified IDs never merge", () =>
     Effect.gen(function*() {
       const h = yield* Harness
@@ -324,6 +368,7 @@ layer(Harness.layer({ geoIp: { "198.51.100.1": "DE", "198.51.100.2": "FR" } }))(
             lastSeenAt: "2026-03-05T08:00:00.000Z",
             visitorId: "device-2",
             identified: false,
+            displayName: null,
             sessions: 2,
             events: 2,
             country: "DE",
@@ -337,6 +382,7 @@ layer(Harness.layer({ geoIp: { "198.51.100.1": "DE", "198.51.100.2": "FR" } }))(
             lastSeenAt: "2026-03-02T09:00:00.000Z",
             visitorId: "device-1",
             identified: false,
+            displayName: null,
             sessions: 2,
             events: 3,
             country: "FR",
@@ -406,6 +452,24 @@ layer(Harness.layer({ geoIp: { "198.51.100.1": "DE", "198.51.100.2": "FR" } }))(
       assert.deepStrictEqual(one.visitors.map((v) => v.visitorId), ["user_20418"])
       const wildcard = yield* visitors(production!.id, { ...march("01"), search: "%" })
       assert.deepStrictEqual(wildcard.visitors, [])
+    }))
+
+  it.effect("searches Display names by any part, ignoring case, and lists each Visitor's", () =>
+    Effect.gen(function*() {
+      const h = yield* Harness
+      const { environments: [production] } = yield* persistentProject()
+      yield* at("2026-03-01T09:00:00Z")
+      yield* h.ingest(production!.key, [identify("user_1", "laptop", "Samuel"), as("user_1", pageview())])
+      yield* h.ingest(production!.key, [identify("user_2", "phone", "Priya"), as("user_2", pageview())], { ip: "203.0.113.9" })
+      yield* h.ingest(production!.key, [identify("user_3", "tablet"), as("user_3", pageview())], { ip: "203.0.113.10" })
+
+      const all = yield* visitors(production!.id, march("01"))
+      assert.deepStrictEqual(all.visitors.map((v) => [v.visitorId, v.displayName]), [["user_3", null], ["user_2", "Priya"], ["user_1", "Samuel"]])
+      const sam = yield* visitors(production!.id, { ...march("01"), search: "MUE" })
+      assert.deepStrictEqual(sam.visitors.map((v) => v.visitorId), ["user_1"])
+      // The ID prefix still matches, whatever the name.
+      const byId = yield* visitors(production!.id, { ...march("01"), search: "user_" })
+      assert.strictEqual(byId.visitors.length, 3)
     }))
 
   it.effect("is refused for a cookieless Project, and hides other Members' Environments as not found", () =>
