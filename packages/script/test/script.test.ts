@@ -199,6 +199,94 @@ describe("Persistent mode", () => {
   })
 })
 
+describe("Persistent mode: reset", () => {
+  it("after identify, sends later Events as a new anonymous Visitor ID and sends nothing itself", async () => {
+    const site = await openPlayground(browser(), { mode: "persistent" })
+    await site.goto("/")
+    const [pageview] = await site.waitForEvents(1)
+    const deviceId = pageview!.distinct_id
+    await site.page.click("text=Identify as test-user")
+    await site.page.click("text=Reset")
+    await site.page.evaluate(() => window.flock.track("a"))
+    await site.page.reload()
+    const events = await site.waitForEvents(4)
+    expect(await site.settledEvents()).toHaveLength(4)
+    expect(events.map((e) => e.name)).toEqual(["$pageview", "$identify", "a", "$pageview"])
+    const [, , after, reloaded] = events
+    expect(after!.distinct_id).toMatch(/^[0-9a-f-]{36}$/)
+    expect(after!.distinct_id).not.toEqual(deviceId)
+    expect(reloaded!.distinct_id).toEqual(after!.distinct_id)
+    const stored = await site.page.evaluate(() => ({ ...localStorage }))
+    expect(stored).toEqual({ flock_id: after!.distinct_id })
+  })
+
+  it("then identify(id) links the new device Visitor ID", async () => {
+    const site = await openPlayground(browser(), { mode: "persistent" })
+    await site.goto("/")
+    await site.waitForEvents(1)
+    await site.page.click("text=Identify as test-user")
+    await site.page.click("text=Reset")
+    await site.page.evaluate(() => window.flock.track("a"))
+    await site.page.click("text=Identify as test-user")
+    const events = await site.waitForEvents(4)
+    const [, , anonymous, identify] = events
+    expect(identify).toMatchObject({ name: "$identify", distinct_id: "test-user", properties: { $anon_distinct_id: anonymous!.distinct_id } })
+  })
+
+  it("runs in call order with identify and track called before the Tracking mode is confirmed", async () => {
+    const site = await openPlayground(browser(), { mode: "persistent" })
+    await site.page.addInitScript(() =>
+      addEventListener("DOMContentLoaded", () => {
+        window.flock.identify("test-user")
+        window.flock.reset()
+        window.flock.track("a")
+      }))
+    await site.goto("/")
+    const events = await site.waitForEvents(3)
+    expect(await site.settledEvents()).toHaveLength(3)
+    const [pageview, identify, a] = events
+    expect(events.map((e) => e.name)).toEqual(["$pageview", "$identify", "a"])
+    expect(identify!.properties).toMatchObject({ $anon_distinct_id: pageview!.distinct_id })
+    expect(a!.distinct_id).not.toEqual("test-user")
+    expect(a!.distinct_id).not.toEqual(pageview!.distinct_id)
+  })
+
+  it("on a device that was never identified, keeps its Visitor ID and sends nothing", async () => {
+    const site = await openPlayground(browser(), { mode: "persistent" })
+    await site.goto("/")
+    const [pageview] = await site.waitForEvents(1)
+    await site.page.click("text=Reset")
+    await site.page.evaluate(() => window.flock.track("a"))
+    const events = await site.settledEvents()
+    expect(events.map((e) => [e.name, e.distinct_id])).toEqual([
+      ["$pageview", pageview!.distinct_id],
+      ["a", pageview!.distinct_id]
+    ])
+  })
+})
+
+describe("Persistent mode: open tabs", () => {
+  it("identify and reset in one tab apply to Events another open tab sends, without a reload", async () => {
+    const site = await openPlayground(browser(), { mode: "persistent" })
+    await site.goto("/")
+    await site.waitForEvents(1)
+    const other = await site.openTab("/")
+    const [pageview] = await site.waitForEvents(2)
+    await site.page.click("text=Identify as test-user")
+    await site.waitForEvents(3)
+    await other.evaluate(() => window.flock.track("a"))
+    await site.page.click("text=Reset")
+    await other.evaluate(() => window.flock.track("b"))
+    const events = await site.waitForEvents(5)
+    const [, , , a, b] = events
+    expect(a).toMatchObject({ name: "a", distinct_id: "test-user" })
+    expect(b!.name).toBe("b")
+    expect(b!.distinct_id).not.toEqual("test-user")
+    expect(b!.distinct_id).not.toEqual(pageview!.distinct_id)
+    expect(b!.distinct_id).toEqual(await site.page.evaluate(() => localStorage.getItem("flock_id")))
+  })
+})
+
 describe("Persistent snippet on a Project that is now cookieless", () => {
   it("clears the stored Visitor IDs, stores nothing and sends no Visitor ID", async () => {
     const site = await openPlayground(browser(), {
@@ -210,6 +298,7 @@ describe("Persistent snippet on a Project that is now cookieless", () => {
     await site.waitForEvents(1)
     await site.page.evaluate(() => {
       window.flock.identify("other-user")
+      window.flock.reset()
       window.flock.track("a")
     })
     const events = await site.settledEvents()
@@ -217,6 +306,20 @@ describe("Persistent snippet on a Project that is now cookieless", () => {
     for (const event of events) expect(event).not.toHaveProperty("distinct_id")
     const storage = await site.page.evaluate(() => ({ cookie: document.cookie, localStorage: localStorage.length, sessionStorage: sessionStorage.length }))
     expect(storage).toEqual({ cookie: "", localStorage: 0, sessionStorage: 0 })
+  })
+})
+
+describe("Cookieless mode: reset", () => {
+  it("is a no-op that sends nothing, stores nothing and adds no Visitor ID", async () => {
+    const site = await openPlayground(browser())
+    await site.goto("/")
+    await site.waitForEvents(1)
+    await site.page.click("text=Reset")
+    await site.page.evaluate(() => window.flock.track("a"))
+    const events = await site.settledEvents()
+    expect(events.map((e) => e.name)).toEqual(["$pageview", "a"])
+    for (const event of events) expect(event).not.toHaveProperty("distinct_id")
+    expect(await site.page.evaluate(() => localStorage.length)).toBe(0)
   })
 })
 

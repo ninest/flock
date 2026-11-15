@@ -66,6 +66,8 @@ export interface Playground {
   readonly waitForEvents: (count: number) => Promise<Array<SentEvent>>
   /** Waits a little and returns all Events, to check that no more were sent. */
   readonly settledEvents: () => Promise<Array<SentEvent>>
+  /** Opens a playground path in another tab on the same device; its Events are captured here too. */
+  readonly openTab: (path: string) => Promise<Page>
 }
 
 export const openPlayground = async (
@@ -119,8 +121,12 @@ export const openPlayground = async (
       body: JSON.stringify({ accepted: batch.events.length, rejected: [] })
     })
   })
-  const page = await context.newPage()
-  page.on("pageerror", (e) => console.error("pageerror", e.message))
+  const newPage = async () => {
+    const page = await context.newPage()
+    page.on("pageerror", (e) => console.error("pageerror", e.message))
+    return page
+  }
+  const page = await newPage()
   const events = () => requests.flatMap((r) => r.events)
   return {
     page,
@@ -140,6 +146,11 @@ export const openPlayground = async (
     settledEvents: async () => {
       await new Promise((resolve) => setTimeout(resolve, 300))
       return events()
+    },
+    openTab: async (path) => {
+      const tab = await newPage()
+      await tab.goto(`${PLAYGROUND}${path}`)
+      return tab
     }
   }
 }
